@@ -1,0 +1,47 @@
+// Prisma schema for PlanetScale (MySQL)
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+  relationMode = "prisma" // Required for PlanetScale
+}
+
+model Shipment {
+  id                 Int       @id @default(autoincrement())
+  poNumber           String    @map("po_number") @db.VarChar(255)
+  trackingNumber     String    @unique @map("tracking_number") @db.VarChar(255)
+  carrier            String?   @db.VarChar(100)
+  status             String    @default("pending") @db.VarChar(50)
+  origin             String?   @db.Text
+  destination        String?   @db.Text
+  shippedDate        DateTime? @map("shipped_date") @db.DateTime
+  estimatedDelivery  DateTime? @map("estimated_delivery") @db.DateTime
+  deliveredDate      DateTime? @map("delivered_date") @db.DateTime
+  lastChecked        DateTime? @map("last_checked") @db.DateTime
+  createdAt          DateTime  @default(now()) @map("created_at") @db.DateTime
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.DateTime
+  
+  trackingEvents     TrackingEvent[]
+
+  @@index([poNumber], map: "idx_po_number")
+  @@index([status], map: "idx_status")
+  @@map("shipments")
+}
+
+model TrackingEvent {
+  id         Int      @id @default(autoincrement())
+  shipmentId Int      @map("shipment_id")
+  status     String?  @db.VarChar(50)
+  location   String?  @db.Text
+  message    String?  @db.Text
+  eventTime  DateTime? @map("event_time") @db.DateTime
+  createdAt  DateTime @default(now()) @map("created_at") @db.DateTime
+  
+  shipment   Shipment @relation(fields: [shipmentId], references: [id])
+
+  @@index([shipmentId], map: "idx_shipment_id")
+  @@map("tracking_events")
+}

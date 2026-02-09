@@ -1,36 +1,203 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Stitchi Tracking Dashboard
+
+Internal shipment tracking system that provides an API-agnostic interface for managing and monitoring package deliveries.
+
+## Features
+
+- 🔍 Track shipments via PO number and tracking number
+- 📦 Multi-carrier support (UPS, USPS, FedEx, etc.)
+- 📊 Real-time status dashboard with filtering and search
+- 🔄 Automated status updates via tracking APIs
+- 🎯 Clean API design - no coupling to email clients
+
+## Tech Stack
+
+- **Framework:** Next.js 14+ (App Router, TypeScript)
+- **Database:** PlanetScale (MySQL)
+- **ORM:** Prisma
+- **Styling:** TailwindCSS
+- **Tracking:** AfterShip API
 
 ## Getting Started
 
-First, run the development server:
+### Prerequisites
+
+- Node.js 18+ and npm
+- PlanetScale account
+- AfterShip API key (500 free shipments/month)
+
+### 1. Clone and Install
+
+```bash
+git clone https://github.com/everest113/tracking-dashboard.git
+cd tracking-dashboard
+npm install
+```
+
+### 2. Database Setup (PlanetScale)
+
+1. Create a new database in PlanetScale:
+   ```bash
+   pscale database create tracking-dashboard
+   ```
+
+2. Create a branch for development:
+   ```bash
+   pscale branch create tracking-dashboard main
+   ```
+
+3. Get your connection string:
+   ```bash
+   pscale connect tracking-dashboard main --port 3309
+   ```
+
+4. Copy `.env.example` to `.env`:
+   ```bash
+   cp .env.example .env
+   ```
+
+5. Update `DATABASE_URL` in `.env` with your PlanetScale connection string
+
+### 3. Run Migrations
+
+```bash
+npx prisma generate
+npx prisma db push
+```
+
+### 4. Start Development Server
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000) to see the dashboard.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## API Endpoints
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### GET `/api/shipments`
+Fetch all shipments (most recent first, max 100)
 
-## Learn More
+**Response:**
+```json
+[
+  {
+    "id": 1,
+    "poNumber": "PO-12345",
+    "trackingNumber": "1Z999AA10123456784",
+    "carrier": "ups",
+    "status": "in_transit",
+    "shippedDate": "2024-02-08T10:00:00Z",
+    "estimatedDelivery": "2024-02-10T17:00:00Z",
+    "deliveredDate": null,
+    "lastChecked": "2024-02-08T15:30:00Z"
+  }
+]
+```
 
-To learn more about Next.js, take a look at the following resources:
+### POST `/api/shipments`
+Create a new shipment
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+**Request:**
+```json
+{
+  "poNumber": "PO-12345",
+  "trackingNumber": "1Z999AA10123456784",
+  "carrier": "ups"
+}
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+**Response:**
+```json
+{
+  "id": 1,
+  "poNumber": "PO-12345",
+  "trackingNumber": "1Z999AA10123456784",
+  "carrier": "ups",
+  "status": "pending",
+  "createdAt": "2024-02-08T16:00:00Z",
+  "updatedAt": "2024-02-08T16:00:00Z"
+}
+```
 
-## Deploy on Vercel
+## Shipment Status Values
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- `pending` - Created but not yet picked up
+- `in_transit` - Package is on the way
+- `out_for_delivery` - Out for delivery today
+- `delivered` - Successfully delivered
+- `exception` - Issue or delay reported
+- `failed_attempt` - Delivery attempt failed
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Environment Variables
+
+```env
+# Database
+DATABASE_URL="mysql://user:password@host:3306/database?sslaccept=strict"
+
+# Tracking API
+AFTERSHIP_API_KEY="your-aftership-key"
+
+# Security
+CRON_SECRET="random-secret-for-cron-endpoints"
+```
+
+## Project Structure
+
+```
+tracking-dashboard/
+├── app/
+│   ├── api/
+│   │   └── shipments/
+│   │       └── route.ts          # Shipment CRUD API
+│   ├── page.tsx                  # Dashboard homepage
+│   └── layout.tsx
+├── components/
+│   └── ShipmentTable.tsx         # Main table component
+├── lib/
+│   └── prisma.ts                 # Prisma client singleton
+├── prisma/
+│   └── schema.prisma             # Database schema
+└── README.md
+```
+
+## Next Steps
+
+See [GitHub Issues](https://github.com/everest113/tracking-dashboard/issues) for the implementation roadmap:
+
+1. ✅ Phase 1: Foundation & Database (Complete)
+2. Phase 2: Email Scanner Integration
+3. Phase 3: Tracking API Integration
+4. Phase 4: Dashboard Enhancements
+5. Phase 5: Automation & Cron Jobs
+6. Phase 6: Admin Panel
+7. Deployment
+
+## Development
+
+```bash
+# Run development server
+npm run dev
+
+# Generate Prisma client after schema changes
+npx prisma generate
+
+# Push schema changes to PlanetScale
+npx prisma db push
+
+# Open Prisma Studio (database GUI)
+npx prisma studio
+```
+
+## Deployment
+
+Recommended: Deploy to Vercel
+1. Connect your GitHub repo to Vercel
+2. Add environment variables in Vercel dashboard
+3. Deploy!
+
+PlanetScale will automatically handle connection pooling and scaling.
+
+## License
+
+Internal Stitchi tool - All rights reserved
