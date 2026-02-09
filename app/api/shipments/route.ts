@@ -3,6 +3,7 @@ import { getErrorMessage } from '@/lib/utils/fetch-helpers'
 import { prisma } from '@/lib/prisma'
 import { shipmentSchema } from '@/lib/validations'
 import { getShipmentTrackingService } from '@/lib/application/ShipmentTrackingService'
+import { serializeShipment, serializeShipments } from '@/lib/infrastructure/repositories/serializers'
 import { ZodError } from 'zod'
 
 /**
@@ -24,7 +25,7 @@ export async function GET(request: Request) {
       },
     })
 
-    return NextResponse.json(shipments)
+    return NextResponse.json(serializeShipments(shipments))
   } catch (error) {
     console.error('Error fetching shipments:', getErrorMessage(error))
     return NextResponse.json(
@@ -78,7 +79,7 @@ export async function POST(request: Request) {
       console.error('Error registering tracker:', getErrorMessage(err))
     })
 
-    return NextResponse.json(newShipment, { status: 201 })
+    return NextResponse.json(serializeShipment(newShipment), { status: 201 })
   } catch (error) {
     if (error instanceof ZodError) {
       return NextResponse.json(

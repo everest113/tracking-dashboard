@@ -5,18 +5,47 @@
 
 import type { ILogger, LogContext, LoggerConfig } from './types'
 
+let cachedLogger: ILogger | null = null
+
 export function getLogger(config: LoggerConfig = {}): ILogger {
+  if (cachedLogger) return cachedLogger
+  
   // Client-side
   if (typeof window !== 'undefined') {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const clientLogger = require('./client-logger') as typeof import('./client-logger')
-    return clientLogger.default
+    const { default: clientLogger } = require('./client-logger')
+    cachedLogger = clientLogger
+    return clientLogger
   }
   
   // Server-side
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { getServerLogger } = require('./server-logger') as typeof import('./server-logger')
-  return getServerLogger(config)
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const serverLoggerModule = require('./server-logger')
+    const serverLogger = serverLoggerModule.getServerLogger(config)
+    cachedLogger = serverLogger
+    return serverLogger
+  } catch (error) {
+    // Fallback to console if server logger fails to load
+    console.warn('Failed to load server logger, using console fallback:', error)
+    return createConsoleLogger()
+  }
+}
+
+// Console fallback logger
+function createConsoleLogger(): ILogger {
+  const log = (level: string, message: string, metadata?: unknown) => {
+    const meta = metadata ? ` ${JSON.stringify(metadata)}` : ''
+    console[level as keyof Console]?.(`[${level.toUpperCase()}] ${message}${meta}`)
+  }
+
+  return {
+    debug: (msg, meta) => log('debug', msg, meta),
+    info: (msg, meta) => log('info', msg, meta),
+    warn: (msg, meta) => log('warn', msg, meta),
+    error: (msg, meta) => log('error', msg, meta),
+    child: () => createConsoleLogger(),
+  }
 }
 
 export function createLogger(context: LogContext, config?: LoggerConfig): ILogger {
