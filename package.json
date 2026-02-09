@@ -10,10 +10,12 @@
     "postinstall": "prisma generate"
   },
   "dependencies": {
+    "@ai-sdk/openai": "^3.0.26",
     "@orpc/client": "^0.27.0",
     "@orpc/next": "^0.27.0",
     "@orpc/server": "^0.27.0",
     "@prisma/client": "^5.22.0",
+    "ai": "^6.0.78",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
@@ -27,7 +29,8 @@
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.4.0",
     "ws": "^8.19.0",
-    "zod": "^4.3.6"
+    "zod": "^4.3.6",
+    "zod-to-json-schema": "^3.25.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

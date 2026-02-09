@@ -1,46 +1,15 @@
-import OpenAI from 'openai'
-
-// Lazy-load OpenAI client to avoid initialization during build
-let openai: OpenAI | null = null
-
-function getOpenAIClient() {
-  if (!openai) {
-    openai = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY,
-    })
-  }
-  return openai
-}
-
-export type ExtractedShipment = {
-  trackingNumber: string
-  carrier: 'ups' | 'usps' | 'fedex' | 'dhl' | 'other'
-  poNumber?: string
-  shippedDate?: string // ISO date string
-  confidence: number // 0-1
-}
-
-export type ExtractionResult = {
-  shipments: ExtractedShipment[]
-  supplier?: string // Company/supplier name
-  rawResponse?: string
-}
+import type { EmailMessage } from './schemas'
 
 /**
- * Extract tracking information and supplier from email content using OpenAI
- * Searches through all messages in the thread for tracking, PO numbers, and supplier info
+ * System prompt for tracking extraction AI
  */
-export async function extractTrackingInfo(
-  messages: Array<{
-    subject: string
-    body: string
-    senderEmail?: string
-    senderName?: string
-    sentDate?: Date // Email sent timestamp for fallback
-  }>
-): Promise<ExtractionResult> {
-  const client = getOpenAIClient()
-  
+export const SYSTEM_PROMPT = `You are an expert at extracting shipping and supplier information from email threads.
+You are precise and only return valid JSON. Only include shipments with valid tracking numbers.`
+
+/**
+ * Build extraction prompt from email messages
+ */
+export function buildExtractionPrompt(messages: EmailMessage[]): string {
   // Build comprehensive context from all messages
   const threadContext = messages.map((msg, idx) => `
 --- Message ${idx + 1} ---
@@ -52,9 +21,7 @@ Body:
 ${msg.body}
 `).join('\n\n')
 
-  const prompt = `You are an expert at extracting shipping and supplier information from email threads.
-
-Extract ALL tracking numbers, PO numbers, shipped dates, AND identify the supplier company from this email conversation.
+  return `Extract ALL tracking numbers, PO numbers, shipped dates, AND identify the supplier company from this email conversation.
 
 ${threadContext}
 
@@ -113,51 +80,4 @@ IMPORTANT:
 - **ALWAYS try to identify supplier** - use company name from signature/footer, or derive from email domain if needed
 - If supplier cannot be determined, return sender's name as fallback
 - **If no valid tracking numbers found, return empty shipments array**`
-
-  try {
-    const completion = await client.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [
-        {
-          role: 'system',
-          content: 'You are a precise data extraction assistant. Return only valid JSON. Only include shipments with valid tracking numbers.',
-        },
-        {
-          role: 'user',
-          content: prompt,
-        },
-      ],
-      response_format: { type: 'json_object' },
-      temperature: 0.1,
-    })
-
-    const content = completion.choices[0]?.message?.content
-    if (!content) {
-      return { shipments: [] }
-    }
-
-    const result = JSON.parse(content) as ExtractionResult
-    
-    // Validate and normalize tracking numbers
-    result.shipments = (result.shipments || [])
-      .filter(shipment => {
-        // Filter out shipments without tracking numbers
-        if (!shipment.trackingNumber || typeof shipment.trackingNumber !== 'string') {
-          console.warn('Skipping shipment with invalid tracking number:', shipment)
-          return false
-        }
-        return true
-      })
-      .map(shipment => ({
-        ...shipment,
-        trackingNumber: shipment.trackingNumber
-          .toUpperCase()
-          .replace(/[\s-]/g, ''),
-      }))
-
-    return result
-  } catch (error) {
-    console.error('OpenAI extraction error:', error)
-    return { shipments: [] }
-  }
 }

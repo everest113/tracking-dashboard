@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getFrontClient } from '@/lib/infrastructure/sdks/front/client'
-import { extractTrackingInfo } from '@/lib/tracking-extractor'
+import { extractTrackingFromEmail } from '@/lib/application/use-cases/extractTrackingFromEmail'
 import { getShipmentTrackingService } from '@/lib/application/ShipmentTrackingService'
 import { prisma } from '@/lib/prisma'
 
@@ -64,7 +64,7 @@ async function processBatch(
         }))
 
         // Extract tracking info and supplier using OpenAI
-        const extraction = await extractTrackingInfo(messagesToExtract)
+        const extraction = await extractTrackingFromEmail(messagesToExtract)
         console.log(`Extracted ${extraction.shipments.length} shipments from ${conversation.id}`)
 
         // Use AI-extracted supplier name, or fall back to sender info
