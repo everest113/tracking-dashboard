@@ -1,8 +1,7 @@
 import { z } from 'zod'
 
 /**
- * Zod schemas for AI-powered tracking extraction
- * These define the expected structure of AI responses
+ * Shipping extraction schemas
  */
 
 export const ExtractedShipmentSchema = z.object({
@@ -13,13 +12,13 @@ export const ExtractedShipmentSchema = z.object({
   confidence: z.number().min(0).max(1),
 })
 
-export const ExtractionResultSchema = z.object({
+export const TrackingExtractionResultSchema = z.object({
   supplier: z.string().optional(),
   shipments: z.array(ExtractedShipmentSchema),
 })
 
 export type ExtractedShipment = z.infer<typeof ExtractedShipmentSchema>
-export type ExtractionResult = z.infer<typeof ExtractionResultSchema>
+export type TrackingExtractionResult = z.infer<typeof TrackingExtractionResultSchema>
 
 /**
  * Input schema for email messages

@@ -1,25 +1,24 @@
-import { createTrackingExtractionClient } from '@/lib/infrastructure/sdks/tracking-extraction/vercel-ai-client'
-import type { EmailMessage, ExtractionResult } from '@/lib/infrastructure/sdks/tracking-extraction/schemas'
+import { extractTracking, type EmailMessage, type TrackingExtractionResult } from '@/lib/infrastructure/sdks/extraction'
 
 /**
  * Use Case: Extract Tracking Information from Email
  * 
  * Orchestrates the extraction of tracking numbers, PO numbers,
  * carrier information, and supplier details from email messages.
+ * 
+ * This is a thin wrapper around the shipping module that adds
+ * application-layer business rules.
  */
 export async function extractTrackingFromEmail(
   messages: EmailMessage[]
-): Promise<ExtractionResult> {
+): Promise<TrackingExtractionResult> {
   // Validate input
   if (!messages || messages.length === 0) {
     return { shipments: [] }
   }
 
-  // Create extraction client
-  const client = createTrackingExtractionClient()
-
-  // Extract tracking information
-  const result = await client.extractFromEmails(messages)
+  // Extract using shipping module
+  const result = await extractTracking(messages)
 
   // Business rule: If supplier is missing and we have a sender, use sender as fallback
   if (!result.supplier && messages[0]?.senderName) {

@@ -1,15 +1,9 @@
 import type { EmailMessage } from './schemas'
 
 /**
- * System prompt for tracking extraction AI
+ * Build extraction instructions for tracking information
  */
-export const SYSTEM_PROMPT = `You are an expert at extracting shipping and supplier information from email threads.
-You are precise and only return valid JSON. Only include shipments with valid tracking numbers.`
-
-/**
- * Build extraction prompt from email messages
- */
-export function buildExtractionPrompt(messages: EmailMessage[]): string {
+export function buildTrackingExtractionInstructions(messages: EmailMessage[]): string {
   // Build comprehensive context from all messages
   const threadContext = messages.map((msg, idx) => `
 --- Message ${idx + 1} ---
