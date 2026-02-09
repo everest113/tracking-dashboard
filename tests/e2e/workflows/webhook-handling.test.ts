@@ -3,16 +3,14 @@
  * Tests webhook signature verification and event processing
  */
 
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import { POST } from '@/app/api/webhooks/ship24/route'
-import { createMockRequest, assertResponse } from '../../helpers/api'
+import { createMockRequest } from '../../helpers/api'
 import { createTestShipment } from '../../helpers/db'
-import { getShipmentRepository } from '@/lib/infrastructure/repositories/PrismaShipmentRepository'
 import { SAMPLE_WEBHOOKS } from '../../fixtures/webhooks'
 
 describe('Ship24 Webhook Handling', () => {
   const repository = getShipmentRepository()
-  const WEBHOOK_SECRET = process.env.SHIP24_WEBHOOK_SECRET || 'test_secret'
 
   describe('Webhook Signature Verification', () => {
     it('should accept valid webhook signature', async () => {
@@ -180,6 +178,9 @@ describe('Ship24 Webhook Handling', () => {
         status: 'in_transit',
         ship24_tracker_id: 'ship24_tracker_123',
       })
+      
+      // Verify shipment was created
+      expect(dbShipment.id).toBeGreaterThan(0)
 
       const webhook = {
         event: 'tracking.event.new',

@@ -9,9 +9,10 @@ export function getLogger(config: LoggerConfig = {}): ILogger {
   // Client-side
   if (typeof window !== 'undefined') {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const clientLogger = require('./client-logger').default
-    return clientLogger
+    const clientLogger = require('./client-logger') as typeof import('./client-logger')
+    return clientLogger.default
   }
+  
   // Server-side
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { getServerLogger } = require('./server-logger') as typeof import('./server-logger')

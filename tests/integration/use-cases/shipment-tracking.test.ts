@@ -3,15 +3,13 @@
  * Tests the application layer business logic
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import { getShipmentTrackingService } from '@/lib/application/ShipmentTrackingService'
-import { getShipmentRepository } from '@/lib/infrastructure/repositories/PrismaShipmentRepository'
 import { createTestShipment } from '../../helpers/db'
 import { SAMPLE_SHIPMENTS } from '../../fixtures/shipments'
 
 describe('ShipmentTrackingService', () => {
   const service = getShipmentTrackingService()
-  const repository = getShipmentRepository()
 
   describe('createShipment', () => {
     it('should create a new shipment with valid data', async () => {

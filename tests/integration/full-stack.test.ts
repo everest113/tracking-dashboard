@@ -3,11 +3,10 @@
  * Tests complete user workflows from UI to database
  */
 
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import { getShipmentTrackingService } from '@/lib/application/ShipmentTrackingService'
 import { getShipmentRepository } from '@/lib/infrastructure/repositories/PrismaShipmentRepository'
 import { prisma } from '@/lib/infrastructure/database/prisma'
-import { createTestShipment } from '../helpers/db'
 
 describe('Full Stack Integration', () => {
   const service = getShipmentTrackingService()
@@ -177,7 +176,7 @@ describe('Full Stack Integration', () => {
       // Try to create with invalid carrier
       const result = await service.createShipment({
         trackingNumber: `INVALID${Date.now()}`,
-        carrier: 'invalid_carrier' as any,
+        carrier: 'invalid_carrier' as 'ups' | 'usps' | 'fedex' | 'dhl',
       })
 
       // Should either fail validation or normalize the carrier

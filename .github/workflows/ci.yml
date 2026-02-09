@@ -47,8 +47,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Generate Prisma Client
+        run: npx prisma generate
+
       - name: Type check & Build
         run: npm run build
+        env:
+          # Dummy DATABASE_URL for build-time type checking
+          DATABASE_URL: postgresql://dummy:dummy@localhost:5432/dummy
 
       # Share the build output with the test job to avoid rebuilding
       - name: Upload build artifact
@@ -65,6 +71,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: tracking_dashboard_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
     steps:
       - uses: actions/checkout@v4
 
@@ -76,6 +97,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Generate Prisma Client
+        run: npx prisma generate
+
       # Reuse the build from the build job instead of rebuilding
       - name: Download build artifact
         uses: actions/download-artifact@v4
@@ -83,8 +107,21 @@ jobs:
           name: nextjs-build
           path: .next
 
+      - name: Run database migrations
+        run: npx prisma migrate deploy
+        env:
+          DATABASE_URL: postgresql://test:test@localhost:5432/tracking_dashboard_test
+
       - name: Run tests
         run: npm test
+        env:
+          DATABASE_URL: postgresql://test:test@localhost:5432/tracking_dashboard_test
+          SHIP24_API_KEY: test_api_key
+          SHIP24_WEBHOOK_SIGNING_SECRET: test_webhook_secret
+          OPENAI_API_KEY: test_openai_key
+          CRON_SECRET: test_cron_secret
+          LOG_LEVEL: error
+          NODE_ENV: test
 
       - name: Upload coverage
         uses: actions/upload-artifact@v4

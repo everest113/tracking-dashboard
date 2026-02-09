@@ -3,14 +3,12 @@
  * Tests the complete flow from Front API to database
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import { POST } from '@/app/api/front/scan/route'
-import { createMockRequest, assertResponse } from '../../helpers/api'
-import { getShipmentRepository } from '@/lib/infrastructure/repositories/PrismaShipmentRepository'
+import { createMockRequest } from '../../helpers/api'
 import { prisma } from '@/lib/infrastructure/database/prisma'
 
 describe('Front Inbox Scan Workflow', () => {
-  const repository = getShipmentRepository()
 
   // Mock Front API responses
   const mockFrontConversations = {
