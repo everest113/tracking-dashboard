@@ -74,10 +74,10 @@ export class FrontClient extends BaseSdkClient {
  * Factory function to create Front client
  */
 export function getFrontClient(): FrontClient {
-  const apiKey = process.env.FRONT_API_KEY
+  const apiKey = process.env.FRONT_API_TOKEN
   
   if (!apiKey) {
-    throw new Error('FRONT_API_KEY environment variable is not set')
+    throw new Error('FRONT_API_TOKEN environment variable is not set')
   }
 
   return new FrontClient(apiKey)
