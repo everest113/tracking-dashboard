@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
-import { frontClient } from '@/lib/front-client'
+import { getFrontClient } from '@/lib/infrastructure/sdks/front/client'
 import { extractTrackingInfo } from '@/lib/tracking-extractor'
-import { registerTracker } from '@/lib/ship24-client'
+import { getShipmentTrackingService } from '@/lib/application/ShipmentTrackingService'
 import { prisma } from '@/lib/prisma'
 
 // Process conversations in parallel batches
@@ -23,6 +23,8 @@ async function processBatch(
     errors: [] as string[],
   }
 
+  const frontClient = getFrontClient()
+
   // Process all conversations in parallel
   await Promise.allSettled(
     conversations.map(async (conversation) => {
@@ -30,19 +32,19 @@ async function processBatch(
         console.log(`Processing conversation: ${conversation.id}`)
         
         // Get ALL messages for this conversation
-        const messages = await frontClient.getFullConversation(conversation.id)
+        const messages = await frontClient.getConversationMessages(conversation.id)
         
         if (messages.length === 0) {
           console.log(`No messages found in ${conversation.id}`)
           
           // Mark as scanned even if no messages (avoid re-checking)
-          await prisma.scannedConversation.upsert({
-            where: { conversationId: conversation.id },
-            update: { scannedAt: new Date() },
+          await prisma.scanned_conversations.upsert({
+            where: { conversation_id: conversation.id },
+            update: { scanned_at: new Date() },
             create: {
-              conversationId: conversation.id,
+              conversation_id: conversation.id,
               subject: conversation.subject,
-              shipmentsFound: 0,
+              shipments_found: 0,
             },
           })
           
@@ -90,8 +92,8 @@ async function processBatch(
             }
 
             // Check if tracking number already exists
-            const existing = await prisma.shipment.findUnique({
-              where: { trackingNumber: shipment.trackingNumber },
+            const existing = await prisma.shipments.findUnique({
+              where: { tracking_number: shipment.trackingNumber },
             })
 
             if (existing) {
@@ -112,11 +114,11 @@ async function processBatch(
             }
 
             // Use shipped date from AI extraction, or fall back to email sent date
-            let shippedDate: Date | null = null
+            let shipped_date: Date | null = null
             if (shipment.shippedDate) {
-              shippedDate = new Date(shipment.shippedDate)
+              shipped_date = new Date(shipment.shippedDate)
             } else if (emailSentDate) {
-              shippedDate = emailSentDate
+              shipped_date = emailSentDate
               console.log(`Using email sent date as shipped date: ${emailSentDate.toISOString()}`)
             }
 
@@ -127,25 +129,28 @@ async function processBatch(
 
             // Prepare shipment data
             const shipmentData: any = {
-              poNumber,
-              trackingNumber: shipment.trackingNumber,
+              po_number: poNumber,
+              tracking_number: shipment.trackingNumber,
               carrier,
               supplier: supplierName,
               status: 'pending',
-              frontConversationId: conversation.id,
-              shippedDate,
+              front_conversation_id: conversation.id,
+              shipped_date: shipped_date,
             }
 
             // Register tracker with Ship24 (non-blocking)
             try {
-              const registration = await registerTracker(
+              const service = getShipmentTrackingService()
+              const result = await service.registerTracker(
                 shipment.trackingNumber,
                 carrier || null,
                 poNumber
               )
               
-              shipmentData.ship24_tracker_id = registration.trackerId
-              console.log(`✅ Registered tracker: ${registration.trackingNumber} → ${registration.trackerId}`)
+              if (result.success && result.trackerId) {
+                shipmentData.ship24_tracker_id = result.trackerId
+                console.log(`✅ Registered tracker: ${shipment.trackingNumber} → ${result.trackerId}`)
+              }
             } catch (trackerError: any) {
               // Log but don't fail the shipment creation
               console.warn(`⚠️  Failed to register tracker for ${shipment.trackingNumber}:`, trackerError.message)
@@ -153,11 +158,11 @@ async function processBatch(
             }
 
             // Create shipment
-            await prisma.shipment.create({
+            await prisma.shipments.create({
               data: shipmentData,
             })
 
-            console.log(`Created shipment ${shipment.trackingNumber} - Supplier: ${supplierName} - PO: ${poNumber || 'none'} - Shipped: ${shippedDate?.toISOString() || 'unknown'}`)
+            console.log(`Created shipment ${shipment.trackingNumber} - Supplier: ${supplierName} - PO: ${poNumber || 'none'} - Shipped: ${shipped_date?.toISOString() || 'unknown'}`)
             results.added++
             shipmentsAddedThisConvo++
           } catch (err: any) {
@@ -167,16 +172,16 @@ async function processBatch(
         }
 
         // Mark conversation as scanned
-        await prisma.scannedConversation.upsert({
-          where: { conversationId: conversation.id },
+        await prisma.scanned_conversations.upsert({
+          where: { conversation_id: conversation.id },
           update: { 
-            scannedAt: new Date(),
-            shipmentsFound: shipmentsAddedThisConvo,
+            scanned_at: new Date(),
+            shipments_found: shipmentsAddedThisConvo,
           },
           create: {
-            conversationId: conversation.id,
+            conversation_id: conversation.id,
             subject: conversation.subject,
-            shipmentsFound: shipmentsAddedThisConvo,
+            shipments_found: shipmentsAddedThisConvo,
           },
         })
 
@@ -227,17 +232,18 @@ export async function POST(request: Request) {
     }
 
     // Create sync history record
-    const syncRecord = await prisma.syncHistory.create({
+    const syncRecord = await prisma.sync_history.create({
       data: {
         status: 'running',
         limit,
-        batchSize,
+        batch_size: batchSize,
       },
     })
     syncHistoryId = syncRecord.id
 
     // Fetch conversations from Front
     console.log('Fetching conversations from Front...')
+    const frontClient = getFrontClient()
     const conversations = await frontClient.listConversations({
       limit,
       after,
@@ -248,21 +254,21 @@ export async function POST(request: Request) {
     if (conversations.length === 0) {
       const duration = Date.now() - startTime
 
-      await prisma.syncHistory.update({
+      await prisma.sync_history.update({
         where: { id: syncHistoryId },
         data: {
           status: 'success',
-          completedAt: new Date(),
-          durationMs: duration,
+          completed_at: new Date(),
+          duration_ms: duration,
         },
       })
 
       return NextResponse.json({
         success: true,
         message: 'No conversations found',
-        conversationsProcessed: 0,
-        shipmentsAdded: 0,
-        durationMs: duration,
+        conversations_processed: 0,
+        shipments_added: 0,
+        duration_ms: duration,
       })
     }
 
@@ -271,10 +277,10 @@ export async function POST(request: Request) {
     let alreadyScanned = 0
 
     if (!force) {
-      const scannedIds = await prisma.scannedConversation.findMany({
-        select: { conversationId: true },
+      const scannedIds = await prisma.scanned_conversations.findMany({
+        select: { conversation_id: true },
       })
-      const scannedSet = new Set(scannedIds.map((s) => s.conversationId))
+      const scannedSet = new Set(scannedIds.map((s) => s.conversation_id))
 
       toProcess = conversations.filter((c) => !scannedSet.has(c.id))
       alreadyScanned = conversations.length - toProcess.length
@@ -288,25 +294,25 @@ export async function POST(request: Request) {
     if (toProcess.length === 0) {
       const duration = Date.now() - startTime
 
-      await prisma.syncHistory.update({
+      await prisma.sync_history.update({
         where: { id: syncHistoryId },
         data: {
           status: 'success',
-          conversationsProcessed: 0,
-          conversationsAlreadyScanned: alreadyScanned,
-          shipmentsAdded: 0,
-          completedAt: new Date(),
-          durationMs: duration,
+          conversations_processed: 0,
+          conversations_already_scanned: alreadyScanned,
+          shipments_added: 0,
+          completed_at: new Date(),
+          duration_ms: duration,
         },
       })
 
       return NextResponse.json({
         success: true,
         message: 'All conversations already scanned',
-        conversationsProcessed: 0,
-        conversationsAlreadyScanned: alreadyScanned,
-        shipmentsAdded: 0,
-        durationMs: duration,
+        conversations_processed: 0,
+        conversations_already_scanned: alreadyScanned,
+        shipments_added: 0,
+        duration_ms: duration,
       })
     }
 
@@ -341,18 +347,18 @@ export async function POST(request: Request) {
     const duration = Date.now() - startTime
 
     // Update sync history with results
-    await prisma.syncHistory.update({
+    await prisma.sync_history.update({
       where: { id: syncHistoryId },
       data: {
         status: results.errors.length > 0 ? 'partial_success' : 'success',
-        conversationsProcessed: toProcess.length,
-        conversationsAlreadyScanned: alreadyScanned,
-        shipmentsAdded: results.added,
-        shipmentsSkipped: results.skipped,
-        conversationsWithNoTracking: results.noTracking,
+        conversations_processed: toProcess.length,
+        conversations_already_scanned: alreadyScanned,
+        shipments_added: results.added,
+        shipments_skipped: results.skipped,
+        conversations_with_no_tracking: results.noTracking,
         errors: results.errors,
-        completedAt: new Date(),
-        durationMs: duration,
+        completed_at: new Date(),
+        duration_ms: duration,
       },
     })
 
@@ -365,13 +371,13 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       success: true,
-      conversationsProcessed: toProcess.length,
-      conversationsAlreadyScanned: alreadyScanned,
-      shipmentsAdded: results.added,
-      shipmentsSkipped: results.skipped,
-      conversationsWithNoTracking: results.noTracking,
+      conversations_processed: toProcess.length,
+      conversations_already_scanned: alreadyScanned,
+      shipments_added: results.added,
+      shipments_skipped: results.skipped,
+      conversations_with_no_tracking: results.noTracking,
       errors: results.errors.slice(0, 10), // Limit error list in response
-      durationMs: duration,
+      duration_ms: duration,
     })
   } catch (error: any) {
     console.error('=== FATAL ERROR ===')
@@ -381,13 +387,13 @@ export async function POST(request: Request) {
     // Update sync history with error
     if (syncHistoryId) {
       try {
-        await prisma.syncHistory.update({
+        await prisma.sync_history.update({
           where: { id: syncHistoryId },
           data: {
             status: 'error',
             errors: [error.message],
-            completedAt: new Date(),
-            durationMs: Date.now() - startTime,
+            completed_at: new Date(),
+            duration_ms: Date.now() - startTime,
           },
         })
       } catch (updateErr) {
@@ -399,7 +405,7 @@ export async function POST(request: Request) {
       { 
         success: false,
         error: error.message || 'Failed to scan Front inbox',
-        durationMs: Date.now() - startTime,
+        duration_ms: Date.now() - startTime,
       },
       { status: 500 }
     )

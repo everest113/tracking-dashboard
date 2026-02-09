@@ -7,15 +7,15 @@ export async function GET(request: Request) {
     const limit = parseInt(searchParams.get('limit') || '10', 10)
 
     // Get recent sync history
-    const history = await prisma.syncHistory.findMany({
-      orderBy: { startedAt: 'desc' },
+    const history = await prisma.sync_history.findMany({
+      orderBy: { started_at: 'desc' },
       take: limit,
     })
 
     // Get last successful sync
-    const lastSync = await prisma.syncHistory.findFirst({
+    const lastSync = await prisma.sync_history.findFirst({
       where: { status: { in: ['success', 'partial'] } },
-      orderBy: { completedAt: 'desc' },
+      orderBy: { completed_at: 'desc' },
     })
 
     return NextResponse.json({

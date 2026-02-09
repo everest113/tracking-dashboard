@@ -16,45 +16,45 @@ export async function GET() {
       needsUpdate
     ] = await Promise.all([
       // Total shipments
-      prisma.shipment.count(),
+      prisma.shipments.count(),
       
       // Delivered
-      prisma.shipment.count({
+      prisma.shipments.count({
         where: { status: 'delivered' }
       }),
       
       // In transit
-      prisma.shipment.count({
+      prisma.shipments.count({
         where: { status: 'in_transit' }
       }),
       
       // Pending
-      prisma.shipment.count({
+      prisma.shipments.count({
         where: { status: 'pending' }
       }),
       
       // Exception
-      prisma.shipment.count({
+      prisma.shipments.count({
         where: { status: 'exception' }
       }),
       
       // Recently checked (last hour)
-      prisma.shipment.count({
+      prisma.shipments.count({
         where: {
-          lastChecked: {
+          last_checked: {
             gte: new Date(Date.now() - 60 * 60 * 1000)
           }
         }
       }),
       
       // Needs update (not checked in 24 hours and not delivered)
-      prisma.shipment.count({
+      prisma.shipments.count({
         where: {
           status: { notIn: ['delivered'] },
           OR: [
-            { lastChecked: null },
+            { last_checked: null },
             {
-              lastChecked: {
+              last_checked: {
                 lt: new Date(Date.now() - 24 * 60 * 60 * 1000)
               }
             }

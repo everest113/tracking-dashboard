@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { formatDistanceToNow } from 'date-fns'
+import { api } from '@/lib/orpc/client'
 import { Clock, History, ChevronRight } from 'lucide-react'
 import {
   Sheet,
@@ -15,7 +16,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 
 type SyncHistory = {
-  id: number
+  id: string
   conversationsProcessed: number
   conversationsAlreadyScanned: number
   shipmentsAdded: number
@@ -24,13 +25,14 @@ type SyncHistory = {
   batchSize: number
   limit: number
   status: string
-  startedAt: string
-  completedAt: string | null
+  startedAt: Date
+  completedAt: Date | null
   durationMs: number | null
   errors: string[]
 }
 
 type SyncData = {
+  success: boolean
   lastSync: SyncHistory | null
   history: SyncHistory[]
 }
@@ -42,11 +44,8 @@ export default function LastSyncDisplay() {
 
   const fetchSyncHistory = async () => {
     try {
-      const response = await fetch('/api/sync-history?limit=20')
-      const data = await response.json()
-      if (data.success) {
-        setSyncData(data)
-      }
+      const data = await (api.syncHistory as any).get({ limit: 20 })
+      setSyncData(data)
     } catch (error) {
       console.error('Error fetching sync history:', error)
     } finally {
@@ -86,9 +85,8 @@ export default function LastSyncDisplay() {
     }
   }
 
-  const formatDate = (dateStr: string) => {
-    const date = new Date(dateStr)
-    return date.toLocaleString('en-US', {
+  const formatDate = (date: Date) => {
+    return new Date(date).toLocaleString('en-US', {
       month: 'short',
       day: 'numeric',
       year: 'numeric',

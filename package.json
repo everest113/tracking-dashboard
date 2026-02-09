@@ -10,6 +10,9 @@
     "postinstall": "prisma generate"
   },
   "dependencies": {
+    "@orpc/client": "^0.27.0",
+    "@orpc/next": "^0.27.0",
+    "@orpc/server": "^0.27.0",
     "@prisma/client": "^5.22.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

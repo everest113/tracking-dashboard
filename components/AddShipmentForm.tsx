@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { shipmentSchema, type ShipmentInput } from '@/lib/validations'
 import { ZodError } from 'zod'
 import { toast } from 'sonner'
+import { api } from '@/lib/orpc/client'
 import {
   Dialog,
   DialogContent,
@@ -59,32 +60,8 @@ export default function AddShipmentForm({ onSuccess }: AddShipmentFormProps) {
       // Validate with Zod on client-side
       const validatedData = shipmentSchema.parse(formData)
 
-      const response = await fetch('/api/shipments', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(validatedData),
-      })
-
-      const data = await response.json()
-
-      if (!response.ok) {
-        if (response.status === 400 && data.details) {
-          // Handle Zod validation errors from server
-          const newErrors: FormErrors = {}
-          data.details.forEach((err: { field: string; message: string }) => {
-            newErrors[err.field as keyof FormErrors] = err.message
-          })
-          setErrors(newErrors)
-          toast.error('Validation failed', {
-            description: 'Please check the form for errors.',
-          })
-        } else {
-          toast.error('Failed to create shipment', {
-            description: data.error || 'An unexpected error occurred.',
-          })
-        }
-        return
-      }
+      // Call ORPC endpoint
+      const data = await (api.shipments as any).create(validatedData)
 
       // Success!
       toast.success('Shipment added successfully', {
@@ -101,9 +78,9 @@ export default function AddShipmentForm({ onSuccess }: AddShipmentFormProps) {
       })
       setIsOpen(false)
       onSuccess()
-    } catch (error) {
+    } catch (error: any) {
       if (error instanceof ZodError) {
-        // Client-side validation errors
+        // Handle Zod validation errors
         const newErrors: FormErrors = {}
         error.issues.forEach((issue) => {
           const field = issue.path[0] as keyof FormErrors
@@ -114,8 +91,8 @@ export default function AddShipmentForm({ onSuccess }: AddShipmentFormProps) {
           description: 'Please check the form for errors.',
         })
       } else {
-        toast.error('An unexpected error occurred', {
-          description: 'Please try again later.',
+        toast.error('Failed to create shipment', {
+          description: error.message || 'An unexpected error occurred.',
         })
       }
     } finally {
@@ -123,154 +100,130 @@ export default function AddShipmentForm({ onSuccess }: AddShipmentFormProps) {
     }
   }
 
-  const handleChange = (field: keyof ShipmentInput, value: string) => {
-    setFormData(prev => ({ ...prev, [field]: value }))
-    // Clear error when user starts typing
-    if (errors[field]) {
-      setErrors(prev => ({ ...prev, [field]: undefined }))
-    }
-  }
-
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
       <DialogTrigger asChild>
-        <Button variant="success" size="default">
-          + Add Shipment
-        </Button>
+        <Button>Add Shipment</Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-[500px]">
         <DialogHeader>
           <DialogTitle>Add New Shipment</DialogTitle>
           <DialogDescription>
-            Enter the shipment details below. Only tracking number and carrier are required.
+            Enter the shipment details to start tracking.
           </DialogDescription>
         </DialogHeader>
-        
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {/* PO Number */}
+        <form onSubmit={handleSubmit} className="space-y-4 mt-4">
           <div className="space-y-2">
-            <Label htmlFor="poNumber">PO Number <span className="text-muted-foreground text-xs">(optional)</span></Label>
+            <Label htmlFor="poNumber">
+              PO Number <span className="text-muted-foreground text-sm">(Optional)</span>
+            </Label>
             <Input
               id="poNumber"
               value={formData.poNumber}
-              onChange={(e) => handleChange('poNumber', e.target.value)}
+              onChange={(e) => setFormData({ ...formData, poNumber: e.target.value })}
               placeholder="PO-12345"
-              disabled={isSubmitting}
-              className={errors.poNumber ? 'border-red-500' : ''}
             />
             {errors.poNumber && (
-              <p className="text-sm text-red-600">{errors.poNumber}</p>
+              <p className="text-sm text-destructive">{errors.poNumber}</p>
             )}
           </div>
 
-          {/* Tracking Number */}
           <div className="space-y-2">
-            <Label htmlFor="trackingNumber">Tracking Number <span className="text-red-500">*</span></Label>
+            <Label htmlFor="trackingNumber">
+              Tracking Number <span className="text-destructive">*</span>
+            </Label>
             <Input
               id="trackingNumber"
               value={formData.trackingNumber}
-              onChange={(e) => handleChange('trackingNumber', e.target.value.toUpperCase())}
+              onChange={(e) => setFormData({ ...formData, trackingNumber: e.target.value })}
               placeholder="1Z999AA10123456784"
-              disabled={isSubmitting}
-              className={errors.trackingNumber ? 'border-red-500' : ''}
+              required
             />
             {errors.trackingNumber && (
-              <p className="text-sm text-red-600">{errors.trackingNumber}</p>
+              <p className="text-sm text-destructive">{errors.trackingNumber}</p>
             )}
-            <p className="text-xs text-muted-foreground">
-              Letters and numbers only, automatically converted to uppercase
-            </p>
           </div>
 
-          {/* Carrier */}
           <div className="space-y-2">
-            <Label htmlFor="carrier">Carrier <span className="text-red-500">*</span></Label>
+            <Label htmlFor="carrier">
+              Carrier <span className="text-destructive">*</span>
+            </Label>
             <Select
               value={formData.carrier}
-              onValueChange={(value) => handleChange('carrier', value)}
-              disabled={isSubmitting}
+              onValueChange={(value) => setFormData({ ...formData, carrier: value as any })}
             >
-              <SelectTrigger className={errors.carrier ? 'border-red-500' : ''}>
-                <SelectValue placeholder="Select carrier" />
+              <SelectTrigger id="carrier">
+                <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="ups">UPS</SelectItem>
-                <SelectItem value="usps">USPS</SelectItem>
                 <SelectItem value="fedex">FedEx</SelectItem>
+                <SelectItem value="usps">USPS</SelectItem>
                 <SelectItem value="dhl">DHL</SelectItem>
-                <SelectItem value="other">Other</SelectItem>
               </SelectContent>
             </Select>
             {errors.carrier && (
-              <p className="text-sm text-red-600">{errors.carrier}</p>
+              <p className="text-sm text-destructive">{errors.carrier}</p>
             )}
           </div>
 
-          {/* Supplier */}
           <div className="space-y-2">
-            <Label htmlFor="supplier">Supplier <span className="text-muted-foreground text-xs">(optional)</span></Label>
+            <Label htmlFor="supplier">
+              Supplier <span className="text-muted-foreground text-sm">(Optional)</span>
+            </Label>
             <Input
               id="supplier"
               value={formData.supplier}
-              onChange={(e) => handleChange('supplier', e.target.value)}
+              onChange={(e) => setFormData({ ...formData, supplier: e.target.value })}
               placeholder="Supplier name"
-              disabled={isSubmitting}
-              className={errors.supplier ? 'border-red-500' : ''}
             />
             {errors.supplier && (
-              <p className="text-sm text-red-600">{errors.supplier}</p>
+              <p className="text-sm text-destructive">{errors.supplier}</p>
             )}
           </div>
 
-          {/* Shipped Date */}
-          <div className="space-y-2">
-            <Label htmlFor="shippedDate">Shipped Date <span className="text-muted-foreground text-xs">(optional)</span></Label>
-            <Input
-              id="shippedDate"
-              type="date"
-              value={formData.shippedDate}
-              onChange={(e) => handleChange('shippedDate', e.target.value)}
-              disabled={isSubmitting}
-              className={errors.shippedDate ? 'border-red-500' : ''}
-            />
-            {errors.shippedDate && (
-              <p className="text-sm text-red-600">{errors.shippedDate}</p>
-            )}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="shippedDate">
+                Shipped Date <span className="text-muted-foreground text-sm">(Optional)</span>
+              </Label>
+              <Input
+                id="shippedDate"
+                type="date"
+                value={formData.shippedDate}
+                onChange={(e) => setFormData({ ...formData, shippedDate: e.target.value })}
+              />
+              {errors.shippedDate && (
+                <p className="text-sm text-destructive">{errors.shippedDate}</p>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="estimatedDelivery">
+                Est. Delivery <span className="text-muted-foreground text-sm">(Optional)</span>
+              </Label>
+              <Input
+                id="estimatedDelivery"
+                type="date"
+                value={formData.estimatedDelivery}
+                onChange={(e) => setFormData({ ...formData, estimatedDelivery: e.target.value })}
+              />
+              {errors.estimatedDelivery && (
+                <p className="text-sm text-destructive">{errors.estimatedDelivery}</p>
+              )}
+            </div>
           </div>
 
-          {/* Estimated Delivery */}
-          <div className="space-y-2">
-            <Label htmlFor="estimatedDelivery">Estimated Delivery <span className="text-muted-foreground text-xs">(optional)</span></Label>
-            <Input
-              id="estimatedDelivery"
-              type="date"
-              value={formData.estimatedDelivery}
-              onChange={(e) => handleChange('estimatedDelivery', e.target.value)}
-              disabled={isSubmitting}
-              className={errors.estimatedDelivery ? 'border-red-500' : ''}
-            />
-            {errors.estimatedDelivery && (
-              <p className="text-sm text-red-600">{errors.estimatedDelivery}</p>
-            )}
-          </div>
-
-          {/* Actions */}
-          <div className="flex gap-3 pt-4">
+          <div className="flex justify-end gap-3 pt-4">
             <Button
               type="button"
               variant="outline"
               onClick={() => setIsOpen(false)}
               disabled={isSubmitting}
-              className="flex-1"
             >
               Cancel
             </Button>
-            <Button
-              type="submit"
-              variant="success"
-              disabled={isSubmitting}
-              className="flex-1"
-            >
+            <Button type="submit" disabled={isSubmitting}>
               {isSubmitting ? 'Adding...' : 'Add Shipment'}
             </Button>
           </div>

@@ -7,7 +7,7 @@ export async function GET() {
     const models = Object.keys(prisma).filter(key => !key.startsWith('$') && !key.startsWith('_'))
     
     // Try to count records
-    const syncHistoryCount = await prisma.syncHistory.count()
+    const syncHistoryCount = await prisma.sync_history.count()
     
     return NextResponse.json({
       success: true,

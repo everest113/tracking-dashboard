@@ -1,13 +1,13 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { shipmentSchema } from '@/lib/validations'
-import { registerTracker } from '@/lib/ship24-client'
+import { getShipmentTrackingService } from '@/lib/application/ShipmentTrackingService'
 import { ZodError } from 'zod'
 
 export async function GET() {
   try {
-    const shipments = await prisma.shipment.findMany({
-      orderBy: { createdAt: 'desc' },
+    const shipments = await prisma.shipments.findMany({
+      orderBy: { created_at: 'desc' },
       take: 100,
     })
     
@@ -29,8 +29,8 @@ export async function POST(request: Request) {
     const validatedData = shipmentSchema.parse(body)
 
     // Check if tracking number already exists
-    const existingShipment = await prisma.shipment.findUnique({
-      where: { trackingNumber: validatedData.trackingNumber },
+    const existingShipment = await prisma.shipments.findUnique({
+      where: { tracking_number: validatedData.trackingNumber },
     })
 
     if (existingShipment) {
@@ -65,22 +65,25 @@ export async function POST(request: Request) {
     }
 
     // Register tracker with Ship24 (non-blocking)
+    const service = getShipmentTrackingService()
     try {
-      const registration = await registerTracker(
+      const result = await service.registerTracker(
         validatedData.trackingNumber,
         validatedData.carrier,
         validatedData.poNumber || undefined
       )
       
-      shipmentData.ship24_tracker_id = registration.trackerId
-      console.log(`✅ Registered tracker: ${registration.trackingNumber} → ${registration.trackerId}`)
+      if (result.success && result.trackerId) {
+        shipmentData.ship24_tracker_id = result.trackerId
+        console.log(`✅ Registered tracker: ${validatedData.trackingNumber} → ${result.trackerId}`)
+      }
     } catch (trackerError: any) {
       // Log but don't fail the shipment creation
       console.warn(`⚠️  Failed to register tracker for ${validatedData.trackingNumber}:`, trackerError.message)
       // Will be picked up by backfill endpoint later
     }
 
-    const shipment = await prisma.shipment.create({
+    const shipment = await prisma.shipments.create({
       data: shipmentData,
     })
 

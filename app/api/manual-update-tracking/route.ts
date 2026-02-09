@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getTrackerResults, mapShip24Status } from '@/lib/ship24-client'
+import { createShip24Client } from '@/lib/infrastructure/sdks/ship24/client'
+import { Ship24Mapper } from '@/lib/infrastructure/mappers/Ship24Mapper'
+import { ShipmentStatus } from '@/lib/domain/value-objects/ShipmentStatus'
 
 /**
  * Manual trigger endpoint for tracking updates
@@ -13,7 +15,7 @@ export async function POST(request: Request) {
     console.log('=== Manual Tracking Update Started ===')
 
     // Get all NON-DELIVERED shipments that have a tracker ID
-    const activeShipments = await prisma.shipment.findMany({
+    const activeShipments = await prisma.shipments.findMany({
       where: {
         status: {
           notIn: ['delivered']
@@ -47,15 +49,25 @@ export async function POST(request: Request) {
     const statusChanges: Array<{ trackingNumber: string; old: string; new: string }> = []
     const deliveredShipments: string[] = []
 
+    const ship24Client = createShip24Client()
+
     // Process each shipment
     for (const shipment of activeShipments) {
       try {
         console.log(`[${shipment.tracking_number}] Fetching cached results (tracker: ${shipment.ship24_tracker_id})`)
         
         // Fetch tracking data from Ship24's cache (fast)
-        const trackingInfo = await getTrackerResults(shipment.ship24_tracker_id!)
+        const response = await ship24Client.getTrackerResults(shipment.ship24_tracker_id!)
+        const tracking = response.data.trackings[0]
         
-        const newStatus = mapShip24Status(trackingInfo.status_description)
+        if (!tracking) {
+          throw new Error('No tracking data found')
+        }
+
+        // Map to domain
+        const trackingUpdate = Ship24Mapper.toDomainTrackingUpdate(tracking)
+        
+        const newStatus = ShipmentStatus.toString(trackingUpdate.status)
         const oldStatus = shipment.status
         
         // Prepare update data
@@ -65,55 +77,53 @@ export async function POST(request: Request) {
         }
         
         // Update dates if available
-        if (trackingInfo.estimated_delivery_date) {
-          updateData.estimated_delivery = new Date(trackingInfo.estimated_delivery_date)
+        if (trackingUpdate.estimatedDelivery) {
+          updateData.estimated_delivery = trackingUpdate.estimatedDelivery
         }
         
-        if (trackingInfo.actual_delivery_date) {
-          updateData.delivered_date = new Date(trackingInfo.actual_delivery_date)
+        if (trackingUpdate.deliveredDate) {
+          updateData.delivered_date = trackingUpdate.deliveredDate
         }
 
-        if (trackingInfo.ship_date) {
-          updateData.shipped_date = new Date(trackingInfo.ship_date)
+        if (trackingUpdate.shippedDate) {
+          updateData.shipped_date = trackingUpdate.shippedDate
         }
         
         // Update carrier if we got it from Ship24
-        if (trackingInfo.carrier_status_code && !shipment.carrier) {
-          updateData.carrier = trackingInfo.carrier_status_code
+        if (trackingUpdate.carrier && !shipment.carrier) {
+          updateData.carrier = trackingUpdate.carrier
         }
         
         // Use a transaction to ensure atomicity
         await prisma.$transaction(async (tx) => {
           // Update shipment
-          await tx.shipment.update({
+          await tx.shipments.update({
             where: { id: shipment.id },
             data: updateData
           })
           
           // Store latest tracking event if we have events
-          if (trackingInfo.events && trackingInfo.events.length > 0) {
-            const latestEvent = trackingInfo.events[0]
+          if (trackingUpdate.events && trackingUpdate.events.length > 0) {
+            const latestEvent = trackingUpdate.events[0]
             
             // Check if this event already exists
-            const existingEvent = await tx.trackingEvent.findFirst({
+            const existingEvent = await tx.tracking_events.findFirst({
               where: {
                 shipment_id: shipment.id,
-                event_time: latestEvent.occurred_at ? new Date(latestEvent.occurred_at) : undefined,
+                event_time: latestEvent.occurredAt,
                 message: latestEvent.description
               }
             })
             
             // Only create if it doesn't exist
             if (!existingEvent) {
-              await tx.trackingEvent.create({
+              await tx.tracking_events.create({
                 data: {
                   shipment_id: shipment.id,
-                  status: newStatus,
-                  location: latestEvent.city_locality 
-                    ? `${latestEvent.city_locality}, ${latestEvent.state_province || ''} ${latestEvent.postal_code || ''}`.trim()
-                    : null,
+                  status: latestEvent.status,
+                  location: latestEvent.location,
                   message: latestEvent.description,
-                  event_time: latestEvent.occurred_at ? new Date(latestEvent.occurred_at) : new Date()
+                  event_time: latestEvent.occurredAt
                 }
               })
             }
@@ -151,7 +161,7 @@ export async function POST(request: Request) {
         
         // Still update lastChecked to avoid repeatedly hitting failed lookups
         try {
-          await prisma.shipment.update({
+          await prisma.shipments.update({
             where: { id: shipment.id },
             data: { last_checked: new Date() }
           })

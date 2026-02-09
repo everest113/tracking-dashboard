@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { api } from '@/lib/orpc/client'
 import { Button } from '@/components/ui/button'
 import { RefreshCw, CheckCircle, XCircle } from 'lucide-react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -18,24 +19,13 @@ export function ManualTrackingUpdate() {
     setResult(null)
 
     try {
-      const response = await fetch('/api/manual-update-tracking', {
-        method: 'POST',
+      const data = await (api.manualUpdateTracking as any).update()
+
+      setResult({
+        success: true,
+        message: `Updated ${data.updated} of ${data.checked} shipments in ${Math.round(data.durationMs / 1000)}s`,
+        details: data,
       })
-
-      const data = await response.json()
-
-      if (response.ok) {
-        setResult({
-          success: true,
-          message: `Updated ${data.updated} of ${data.checked} shipments in ${Math.round(data.durationMs / 1000)}s`,
-          details: data,
-        })
-      } else {
-        setResult({
-          success: false,
-          message: data.error || 'Failed to update tracking',
-        })
-      }
     } catch (error: any) {
       setResult({
         success: false,

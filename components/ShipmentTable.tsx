@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import AddShipmentForm from './AddShipmentForm'
 import SyncDialog from './SyncDialog'
+import { api } from '@/lib/orpc/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -77,8 +78,7 @@ export default function ShipmentTable() {
 
   const fetchShipments = async () => {
     try {
-      const res = await fetch('/api/shipments')
-      const data = await res.json()
+      const data = await (api.shipments as any).list()
       setShipments(data)
     } catch (error) {
       console.error('Failed to fetch shipments:', error)
