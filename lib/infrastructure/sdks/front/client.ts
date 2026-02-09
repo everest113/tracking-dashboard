@@ -50,110 +50,66 @@ export class FrontClient extends BaseSdkClient {
   }
 
   /**
-   * Get a single page of conversations from an inbox
+   * Search ALL conversations in an inbox with date filtering (paginated)
+   * Uses the search endpoint with proper date filtering support
    */
-  async getInboxConversationsPage(
+  async searchAllInboxConversations(
     inboxId: string,
     options: {
-      limit?: number
-      after?: number | Date
-      pageToken?: string
-    } = {}
-  ): Promise<FrontListResponse<FrontConversation>> {
-    const params = new URLSearchParams()
-    
-    if (options.limit) {
-      params.append('limit', options.limit.toString())
-    }
-    
-    if (options.after) {
-      const timestamp = typeof options.after === 'number' 
-        ? options.after 
-        : Math.floor(options.after.getTime() / 1000)
-      params.append('q[after]', timestamp.toString())
-    }
-
-    // If pageToken is provided, use it directly as the endpoint
-    if (options.pageToken) {
-      // pageToken is a full URL from _pagination.next
-      const url = new URL(options.pageToken)
-      return await this.get<FrontListResponse<FrontConversation>>(
-        url.pathname + url.search,
-        FrontListResponseSchema(FrontConversationSchema)
-      )
-    }
-
-    const queryString = params.toString()
-    const endpoint = `/inboxes/${inboxId}/conversations${queryString ? `?${queryString}` : ''}`
-
-    return await this.get<FrontListResponse<FrontConversation>>(
-      endpoint,
-      FrontListResponseSchema(FrontConversationSchema)
-    )
-  }
-
-  /**
-   * Get ALL conversations from an inbox (handles pagination automatically)
-   */
-  async getAllInboxConversations(
-    inboxId: string,
-    options: {
+      after?: Date
       pageSize?: number
-      after?: number | Date
-      maxPages?: number  // Safety limit to prevent infinite loops
+      maxPages?: number
     } = {}
   ): Promise<FrontConversation[]> {
     const pageSize = options.pageSize || 100
-    const maxPages = options.maxPages || 1000  // Safety limit
+    const maxPages = options.maxPages || 1000
+    
+    // Build search query using Front's search syntax
+    // Format: inbox:ID after:TIMESTAMP
+    const parts: string[] = [`inbox:${inboxId}`]
+    
+    if (options.after) {
+      const timestamp = Math.floor(options.after.getTime() / 1000)
+      parts.push(`after:${timestamp}`)
+    }
+    
+    const query = parts.join(' ')
+    console.log(`Search query: "${query}"`)
     
     let allConversations: FrontConversation[] = []
     let currentPage = 0
     let nextPageToken: string | null | undefined = undefined
 
     do {
-      console.log(`Fetching page ${currentPage + 1} (${allConversations.length} conversations so far)...`)
+      console.log(`Searching page ${currentPage + 1} (${allConversations.length} conversations so far)...`)
       
-      const response = await this.getInboxConversationsPage(inboxId, {
-        limit: pageSize,
-        after: options.after,
-        pageToken: nextPageToken || undefined,
-      })
+      const endpoint: string = nextPageToken
+        ? new URL(nextPageToken).pathname + new URL(nextPageToken).search
+        : `/conversations/search/${encodeURIComponent(query)}?limit=${pageSize}`
+      
+      const response: FrontListResponse<FrontConversation> = await this.get<FrontListResponse<FrontConversation>>(
+        endpoint,
+        FrontListResponseSchema(FrontConversationSchema)
+      )
 
       allConversations = allConversations.concat(response._results)
       nextPageToken = response._pagination.next
 
       currentPage++
 
-      // Safety check
       if (currentPage >= maxPages) {
         console.warn(`Reached maximum page limit (${maxPages}). Stopping pagination.`)
         break
       }
 
-      // Small delay to avoid rate limiting
       if (nextPageToken) {
         await new Promise(resolve => setTimeout(resolve, 100))
       }
 
     } while (nextPageToken)
 
-    console.log(`Fetched ${allConversations.length} total conversations across ${currentPage} pages`)
+    console.log(`Found ${allConversations.length} total conversations across ${currentPage} pages`)
     return allConversations
-  }
-
-  /**
-   * Get conversations from an inbox (single page - deprecated, use getAllInboxConversations)
-   * @deprecated Use getAllInboxConversations for automatic pagination
-   */
-  async getInboxConversations(
-    inboxId: string,
-    options: {
-      limit?: number
-      after?: number | Date
-    } = {}
-  ): Promise<FrontConversation[]> {
-    const response = await this.getInboxConversationsPage(inboxId, options)
-    return response._results
   }
 
   /**

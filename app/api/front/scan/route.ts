@@ -202,7 +202,7 @@ export async function POST(request: Request) {
     console.log(`Using inbox ID: ${inboxId}`)
 
     // Fetch ALL conversations (paginated automatically)
-    const conversations = await frontClient.getAllInboxConversations(inboxId, {
+    const conversations = await frontClient.searchAllInboxConversations(inboxId, {
       pageSize,
       after: afterDate,
       maxPages,
