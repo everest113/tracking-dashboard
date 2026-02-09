@@ -1,7 +1,10 @@
 import { NextResponse } from 'next/server'
+import { getErrorMessage } from '@/lib/utils/fetch-helpers'
 import { prisma } from '@/lib/prisma'
-import { mapShip24Status } from '@/lib/ship24-client'
+import { Ship24Mapper } from '@/lib/infrastructure/mappers/Ship24Mapper'
+import { ShipmentStatus } from '@/lib/domain/value-objects/ShipmentStatus'
 import crypto from 'crypto'
+import type { Prisma } from '@prisma/client'
 
 /**
  * Verify Ship24 webhook signature
@@ -24,7 +27,7 @@ function verifyShip24Signature(
       Buffer.from(signature),
       Buffer.from(expectedSignature)
     )
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Signature verification error:', error)
     return false
   }
@@ -77,22 +80,6 @@ export async function POST(request: Request) {
     console.log('=== Ship24 Webhook Received ===')
     console.log('Payload:', JSON.stringify(payload, null, 2))
 
-    // Ship24 webhook structure:
-    // {
-    //   "webhook": {
-    //     "id": "webhook-id",
-    //     "trackerId": "tracker-id",
-    //     ...
-    //   },
-    //   "data": {
-    //     "trackings": [{
-    //       "tracker": { trackerId, trackingNumber, ... },
-    //       "shipment": { status, statusMilestone, delivery: {...}, ... },
-    //       "events": [...]
-    //     }]
-    //   }
-    // }
-
     const tracking = payload.data?.trackings?.[0]
     
     if (!tracking) {
@@ -101,11 +88,8 @@ export async function POST(request: Request) {
     }
 
     const tracker = tracking.tracker || {}
-    const shipment = tracking.shipment || {}
-    const events = tracking.events || []
-
-    const trackerId = tracker.trackerId
     const trackingNumber = tracker.trackingNumber
+    const trackerId = tracker.trackerId
 
     if (!trackerId || !trackingNumber) {
       console.error('Webhook: Missing trackerId or trackingNumber')
@@ -113,7 +97,7 @@ export async function POST(request: Request) {
     }
 
     // Find shipment in database by trackerId or trackingNumber
-    let dbShipment = await prisma.shipment.findFirst({
+    const dbShipment = await prisma.shipments.findFirst({
       where: {
         OR: [
           { ship24_tracker_id: trackerId },
@@ -127,13 +111,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: true, message: 'Shipment not found in database' })
     }
 
-    // Extract tracking information
-    const latestStatus = shipment.statusMilestone || shipment.status || 'unknown'
-    const newStatus = mapShip24Status(latestStatus)
+    // Map webhook data to domain
+    const trackingUpdate = Ship24Mapper.toDomainTrackingUpdate(tracking)
+    
+    const newStatus = ShipmentStatus.toString(trackingUpdate.status)
     const oldStatus = dbShipment.status
 
     // Prepare update data
-    const updateData: any = {
+    const updateData: Prisma.shipmentsUpdateInput = {
       status: newStatus,
       last_checked: new Date(),
     }
@@ -144,58 +129,52 @@ export async function POST(request: Request) {
     }
 
     // Update dates if available
-    if (shipment.delivery?.estimatedDeliveryDate) {
-      updateData.estimated_delivery = new Date(shipment.delivery.estimatedDeliveryDate)
+    if (trackingUpdate.estimatedDelivery) {
+      updateData.estimated_delivery = trackingUpdate.estimatedDelivery
     }
 
-    if (shipment.delivery?.actualDeliveryDate) {
-      updateData.delivered_date = new Date(shipment.delivery.actualDeliveryDate)
+    if (trackingUpdate.deliveredDate) {
+      updateData.delivered_date = trackingUpdate.deliveredDate
     }
 
-    if (shipment.shipDate) {
-      updateData.shipped_date = new Date(shipment.shipDate)
+    if (trackingUpdate.shippedDate) {
+      updateData.shipped_date = trackingUpdate.shippedDate
     }
 
-    // Update carrier if available and not set
-    if (tracker.courierCode && !dbShipment.carrier) {
-      updateData.carrier = Array.isArray(tracker.courierCode) ? tracker.courierCode[0] : tracker.courierCode
+    // Update carrier if available
+    if (trackingUpdate.carrier && !dbShipment.carrier) {
+      updateData.carrier = trackingUpdate.carrier
     }
 
-    // Update shipment in database
+    // Use transaction to ensure atomicity
     await prisma.$transaction(async (tx) => {
       // Update shipment
-      await tx.shipment.update({
+      await tx.shipments.update({
         where: { id: dbShipment.id },
         data: updateData
       })
 
       // Store tracking events
-      if (events && events.length > 0) {
-        for (const event of events) {
-          const location = event.location || {}
-          const eventTime = event.datetime || event.occurrenceDateTime
-          const description = event.statusDetails || event.status || 'Status update'
-
+      if (trackingUpdate.events && trackingUpdate.events.length > 0) {
+        for (const event of trackingUpdate.events) {
           // Check if event already exists
-          const existingEvent = await tx.trackingEvent.findFirst({
+          const existingEvent = await tx.tracking_events.findFirst({
             where: {
               shipment_id: dbShipment.id,
-              event_time: eventTime ? new Date(eventTime) : undefined,
-              message: description
+              event_time: event.occurredAt,
+              message: event.description
             }
           })
 
           // Only create if it doesn't exist
           if (!existingEvent) {
-            await tx.trackingEvent.create({
+            await tx.tracking_events.create({
               data: {
                 shipment_id: dbShipment.id,
-                status: mapShip24Status(event.status || 'unknown'),
-                location: location.city
-                  ? `${location.city}, ${location.state || ''} ${location.postalCode || ''}`.trim()
-                  : null,
-                message: description,
-                event_time: eventTime ? new Date(eventTime) : new Date()
+                status: event.status,
+                location: event.location,
+                message: event.description,
+                event_time: event.occurredAt
               }
             })
           }
@@ -203,54 +182,43 @@ export async function POST(request: Request) {
       }
     })
 
+    // Log status change
     const statusChanged = oldStatus !== newStatus
+    
+    if (statusChanged) {
+      console.log(`✅ Webhook: Status updated for ${trackingNumber}: ${oldStatus} → ${newStatus}`)
+    } else {
+      console.log(`⏸️  Webhook: No status change for ${trackingNumber} (still ${newStatus})`)
+    }
+
     const duration = Date.now() - startTime
 
-    const response = {
+    return NextResponse.json({
       success: true,
-      trackerId,
       trackingNumber,
       statusChanged,
       oldStatus,
       newStatus,
-      eventsAdded: events.length,
       durationMs: duration,
       timestamp: new Date().toISOString()
-    }
+    })
 
-    console.log('Webhook processed:', response)
-
-    if (statusChanged) {
-      console.log(`  ✅ Status changed: ${oldStatus} → ${newStatus}`)
-      if (newStatus === 'delivered') {
-        console.log(`  🎉 DELIVERED: ${trackingNumber}`)
-      }
-    } else {
-      console.log(`  ⏸️  No status change (still ${newStatus})`)
-    }
-
-    return NextResponse.json(response)
-
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? getErrorMessage(error) : 'Failed to process webhook'
+    const errorStack = error instanceof Error ? error.stack : undefined
+    
     console.error('=== Webhook Error ===')
-    console.error('Error:', error.message)
-    console.error('Stack:', error.stack)
+    console.error('Error:', errorMessage)
+    console.error('Stack:', errorStack)
 
     return NextResponse.json(
       {
         success: false,
-        error: error.message || 'Failed to process webhook',
+        error: errorMessage,
         durationMs: Date.now() - startTime,
         timestamp: new Date().toISOString()
       },
       { status: 500 }
     )
   }
-}
-
-/**
- * Handle HEAD requests (Ship24 validates webhook URL with HEAD)
- */
-export async function HEAD(request: Request) {
-  return new NextResponse(null, { status: 200 })
 }

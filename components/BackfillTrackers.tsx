@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { getErrorMessage } from '@/lib/utils/fetch-helpers'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 import {
@@ -13,7 +14,7 @@ import {
 } from '@/components/ui/dialog'
 import { Upload } from 'lucide-react'
 
-export default function BackfillTrackers() {
+export default function BackfillTrackers({ onSuccess }: { onSuccess: () => void }) {
   const [isOpen, setIsOpen] = useState(false)
   const [isBackfilling, setIsBackfilling] = useState(false)
 
@@ -26,29 +27,35 @@ export default function BackfillTrackers() {
         headers: { 'Content-Type': 'application/json' },
       })
 
-      const data = await response.json()
+      const data: unknown = await response.json()
 
       if (!response.ok) {
+        const errorMsg = typeof data === 'object' && data !== null && 'error' in data 
+          ? String((data as { error: string }).error)
+          : 'Failed to register trackers'
         toast.error('Backfill failed', {
-          description: data.error || 'Failed to register trackers',
+          description: errorMsg,
         })
         return
       }
 
-      if (data.registered === 0) {
+      const result = data as { registered: number; skipped: number }
+
+      if (result.registered === 0) {
         toast.success('Already up to date', {
           description: 'All shipments are already registered with Ship24.',
         })
       } else {
         toast.success('Trackers registered', {
-          description: `${data.registered} shipment(s) registered with Ship24 for real-time tracking.`,
+          description: `${result.registered} shipment(s) registered with Ship24 for real-time tracking.`,
         })
       }
 
       setIsOpen(false)
-    } catch (error: any) {
+      onSuccess()
+    } catch (error: unknown) {
       toast.error('Backfill failed', {
-        description: error.message || 'An unexpected error occurred.',
+        description: getErrorMessage(error) || 'An unexpected error occurred.',
       })
     } finally {
       setIsBackfilling(false)
@@ -58,48 +65,29 @@ export default function BackfillTrackers() {
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm">
-          <Upload className="h-4 w-4 mr-2" />
-          Register Trackers
+        <Button variant="outline">
+          <Upload className="h-4 w-4" />
+          Backfill Trackers
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[500px]">
+      <DialogContent>
         <DialogHeader>
-          <DialogTitle>Register Ship24 Trackers</DialogTitle>
+          <DialogTitle>Backfill Ship24 Trackers</DialogTitle>
           <DialogDescription>
-            Register all existing shipments with Ship24 to receive real-time webhook updates.
-            <br /><br />
-            This only affects shipments that haven't been registered yet. New shipments are registered automatically.
+            Register all untracked shipments with Ship24 for real-time tracking updates.
           </DialogDescription>
         </DialogHeader>
-        
         <div className="space-y-4">
-          <div className="bg-muted p-4 rounded-md">
-            <h4 className="font-medium mb-2">What this does:</h4>
-            <ul className="text-sm space-y-1 list-disc list-inside">
-              <li>Registers untracked shipments with Ship24</li>
-              <li>Enables real-time webhook notifications</li>
-              <li>Improves tracking update efficiency</li>
-            </ul>
-          </div>
-
-          <div className="flex gap-3">
-            <Button
-              variant="outline"
-              onClick={() => setIsOpen(false)}
-              disabled={isBackfilling}
-              className="flex-1"
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={handleBackfill}
-              disabled={isBackfilling}
-              className="flex-1"
-            >
-              {isBackfilling ? 'Registering...' : 'Register Now'}
-            </Button>
-          </div>
+          <p className="text-sm text-muted-foreground">
+            This will find all shipments that don&apos;t have a Ship24 tracker ID and register them.
+          </p>
+          <Button
+            onClick={handleBackfill}
+            disabled={isBackfilling}
+            className="w-full"
+          >
+            {isBackfilling ? 'Registering...' : 'Start Backfill'}
+          </Button>
         </div>
       </DialogContent>
     </Dialog>

@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { getErrorMessage } from '@/lib/utils/fetch-helpers'
 import { prisma } from '@/lib/prisma'
 
 export async function GET() {
@@ -7,7 +8,7 @@ export async function GET() {
     const models = Object.keys(prisma).filter(key => !key.startsWith('$') && !key.startsWith('_'))
     
     // Try to count records
-    const syncHistoryCount = await prisma.syncHistory.count()
+    const syncHistoryCount = await prisma.sync_history.count()
     
     return NextResponse.json({
       success: true,
@@ -15,11 +16,11 @@ export async function GET() {
       models,
       syncHistoryCount,
     })
-  } catch (error: any) {
+  } catch (error: unknown) {
     return NextResponse.json({
       success: false,
-      error: error.message,
-      stack: error.stack,
+      error: getErrorMessage(error),
+      stack: error instanceof Error ? error.stack : undefined,
     }, { status: 500 })
   }
 }

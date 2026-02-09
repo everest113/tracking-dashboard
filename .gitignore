@@ -47,3 +47,7 @@ next-env.d.ts
 !.yarn/sdks
 !.yarn/versions
 .env*.local
+
+# Testing
+.env.test
+coverage/
