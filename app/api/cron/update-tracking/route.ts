@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getTrackingInfo, mapShipStationStatus } from '@/lib/shipstation-client'
+import { getTrackingInfo, mapShip24Status } from '@/lib/ship24-client'
 
 /**
  * Cron endpoint to update tracking information for active shipments
@@ -17,7 +17,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    console.log('=== Tracking Update Cron Started ===')
+    console.log('=== Tracking Update Cron Started (Ship24) ===')
 
     // Get all shipments that are not delivered
     const activeShipments = await prisma.shipment.findMany({
@@ -44,13 +44,13 @@ export async function GET(request: Request) {
       try {
         console.log(`Checking tracking for ${shipment.trackingNumber} (carrier: ${shipment.carrier || 'auto'})`)
         
-        // Fetch real tracking data from ShipStation
+        // Fetch real tracking data from Ship24
         const trackingInfo = await getTrackingInfo(
           shipment.trackingNumber,
           shipment.carrier
         )
         
-        const newStatus = mapShipStationStatus(trackingInfo.status_code)
+        const newStatus = mapShip24Status(trackingInfo.status_description)
         const oldStatus = shipment.status
         
         // Prepare update data
