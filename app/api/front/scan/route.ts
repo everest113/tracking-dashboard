@@ -189,7 +189,18 @@ export async function POST(request: Request) {
 
     console.log(`Fetching conversations after: ${afterDate.toISOString()}`)
 
-    const conversations = await frontClient.getInboxConversations('top', {
+        // Find the inbox by name
+    const inboxName = process.env.FRONT_SUPPLIERS_INBOX || 'Suppliers'
+    const inboxId = await frontClient.findInboxByName(inboxName)
+    
+    if (!inboxId) {
+      return NextResponse.json(
+        { success: false, error: `Inbox '${inboxName}' not found` },
+        { status: 404 }
+      )
+    }
+
+    const conversations = await frontClient.getInboxConversations(inboxId, {
       limit,
       after: afterDate
     })

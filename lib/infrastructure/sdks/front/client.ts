@@ -4,6 +4,7 @@
  */
 
 import { BaseSdkClient } from '../base-client'
+import { z } from 'zod'
 import {
   FrontConversationSchema,
   FrontMessageSchema,
@@ -21,6 +22,31 @@ export class FrontClient extends BaseSdkClient {
         'Authorization': `Bearer ${apiKey}`,
       },
     })
+  }
+
+  /**
+   * List all inboxes
+   */
+  async listInboxes(): Promise<Array<{ id: string; name: string }>> {
+    const InboxSchema = z.object({
+      id: z.string(),
+      name: z.string(),
+    })
+    
+    const response = await this.get<FrontListResponse<z.infer<typeof InboxSchema>>>(
+      '/inboxes',
+      FrontListResponseSchema(InboxSchema)
+    )
+    return response._results
+  }
+
+  /**
+   * Find inbox by name
+   */
+  async findInboxByName(name: string): Promise<string | null> {
+    const inboxes = await this.listInboxes()
+    const inbox = inboxes.find(i => i.name.toLowerCase() === name.toLowerCase())
+    return inbox?.id || null
   }
 
   /**
