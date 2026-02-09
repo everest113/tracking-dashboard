@@ -48,7 +48,7 @@ export const FrontMessageSchema = z.object({
     email: z.string().optional(),
     name: z.string().optional(),
     username: z.string().optional(),
-  }).optional(),
+  }).nullable(),  // System/automated messages can have null author
   recipients: z.array(z.object({
     handle: z.string(),
     name: z.string().optional(),
