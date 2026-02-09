@@ -5,7 +5,7 @@ import ShipmentTable from '@/components/ShipmentTable'
 import LastSyncDisplay from '@/components/LastSyncDisplay'
 import ManualTrackingUpdate from '@/components/ManualTrackingUpdate'
 import BackfillTrackers from '@/components/BackfillTrackers'
-import ScanFrontButton from '@/components/ScanFrontButton'
+import SyncDialog from '@/components/SyncDialog'
 
 interface Shipment {
   id: number
@@ -59,7 +59,7 @@ export default function Home() {
             <div className="flex flex-col items-end gap-3">
               <LastSyncDisplay />
               <div className="flex gap-2">
-                <ScanFrontButton onSuccess={handleRefresh} />
+                <SyncDialog onSuccess={handleRefresh} />
                 <BackfillTrackers onSuccess={handleRefresh} />
                 <ManualTrackingUpdate onSuccess={handleRefresh} />
               </div>
