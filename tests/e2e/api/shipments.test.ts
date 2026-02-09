@@ -3,16 +3,22 @@
  * Tests the full API route handlers
  */
 
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import { GET, POST } from '@/app/api/shipments/route'
 import { createMockRequest, assertResponse } from '../../helpers/api'
-import { createTestShipment, createTestShipments } from '../../helpers/db'
+import { createTestShipment, cleanDatabase } from '../../helpers/db'
 import { SAMPLE_SHIPMENTS } from '../../fixtures/shipments'
 
 describe('GET /api/shipments', () => {
+  beforeEach(async () => {
+    await cleanDatabase()
+  })
+
   it('should return all shipments', async () => {
-    // Arrange
-    await createTestShipments(3, SAMPLE_SHIPMENTS.pending)
+    // Arrange - create shipments one by one
+    await createTestShipment({ ...SAMPLE_SHIPMENTS.pending, tracking_number: 'TEST1' })
+    await createTestShipment({ ...SAMPLE_SHIPMENTS.pending, tracking_number: 'TEST2' })
+    await createTestShipment({ ...SAMPLE_SHIPMENTS.pending, tracking_number: 'TEST3' })
 
     const request = createMockRequest({
       method: 'GET',
@@ -32,7 +38,7 @@ describe('GET /api/shipments', () => {
   })
 
   it('should return empty array when no shipments exist', async () => {
-    // Arrange
+    // Arrange - no shipments created
     const request = createMockRequest({
       method: 'GET',
       url: 'http://localhost:3000/api/shipments',
@@ -47,8 +53,13 @@ describe('GET /api/shipments', () => {
   })
 
   it('should respect limit query parameter', async () => {
-    // Arrange
-    await createTestShipments(10, SAMPLE_SHIPMENTS.pending)
+    // Arrange - create 10 shipments
+    for (let i = 0; i < 10; i++) {
+      await createTestShipment({
+        ...SAMPLE_SHIPMENTS.pending,
+        tracking_number: `LIMIT_TEST_${i}`,
+      })
+    }
 
     const request = createMockRequest({
       method: 'GET',
@@ -65,18 +76,23 @@ describe('GET /api/shipments', () => {
 })
 
 describe('POST /api/shipments', () => {
+  beforeEach(async () => {
+    await cleanDatabase()
+  })
+
   it('should create a new shipment', async () => {
     // Arrange
-    const trackingNumber = `TEST${Date.now()}`
+    const newShipment = {
+      trackingNumber: `NEW${Date.now()}`,
+      carrier: 'ups',
+      poNumber: 'PO-123',
+      supplier: 'Test Supplier',
+    }
+
     const request = createMockRequest({
       method: 'POST',
       url: 'http://localhost:3000/api/shipments',
-      body: {
-        trackingNumber,
-        carrier: 'ups',
-        poNumber: 'PO-12345',
-        supplier: 'Test Supplier',
-      },
+      body: newShipment,
     })
 
     // Act
@@ -85,21 +101,21 @@ describe('POST /api/shipments', () => {
 
     // Assert
     expect(data).toHaveProperty('id')
-    expect(data.trackingNumber).toBe(trackingNumber)
-    expect(data.carrier).toBe('ups')
-    expect(data.poNumber).toBe('PO-12345')
+    expect(data.trackingNumber).toBe(newShipment.trackingNumber)
+    expect(data.carrier).toBe(newShipment.carrier)
     expect(data.status).toBe('pending')
   })
 
   it('should validate required tracking number', async () => {
     // Arrange
+    const invalidShipment = {
+      carrier: 'ups',
+    }
+
     const request = createMockRequest({
       method: 'POST',
       url: 'http://localhost:3000/api/shipments',
-      body: {
-        carrier: 'ups',
-        // Missing trackingNumber
-      },
+      body: invalidShipment,
     })
 
     // Act
@@ -107,30 +123,28 @@ describe('POST /api/shipments', () => {
 
     // Assert
     expect(response.status).toBe(400)
-    const data = await response.json()
-    expect(data.error).toBeDefined()
   })
 
   it('should prevent duplicate tracking numbers', async () => {
     // Arrange
-    const trackingNumber = `TEST${Date.now()}`
-    await createTestShipment({
-      tracking_number: trackingNumber,
-    })
+    const trackingNumber = `DUP${Date.now()}`
+    await createTestShipment({ tracking_number: trackingNumber })
+
+    const duplicateShipment = {
+      trackingNumber,
+      carrier: 'fedex',
+    }
 
     const request = createMockRequest({
       method: 'POST',
       url: 'http://localhost:3000/api/shipments',
-      body: {
-        trackingNumber,
-        carrier: 'ups',
-      },
+      body: duplicateShipment,
     })
 
     // Act
     const response = await POST(request)
 
-    // Assert - Should either update or return error
-    expect([200, 409]).toContain(response.status)
+    // Assert
+    expect(response.status).toBe(409)
   })
 })

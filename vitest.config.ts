@@ -19,8 +19,13 @@ export default defineConfig({
         '**/types.ts',
       ],
     },
-    // Run tests sequentially by default (safer for DB tests)
-    threads: false,
+    // Run tests in single thread to avoid database race conditions
+    pool: 'forks',
+    poolOptions: {
+      forks: {
+        singleFork: true,
+      },
+    },
     // Timeout for async tests
     testTimeout: 30000,
   },
