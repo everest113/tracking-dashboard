@@ -1,12 +1,11 @@
-// Prisma schema for PlanetScale (MySQL)
+// Prisma schema for Vercel Postgres (PostgreSQL via Neon)
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "mysql"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
-  relationMode = "prisma" // Required for PlanetScale
 }
 
 model Shipment {
@@ -17,12 +16,12 @@ model Shipment {
   status             String    @default("pending") @db.VarChar(50)
   origin             String?   @db.Text
   destination        String?   @db.Text
-  shippedDate        DateTime? @map("shipped_date") @db.DateTime
-  estimatedDelivery  DateTime? @map("estimated_delivery") @db.DateTime
-  deliveredDate      DateTime? @map("delivered_date") @db.DateTime
-  lastChecked        DateTime? @map("last_checked") @db.DateTime
-  createdAt          DateTime  @default(now()) @map("created_at") @db.DateTime
-  updatedAt          DateTime  @updatedAt @map("updated_at") @db.DateTime
+  shippedDate        DateTime? @map("shipped_date")
+  estimatedDelivery  DateTime? @map("estimated_delivery")
+  deliveredDate      DateTime? @map("delivered_date")
+  lastChecked        DateTime? @map("last_checked")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
   
   trackingEvents     TrackingEvent[]
 
@@ -37,10 +36,10 @@ model TrackingEvent {
   status     String?  @db.VarChar(50)
   location   String?  @db.Text
   message    String?  @db.Text
-  eventTime  DateTime? @map("event_time") @db.DateTime
-  createdAt  DateTime @default(now()) @map("created_at") @db.DateTime
+  eventTime  DateTime? @map("event_time")
+  createdAt  DateTime @default(now()) @map("created_at")
   
-  shipment   Shipment @relation(fields: [shipmentId], references: [id])
+  shipment   Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
 
   @@index([shipmentId], map: "idx_shipment_id")
   @@map("tracking_events")
