@@ -1,4 +1,3 @@
-// Prisma schema for Vercel Postgres (PostgreSQL via Neon)
 generator client {
   provider = "prisma-client-js"
 }
@@ -8,72 +7,66 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model Shipment {
-  id                 Int       @id @default(autoincrement())
-  poNumber           String?   @map("po_number") @db.VarChar(255)
-  trackingNumber     String    @unique @map("tracking_number") @db.VarChar(255)
-  carrier            String?   @db.VarChar(100)
-  supplier           String?   @db.VarChar(255)
-  status             String    @default("pending") @db.VarChar(50)
-  origin             String?   @db.Text
-  destination        String?   @db.Text
-  shippedDate        DateTime? @map("shipped_date")
-  estimatedDelivery  DateTime? @map("estimated_delivery")
-  deliveredDate      DateTime? @map("delivered_date")
-  lastChecked        DateTime? @map("last_checked")
-  frontConversationId String?  @map("front_conversation_id") @db.VarChar(255)
-  createdAt          DateTime  @default(now()) @map("created_at")
-  updatedAt          DateTime  @updatedAt @map("updated_at")
-  
-  trackingEvents     TrackingEvent[]
-
-  @@index([poNumber], map: "idx_po_number")
-  @@index([status], map: "idx_status")
-  @@index([frontConversationId], map: "idx_front_conversation")
-  @@map("shipments")
-}
-
-model TrackingEvent {
-  id         Int      @id @default(autoincrement())
-  shipmentId Int      @map("shipment_id")
-  status     String?  @db.VarChar(50)
-  location   String?  @db.Text
-  message    String?  @db.Text
-  eventTime  DateTime? @map("event_time")
-  createdAt  DateTime @default(now()) @map("created_at")
-  
-  shipment   Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
-
-  @@index([shipmentId], map: "idx_shipment_id")
-  @@map("tracking_events")
-}
-
-model ScannedConversation {
+model scanned_conversations {
   id              Int      @id @default(autoincrement())
-  conversationId  String   @unique @map("conversation_id") @db.VarChar(255)
-  subject         String?  @db.Text
-  shipmentsFound  Int      @default(0) @map("shipments_found")
-  scannedAt       DateTime @default(now()) @map("scanned_at")
-  
-  @@index([conversationId], map: "idx_conversation_id")
-  @@map("scanned_conversations")
+  conversation_id String   @unique @db.VarChar(255)
+  subject         String?
+  shipments_found Int      @default(0)
+  scanned_at      DateTime @default(now())
+
+  @@index([conversation_id], map: "idx_conversation_id")
 }
 
-model SyncHistory {
-  id                          Int      @id @default(autoincrement())
-  conversationsProcessed      Int      @default(0) @map("conversations_processed")
-  conversationsAlreadyScanned Int      @default(0) @map("conversations_already_scanned")
-  shipmentsAdded              Int      @default(0) @map("shipments_added")
-  shipmentsSkipped            Int      @default(0) @map("shipments_skipped")
-  conversationsWithNoTracking Int      @default(0) @map("conversations_with_no_tracking")
-  batchSize                   Int      @default(10) @map("batch_size")
-  limit                       Int      @default(100)
-  durationMs                  Int?     @map("duration_ms")
-  errors                      String[] @default([])
-  status                      String   @default("success") @db.VarChar(50)
-  startedAt                   DateTime @default(now()) @map("started_at")
-  completedAt                 DateTime? @map("completed_at")
-  
-  @@index([startedAt], map: "idx_started_at")
-  @@map("sync_history")
+model shipments {
+  id                    Int               @id @default(autoincrement())
+  po_number             String?           @db.VarChar(255)
+  tracking_number       String            @unique @db.VarChar(255)
+  carrier               String?           @db.VarChar(100)
+  status                String            @default("pending") @db.VarChar(50)
+  origin                String?
+  destination           String?
+  shipped_date          DateTime?
+  estimated_delivery    DateTime?
+  delivered_date        DateTime?
+  last_checked          DateTime?
+  created_at            DateTime          @default(now())
+  updated_at            DateTime
+  supplier              String?           @db.VarChar(255)
+  front_conversation_id String?           @db.VarChar(255)
+  tracking_events       tracking_events[]
+
+  @@index([front_conversation_id], map: "idx_front_conversation")
+  @@index([po_number], map: "idx_po_number")
+  @@index([status], map: "idx_status")
+}
+
+model sync_history {
+  id                             Int       @id @default(autoincrement())
+  conversations_processed        Int       @default(0)
+  conversations_already_scanned  Int       @default(0)
+  shipments_added                Int       @default(0)
+  shipments_skipped              Int       @default(0)
+  conversations_with_no_tracking Int       @default(0)
+  batch_size                     Int       @default(10)
+  limit                          Int       @default(100)
+  duration_ms                    Int?
+  errors                         String[]  @default([])
+  status                         String    @default("success") @db.VarChar(50)
+  started_at                     DateTime  @default(now())
+  completed_at                   DateTime?
+
+  @@index([started_at], map: "idx_started_at")
+}
+
+model tracking_events {
+  id          Int       @id @default(autoincrement())
+  shipment_id Int
+  status      String?   @db.VarChar(50)
+  location    String?
+  message     String?
+  event_time  DateTime?
+  created_at  DateTime  @default(now())
+  shipments   shipments @relation(fields: [shipment_id], references: [id], onDelete: Cascade)
+
+  @@index([shipment_id], map: "idx_shipment_id")
 }
