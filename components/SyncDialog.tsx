@@ -1,0 +1,323 @@
+'use client'
+
+import { useState, useEffect } from 'react'
+import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog'
+import { toast } from 'sonner'
+import { Loader2, RefreshCw, CheckCircle2, XCircle, AlertCircle } from 'lucide-react'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import ProgressStream, { ProgressEvent } from './ProgressStream'
+
+type ScanResult = {
+  success: boolean
+  summary: {
+    conversationsProcessed: number
+    conversationsAlreadyScanned: number
+    shipmentsAdded: number
+    shipmentsSkipped: number
+    conversationsWithNoTracking: number
+    batchSize: number
+  }
+  errors?: string[]
+}
+
+type SyncStatus = 'idle' | 'running' | 'success' | 'error'
+
+export default function SyncDialog({ onSuccess }: { onSuccess: () => void }) {
+  const [isOpen, setIsOpen] = useState(false)
+  const [status, setStatus] = useState<SyncStatus>('idle')
+  const [result, setResult] = useState<ScanResult | null>(null)
+  
+  // Initialize with 3 days ago as fallback
+  const threeDaysAgo = new Date()
+  threeDaysAgo.setDate(threeDaysAgo.getDate() - 3)
+  const fallbackDate = threeDaysAgo.toISOString().split('T')[0]
+  
+  const [syncDate, setSyncDate] = useState(fallbackDate)
+  const [startTime, setStartTime] = useState<number | null>(null)
+  const [progressEvents, setProgressEvents] = useState<ProgressEvent[]>([])
+
+  // Fetch last sync date on component mount
+  useEffect(() => {
+    const fetchLastSync = async () => {
+      try {
+        const response = await fetch('/api/sync-history?limit=1')
+        const data = await response.json()
+        
+        if (data.success && data.lastSync) {
+          // Set default to the time of the last sync (not after, but from)
+          // This ensures we catch anything that happened during or after the last sync
+          const lastSyncDate = new Date(data.lastSync.startedAt)
+          const defaultDate = lastSyncDate.toISOString().split('T')[0]
+          setSyncDate(defaultDate)
+        }
+      } catch (error) {
+        console.error('Failed to fetch last sync date:', error)
+        // Keep the fallback date (3 days ago) if fetch fails
+      }
+    }
+
+    fetchLastSync()
+  }, [])
+
+  const addProgressEvent = (type: ProgressEvent['type'], message: string) => {
+    setProgressEvents(prev => [...prev, { type, message, timestamp: Date.now() }])
+  }
+
+  const handleSync = async () => {
+    setStatus('running')
+    setStartTime(Date.now())
+    setResult(null)
+    setProgressEvents([])
+
+    const formattedDate = new Date(syncDate).toLocaleDateString()
+    addProgressEvent('processing', 'Initializing sync...')
+    addProgressEvent('processing', `Connecting to Front inbox...`)
+    addProgressEvent('processing', `Fetching conversations from ${formattedDate}`)
+
+    try {
+      // Call API with date parameter
+      const response = await fetch('/api/front/scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ after: syncDate }),
+      })
+
+      const data: ScanResult = await response.json()
+
+      if (!response.ok) {
+        addProgressEvent('error', `Sync failed: ${(data as any).error}`)
+        setStatus('error')
+        toast.error('Sync failed', {
+          description: (data as any).error || 'An error occurred',
+        })
+        return
+      }
+
+      setResult(data)
+      
+      const { summary } = data
+
+      // Add final progress events based on actual results
+      if (summary.conversationsProcessed > 0) {
+        addProgressEvent('complete', `✓ Processed ${summary.conversationsProcessed} conversations`)
+      }
+      if (summary.conversationsAlreadyScanned > 0) {
+        addProgressEvent('skipped', `↻ ${summary.conversationsAlreadyScanned} already scanned (saved AI credits!)`)
+      }
+      if (summary.shipmentsAdded > 0) {
+        addProgressEvent('found', `📦 ${summary.shipmentsAdded} new shipments added!`)
+      }
+      if (summary.shipmentsSkipped > 0) {
+        addProgressEvent('skipped', `⊗ ${summary.shipmentsSkipped} duplicates skipped`)
+      }
+      if (summary.conversationsWithNoTracking > 0) {
+        addProgressEvent('skipped', `∅ ${summary.conversationsWithNoTracking} had no tracking info`)
+      }
+      if (data.errors && data.errors.length > 0) {
+        addProgressEvent('error', `⚠ ${data.errors.length} errors occurred`)
+      }
+
+      addProgressEvent('complete', '✓ Sync complete!')
+
+      setStatus('success')
+
+      if (summary.shipmentsAdded > 0) {
+        toast.success(`Found ${summary.shipmentsAdded} new shipment(s)`, {
+          description: `Processed ${summary.conversationsProcessed} conversations`,
+        })
+        onSuccess()
+      } else {
+        toast.info('No new shipments found', {
+          description: `Scanned ${summary.conversationsProcessed} conversations`,
+        })
+      }
+    } catch (error: any) {
+      console.error('Sync error:', error)
+      addProgressEvent('error', `✗ Error: ${error.message}`)
+      setStatus('error')
+      toast.error('An unexpected error occurred', {
+        description: error.message || 'Please try again later.',
+      })
+    }
+  }
+
+  const resetDialog = () => {
+    setStatus('idle')
+    setResult(null)
+    setStartTime(null)
+    setProgressEvents([])
+  }
+
+  const getStatusIcon = () => {
+    switch (status) {
+      case 'running':
+        return <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
+      case 'success':
+        return <CheckCircle2 className="h-5 w-5 text-green-500" />
+      case 'error':
+        return <XCircle className="h-5 w-5 text-red-500" />
+      default:
+        return <RefreshCw className="h-5 w-5 text-muted-foreground" />
+    }
+  }
+
+  const getDuration = () => {
+    if (!startTime) return null
+    const duration = Date.now() - startTime
+    return (duration / 1000).toFixed(1) + 's'
+  }
+
+  return (
+    <Dialog open={isOpen} onOpenChange={(open) => {
+      setIsOpen(open)
+      if (!open) resetDialog()
+    }}>
+      <DialogTrigger asChild>
+        <Button variant="default">
+          <RefreshCw className="h-4 w-4" />
+          Sync Front Inbox
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-[600px]">
+        <DialogHeader>
+          <div className="flex items-center gap-2">
+            {getStatusIcon()}
+            <DialogTitle>
+              {status === 'idle' && 'Sync Front Inbox'}
+              {status === 'running' && 'Syncing...'}
+              {status === 'success' && 'Sync Complete'}
+              {status === 'error' && 'Sync Failed'}
+            </DialogTitle>
+          </div>
+          <DialogDescription>
+            {status === 'idle' && 'Extract tracking numbers from Front conversations'}
+            {status === 'running' && 'Processing conversations and extracting tracking information...'}
+            {status === 'success' && `Completed in ${getDuration()}`}
+            {status === 'error' && 'An error occurred during sync'}
+          </DialogDescription>
+        </DialogHeader>
+
+        {status === 'idle' && (
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="syncDate">Sync conversations from</Label>
+              <Input
+                id="syncDate"
+                type="date"
+                value={syncDate}
+                onChange={(e) => setSyncDate(e.target.value)}
+                max={new Date().toISOString().split('T')[0]}
+              />
+              <p className="text-xs text-muted-foreground">
+                All conversations created on or after this date will be scanned
+              </p>
+            </div>
+          </div>
+        )}
+
+        {status === 'running' && (
+          <div className="space-y-4 py-2">
+            <ProgressStream events={progressEvents} />
+            <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              <span>Processing...</span>
+            </div>
+          </div>
+        )}
+
+        {(status === 'success' || status === 'error') && result && (
+          <div className="space-y-4 py-4">
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              <div>
+                <p className="text-muted-foreground">Conversations Scanned</p>
+                <p className="text-2xl font-bold">{result.summary.conversationsProcessed}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">New Shipments</p>
+                <p className="text-2xl font-bold text-green-600">{result.summary.shipmentsAdded}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Already Scanned</p>
+                <p className="text-lg">{result.summary.conversationsAlreadyScanned}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Duplicates Skipped</p>
+                <p className="text-lg">{result.summary.shipmentsSkipped}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">No Tracking Info</p>
+                <p className="text-lg">{result.summary.conversationsWithNoTracking}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Duration</p>
+                <p className="text-lg">{getDuration()}</p>
+              </div>
+            </div>
+
+            {result.errors && result.errors.length > 0 && (
+              <div className="rounded-md bg-yellow-50 p-4">
+                <div className="flex">
+                  <AlertCircle className="h-5 w-5 text-yellow-400" />
+                  <div className="ml-3">
+                    <h3 className="text-sm font-medium text-yellow-800">
+                      {result.errors.length} error(s) occurred
+                    </h3>
+                    <div className="mt-2 text-sm text-yellow-700 max-h-32 overflow-y-auto">
+                      <ul className="list-disc pl-5 space-y-1">
+                        {result.errors.slice(0, 5).map((error, i) => (
+                          <li key={i}>{error}</li>
+                        ))}
+                        {result.errors.length > 5 && (
+                          <li>... and {result.errors.length - 5} more</li>
+                        )}
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        <DialogFooter>
+          {status === 'idle' && (
+            <>
+              <Button variant="outline" onClick={() => setIsOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={handleSync}>
+                Start Sync
+              </Button>
+            </>
+          )}
+          {status === 'running' && (
+            <Button disabled>
+              <Loader2 className="animate-spin" />
+              Syncing...
+            </Button>
+          )}
+          {(status === 'success' || status === 'error') && (
+            <>
+              <Button variant="outline" onClick={resetDialog}>
+                Sync Again
+              </Button>
+              <Button onClick={() => setIsOpen(false)}>
+                Close
+              </Button>
+            </>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}

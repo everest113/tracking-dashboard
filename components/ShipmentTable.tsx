@@ -1,12 +1,40 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import AddShipmentForm from './AddShipmentForm'
+import SyncDialog from './SyncDialog'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
+import { Badge } from '@/components/ui/badge'
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card'
 
 type Shipment = {
   id: number
   poNumber: string
   trackingNumber: string
   carrier: string | null
+  supplier: string | null
   status: string
   shippedDate: string | null
   estimatedDelivery: string | null
@@ -15,18 +43,19 @@ type Shipment = {
 }
 
 const STATUS_COLORS: Record<string, string> = {
-  pending: 'bg-gray-100 text-gray-800',
-  in_transit: 'bg-blue-100 text-blue-800',
-  out_for_delivery: 'bg-purple-100 text-purple-800',
-  delivered: 'bg-green-100 text-green-800',
-  exception: 'bg-red-100 text-red-800',
-  failed_attempt: 'bg-yellow-100 text-yellow-800',
+  pending: 'bg-gray-100 text-gray-800 hover:bg-gray-100',
+  in_transit: 'bg-blue-100 text-blue-800 hover:bg-blue-100',
+  out_for_delivery: 'bg-purple-100 text-purple-800 hover:bg-purple-100',
+  delivered: 'bg-green-100 text-green-800 hover:bg-green-100',
+  exception: 'bg-red-100 text-red-800 hover:bg-red-100',
+  failed_attempt: 'bg-yellow-100 text-yellow-800 hover:bg-yellow-100',
 }
 
 const CARRIER_URLS: Record<string, (tracking: string) => string> = {
   ups: (tracking) => `https://www.ups.com/track?tracknum=${tracking}`,
   usps: (tracking) => `https://tools.usps.com/go/TrackConfirmAction?tLabels=${tracking}`,
   fedex: (tracking) => `https://www.fedex.com/fedextrack/?trknbr=${tracking}`,
+  dhl: (tracking) => `https://www.dhl.com/en/express/tracking.html?AWB=${tracking}`,
 }
 
 export default function ShipmentTable() {
@@ -54,8 +83,9 @@ export default function ShipmentTable() {
   const filteredShipments = shipments.filter((s) => {
     const matchesFilter = filter === 'all' || s.status === filter
     const matchesSearch =
-      s.poNumber.toLowerCase().includes(search.toLowerCase()) ||
-      s.trackingNumber.toLowerCase().includes(search.toLowerCase())
+      (s.poNumber && s.poNumber.toLowerCase().includes(search.toLowerCase())) ||
+      s.trackingNumber.toLowerCase().includes(search.toLowerCase()) ||
+      (s.supplier && s.supplier.toLowerCase().includes(search.toLowerCase()))
     return matchesFilter && matchesSearch
   })
 
@@ -71,130 +101,141 @@ export default function ShipmentTable() {
   }
 
   if (loading) {
-    return <div className="text-center py-8">Loading shipments...</div>
+    return (
+      <Card>
+        <CardContent className="flex items-center justify-center py-8">
+          <p className="text-muted-foreground">Loading shipments...</p>
+        </CardContent>
+      </Card>
+    )
   }
 
   return (
     <div className="space-y-4">
-      {/* Filters */}
-      <div className="flex gap-4 flex-wrap">
-        <input
-          type="text"
-          placeholder="Search PO# or Tracking#..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="px-4 py-2 border rounded-lg flex-1 min-w-[200px]"
-        />
-        <select
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          className="px-4 py-2 border rounded-lg"
-        >
-          <option value="all">All Status</option>
-          <option value="pending">Pending</option>
-          <option value="in_transit">In Transit</option>
-          <option value="out_for_delivery">Out for Delivery</option>
-          <option value="delivered">Delivered</option>
-          <option value="exception">Exception</option>
-        </select>
-        <button
-          onClick={fetchShipments}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-        >
-          Refresh
-        </button>
-      </div>
+      {/* Filters Card */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Filter Shipments</CardTitle>
+          <CardDescription>
+            Search by PO number, tracking number, or supplier
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex gap-4 flex-wrap">
+            <Input
+              type="text"
+              placeholder="Search PO#, Tracking#, or Supplier..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="flex-1 min-w-[200px]"
+            />
+            <Select value={filter} onValueChange={setFilter}>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="Filter by status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Status</SelectItem>
+                <SelectItem value="pending">Pending</SelectItem>
+                <SelectItem value="in_transit">In Transit</SelectItem>
+                <SelectItem value="out_for_delivery">Out for Delivery</SelectItem>
+                <SelectItem value="delivered">Delivered</SelectItem>
+                <SelectItem value="exception">Exception</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button onClick={fetchShipments} variant="outline">
+              Refresh
+            </Button>
+            <SyncDialog onSuccess={fetchShipments} />
+            <AddShipmentForm onSuccess={fetchShipments} />
+          </div>
+        </CardContent>
+      </Card>
 
-      {/* Table */}
-      <div className="overflow-x-auto border rounded-lg">
-        <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                PO Number
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Tracking Number
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Carrier
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Status
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Shipped
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Est. Delivery
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Delivered
-              </th>
-            </tr>
-          </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
-            {filteredShipments.length === 0 ? (
-              <tr>
-                <td colSpan={7} className="px-6 py-4 text-center text-gray-500">
-                  No shipments found
-                </td>
-              </tr>
-            ) : (
-              filteredShipments.map((shipment) => {
-                const trackingUrl = getCarrierUrl(shipment.carrier, shipment.trackingNumber)
-                return (
-                  <tr key={shipment.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                      {shipment.poNumber}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm">
-                      {trackingUrl ? (
-                        <a
-                          href={trackingUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-blue-600 hover:underline"
-                        >
-                          {shipment.trackingNumber}
-                        </a>
-                      ) : (
-                        shipment.trackingNumber
-                      )}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 uppercase">
-                      {shipment.carrier || '-'}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span
-                        className={`px-2 py-1 text-xs font-semibold rounded-full ${
-                          STATUS_COLORS[shipment.status] || STATUS_COLORS.pending
-                        }`}
-                      >
-                        {shipment.status.replace('_', ' ')}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {formatDate(shipment.shippedDate)}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {formatDate(shipment.estimatedDelivery)}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {formatDate(shipment.deliveredDate)}
-                    </td>
-                  </tr>
-                )
-              })
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Stats */}
-      <div className="text-sm text-gray-500">
-        Showing {filteredShipments.length} of {shipments.length} shipments
-      </div>
+      {/* Shipments Table Card */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Shipments</CardTitle>
+          <CardDescription>
+            Showing {filteredShipments.length} of {shipments.length} shipments
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="rounded-md border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>PO Number</TableHead>
+                  <TableHead>Tracking Number</TableHead>
+                  <TableHead>Carrier</TableHead>
+                  <TableHead>Supplier</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Shipped</TableHead>
+                  <TableHead>Est. Delivery</TableHead>
+                  <TableHead>Delivered</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredShipments.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={8} className="text-center text-muted-foreground h-24">
+                      {search || filter !== 'all' 
+                        ? 'No shipments match your filters'
+                        : 'No shipments found. Click "Sync Front Inbox" or "Add Shipment" to get started.'
+                      }
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  filteredShipments.map((shipment) => {
+                    const trackingUrl = getCarrierUrl(shipment.carrier, shipment.trackingNumber)
+                    return (
+                      <TableRow key={shipment.id}>
+                        <TableCell className="font-medium">{shipment.poNumber}</TableCell>
+                        <TableCell>
+                          {trackingUrl ? (
+                            <a
+                              href={trackingUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-blue-600 hover:underline"
+                            >
+                              {shipment.trackingNumber}
+                            </a>
+                          ) : (
+                            shipment.trackingNumber
+                          )}
+                        </TableCell>
+                        <TableCell className="uppercase">
+                          {shipment.carrier || '-'}
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {shipment.supplier || '-'}
+                        </TableCell>
+                        <TableCell>
+                          <Badge 
+                            variant="secondary"
+                            className={STATUS_COLORS[shipment.status] || STATUS_COLORS.pending}
+                          >
+                            {shipment.status.replace('_', ' ')}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {formatDate(shipment.shippedDate)}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {formatDate(shipment.estimatedDelivery)}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {formatDate(shipment.deliveredDate)}
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   )
 }
