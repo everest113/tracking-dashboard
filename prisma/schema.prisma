@@ -33,11 +33,13 @@ model shipments {
   updated_at            DateTime
   supplier              String?           @db.VarChar(255)
   front_conversation_id String?           @db.VarChar(255)
+  ship24_tracker_id     String?           @unique @db.VarChar(255)
   tracking_events       tracking_events[]
 
   @@index([front_conversation_id], map: "idx_front_conversation")
   @@index([po_number], map: "idx_po_number")
   @@index([status], map: "idx_status")
+  @@index([ship24_tracker_id], map: "idx_ship24_tracker")
 }
 
 model sync_history {

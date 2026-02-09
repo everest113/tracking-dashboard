@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import AddShipmentForm from './AddShipmentForm'
 import SyncDialog from './SyncDialog'
 import { Button } from '@/components/ui/button'
@@ -28,6 +28,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
+import { ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react'
 
 type Shipment = {
   id: number
@@ -41,6 +42,9 @@ type Shipment = {
   deliveredDate: string | null
   lastChecked: string | null
 }
+
+type SortField = 'shippedDate' | 'estimatedDelivery' | 'deliveredDate'
+type SortDirection = 'asc' | 'desc'
 
 const STATUS_COLORS: Record<string, string> = {
   pending: 'bg-gray-100 text-gray-800 hover:bg-gray-100',
@@ -61,8 +65,11 @@ const CARRIER_URLS: Record<string, (tracking: string) => string> = {
 export default function ShipmentTable() {
   const [shipments, setShipments] = useState<Shipment[]>([])
   const [loading, setLoading] = useState(true)
-  const [filter, setFilter] = useState('all')
+  const [statusFilter, setStatusFilter] = useState('all')
+  const [supplierFilter, setSupplierFilter] = useState('all')
   const [search, setSearch] = useState('')
+  const [sortField, setSortField] = useState<SortField>('shippedDate')
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
 
   useEffect(() => {
     fetchShipments()
@@ -80,14 +87,68 @@ export default function ShipmentTable() {
     }
   }
 
-  const filteredShipments = shipments.filter((s) => {
-    const matchesFilter = filter === 'all' || s.status === filter
-    const matchesSearch =
-      (s.poNumber && s.poNumber.toLowerCase().includes(search.toLowerCase())) ||
-      s.trackingNumber.toLowerCase().includes(search.toLowerCase()) ||
-      (s.supplier && s.supplier.toLowerCase().includes(search.toLowerCase()))
-    return matchesFilter && matchesSearch
-  })
+  // Get unique suppliers for filter dropdown
+  const uniqueSuppliers = useMemo(() => {
+    const suppliers = shipments
+      .map((s) => s.supplier)
+      .filter((s): s is string => s !== null && s !== '')
+    return Array.from(new Set(suppliers)).sort()
+  }, [shipments])
+
+  // Filter and sort shipments
+  const filteredAndSortedShipments = useMemo(() => {
+    let filtered = shipments.filter((s) => {
+      const matchesStatus = statusFilter === 'all' || s.status === statusFilter
+      const matchesSupplier = supplierFilter === 'all' || s.supplier === supplierFilter
+      const matchesSearch =
+        (s.poNumber && s.poNumber.toLowerCase().includes(search.toLowerCase())) ||
+        s.trackingNumber.toLowerCase().includes(search.toLowerCase()) ||
+        (s.supplier && s.supplier.toLowerCase().includes(search.toLowerCase()))
+      return matchesStatus && matchesSupplier && matchesSearch
+    })
+
+    // Sort by selected field
+    filtered.sort((a, b) => {
+      const aValue = a[sortField]
+      const bValue = b[sortField]
+
+      // Handle null values (push to end)
+      if (!aValue && !bValue) return 0
+      if (!aValue) return 1
+      if (!bValue) return -1
+
+      const aDate = new Date(aValue).getTime()
+      const bDate = new Date(bValue).getTime()
+
+      if (sortDirection === 'asc') {
+        return aDate - bDate
+      } else {
+        return bDate - aDate
+      }
+    })
+
+    return filtered
+  }, [shipments, statusFilter, supplierFilter, search, sortField, sortDirection])
+
+  const toggleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortField(field)
+      setSortDirection('desc')
+    }
+  }
+
+  const getSortIcon = (field: SortField) => {
+    if (sortField !== field) {
+      return <ArrowUpDown className="ml-1 h-4 w-4 inline opacity-50" />
+    }
+    return sortDirection === 'asc' ? (
+      <ArrowUp className="ml-1 h-4 w-4 inline" />
+    ) : (
+      <ArrowDown className="ml-1 h-4 w-4 inline" />
+    )
+  }
 
   const getCarrierUrl = (carrier: string | null, tracking: string) => {
     if (!carrier) return null
@@ -98,6 +159,12 @@ export default function ShipmentTable() {
   const formatDate = (date: string | null) => {
     if (!date) return '-'
     return new Date(date).toLocaleDateString()
+  }
+
+  const clearFilters = () => {
+    setStatusFilter('all')
+    setSupplierFilter('all')
+    setSearch('')
   }
 
   if (loading) {
@@ -115,7 +182,7 @@ export default function ShipmentTable() {
       {/* Filters Card */}
       <Card>
         <CardHeader>
-          <CardTitle>Filter Shipments</CardTitle>
+          <CardTitle>Filter & Search</CardTitle>
           <CardDescription>
             Search by PO number, tracking number, or supplier
           </CardDescription>
@@ -129,7 +196,7 @@ export default function ShipmentTable() {
               onChange={(e) => setSearch(e.target.value)}
               className="flex-1 min-w-[200px]"
             />
-            <Select value={filter} onValueChange={setFilter}>
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
               <SelectTrigger className="w-[180px]">
                 <SelectValue placeholder="Filter by status" />
               </SelectTrigger>
@@ -142,6 +209,24 @@ export default function ShipmentTable() {
                 <SelectItem value="exception">Exception</SelectItem>
               </SelectContent>
             </Select>
+            <Select value={supplierFilter} onValueChange={setSupplierFilter}>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="Filter by supplier" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Suppliers</SelectItem>
+                {uniqueSuppliers.map((supplier) => (
+                  <SelectItem key={supplier} value={supplier}>
+                    {supplier}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {(statusFilter !== 'all' || supplierFilter !== 'all' || search) && (
+              <Button onClick={clearFilters} variant="outline">
+                Clear Filters
+              </Button>
+            )}
             <Button onClick={fetchShipments} variant="outline">
               Refresh
             </Button>
@@ -156,7 +241,8 @@ export default function ShipmentTable() {
         <CardHeader>
           <CardTitle>Shipments</CardTitle>
           <CardDescription>
-            Showing {filteredShipments.length} of {shipments.length} shipments
+            Showing {filteredAndSortedShipments.length} of {shipments.length} shipments
+            {sortField && ` • Sorted by ${sortField === 'shippedDate' ? 'Shipped Date' : sortField === 'estimatedDelivery' ? 'Est. Delivery' : 'Delivered Date'} (${sortDirection === 'desc' ? 'newest first' : 'oldest first'})`}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -169,23 +255,41 @@ export default function ShipmentTable() {
                   <TableHead>Carrier</TableHead>
                   <TableHead>Supplier</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead>Shipped</TableHead>
-                  <TableHead>Est. Delivery</TableHead>
-                  <TableHead>Delivered</TableHead>
+                  <TableHead 
+                    className="cursor-pointer hover:bg-muted/50"
+                    onClick={() => toggleSort('shippedDate')}
+                  >
+                    Shipped
+                    {getSortIcon('shippedDate')}
+                  </TableHead>
+                  <TableHead 
+                    className="cursor-pointer hover:bg-muted/50"
+                    onClick={() => toggleSort('estimatedDelivery')}
+                  >
+                    Est. Delivery
+                    {getSortIcon('estimatedDelivery')}
+                  </TableHead>
+                  <TableHead 
+                    className="cursor-pointer hover:bg-muted/50"
+                    onClick={() => toggleSort('deliveredDate')}
+                  >
+                    Delivered
+                    {getSortIcon('deliveredDate')}
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredShipments.length === 0 ? (
+                {filteredAndSortedShipments.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={8} className="text-center text-muted-foreground h-24">
-                      {search || filter !== 'all' 
+                      {search || statusFilter !== 'all' || supplierFilter !== 'all'
                         ? 'No shipments match your filters'
                         : 'No shipments found. Click "Sync Front Inbox" or "Add Shipment" to get started.'
                       }
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredShipments.map((shipment) => {
+                  filteredAndSortedShipments.map((shipment) => {
                     const trackingUrl = getCarrierUrl(shipment.carrier, shipment.trackingNumber)
                     return (
                       <TableRow key={shipment.id}>

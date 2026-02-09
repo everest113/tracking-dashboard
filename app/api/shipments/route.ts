@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { shipmentSchema } from '@/lib/validations'
+import { registerTracker } from '@/lib/ship24-client'
 import { ZodError } from 'zod'
 
 export async function GET() {
@@ -61,6 +62,22 @@ export async function POST(request: Request) {
 
     if (validatedData.estimatedDelivery) {
       shipmentData.estimatedDelivery = new Date(validatedData.estimatedDelivery)
+    }
+
+    // Register tracker with Ship24 (non-blocking)
+    try {
+      const registration = await registerTracker(
+        validatedData.trackingNumber,
+        validatedData.carrier,
+        validatedData.poNumber || undefined
+      )
+      
+      shipmentData.ship24_tracker_id = registration.trackerId
+      console.log(`✅ Registered tracker: ${registration.trackingNumber} → ${registration.trackerId}`)
+    } catch (trackerError: any) {
+      // Log but don't fail the shipment creation
+      console.warn(`⚠️  Failed to register tracker for ${validatedData.trackingNumber}:`, trackerError.message)
+      // Will be picked up by backfill endpoint later
     }
 
     const shipment = await prisma.shipment.create({

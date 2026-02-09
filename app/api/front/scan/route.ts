@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { frontClient } from '@/lib/front-client'
 import { extractTrackingInfo } from '@/lib/tracking-extractor'
+import { registerTracker } from '@/lib/ship24-client'
 import { prisma } from '@/lib/prisma'
 
 // Process conversations in parallel batches
@@ -124,17 +125,36 @@ async function processBatch(
               ? shipment.carrier
               : undefined
 
+            // Prepare shipment data
+            const shipmentData: any = {
+              poNumber,
+              trackingNumber: shipment.trackingNumber,
+              carrier,
+              supplier: supplierName,
+              status: 'pending',
+              frontConversationId: conversation.id,
+              shippedDate,
+            }
+
+            // Register tracker with Ship24 (non-blocking)
+            try {
+              const registration = await registerTracker(
+                shipment.trackingNumber,
+                carrier || null,
+                poNumber
+              )
+              
+              shipmentData.ship24_tracker_id = registration.trackerId
+              console.log(`✅ Registered tracker: ${registration.trackingNumber} → ${registration.trackerId}`)
+            } catch (trackerError: any) {
+              // Log but don't fail the shipment creation
+              console.warn(`⚠️  Failed to register tracker for ${shipment.trackingNumber}:`, trackerError.message)
+              // Will be picked up by backfill endpoint later
+            }
+
             // Create shipment
             await prisma.shipment.create({
-              data: {
-                poNumber,
-                trackingNumber: shipment.trackingNumber,
-                carrier,
-                supplier: supplierName,
-                status: 'pending',
-                frontConversationId: conversation.id,
-                shippedDate,
-              },
+              data: shipmentData,
             })
 
             console.log(`Created shipment ${shipment.trackingNumber} - Supplier: ${supplierName} - PO: ${poNumber || 'none'} - Shipped: ${shippedDate?.toISOString() || 'unknown'}`)
@@ -201,243 +221,185 @@ export async function POST(request: Request) {
     if (!process.env.OPENAI_API_KEY) {
       console.error('Missing OPENAI_API_KEY')
       return NextResponse.json(
-        { error: 'OpenAI API key not configured' },
+        { error: 'OpenAI API key not configured (required for tracking extraction)' },
         { status: 500 }
       )
     }
 
-    const suppliersInboxName = process.env.FRONT_SUPPLIERS_INBOX || 'Suppliers'
-
-    // Create sync history entry
-    const syncHistory = await prisma.syncHistory.create({
+    // Create sync history record
+    const syncRecord = await prisma.syncHistory.create({
       data: {
+        status: 'running',
         limit,
         batchSize,
-        status: 'running',
       },
     })
-    syncHistoryId = syncHistory.id
+    syncHistoryId = syncRecord.id
 
-    // 1. Get Suppliers inbox ID
-    console.log(`Fetching inbox: ${suppliersInboxName}`)
-    const inboxId = await frontClient.getInboxId(suppliersInboxName)
-    console.log('Inbox ID:', inboxId)
-    
-    if (!inboxId) {
+    // Fetch conversations from Front
+    console.log('Fetching conversations from Front...')
+    const conversations = await frontClient.listConversations({
+      limit,
+      after,
+    })
+
+    console.log(`Found ${conversations.length} total conversations`)
+
+    if (conversations.length === 0) {
+      const duration = Date.now() - startTime
+
       await prisma.syncHistory.update({
         where: { id: syncHistoryId },
         data: {
-          status: 'failed',
-          errors: [`${suppliersInboxName} inbox not found in Front`],
+          status: 'success',
           completedAt: new Date(),
-          durationMs: Date.now() - startTime,
+          durationMs: duration,
         },
       })
 
-      return NextResponse.json(
-        { error: `${suppliersInboxName} inbox not found in Front` },
-        { status: 404 }
-      )
+      return NextResponse.json({
+        success: true,
+        message: 'No conversations found',
+        conversationsProcessed: 0,
+        shipmentsAdded: 0,
+        durationMs: duration,
+      })
     }
 
-    // 2. Get conversations (filtered by date if provided)
-    console.log('Fetching conversations...')
-    const afterDate = after ? new Date(after) : undefined
-    const allConversations = await frontClient.getInboxConversations(inboxId, {
-      limit,
-      after: afterDate
-    })
-    console.log('Found conversations:', allConversations.length)
+    // Filter out already scanned conversations (unless force=true)
+    let toProcess = conversations
+    let alreadyScanned = 0
 
-    // 3. BULK CHECK: Query database once for all conversation IDs
-    if (!force && allConversations.length > 0) {
-      const conversationIds = allConversations.map(c => c.id)
-      
-      console.log('Checking which conversations are already scanned...')
-      const scannedConversations = await prisma.scannedConversation.findMany({
-        where: {
-          conversationId: {
-            in: conversationIds
-          }
-        },
-        select: {
-          conversationId: true
-        }
+    if (!force) {
+      const scannedIds = await prisma.scannedConversation.findMany({
+        select: { conversationId: true },
       })
-      
-      const scannedIds = new Set(scannedConversations.map(c => c.conversationId))
-      const alreadyScannedCount = scannedIds.size
-      
-      // Filter out already-scanned conversations
-      const conversations = allConversations.filter(c => !scannedIds.has(c.id))
-      
-      console.log(`Already scanned: ${alreadyScannedCount}, New to process: ${conversations.length}`)
-      
-      if (conversations.length === 0) {
-        // All conversations already scanned!
-        const summary = {
-          conversationsProcessed: allConversations.length,
-          conversationsAlreadyScanned: alreadyScannedCount,
-          shipmentsAdded: 0,
-          shipmentsSkipped: 0,
-          conversationsWithNoTracking: 0,
-          batchSize,
-        }
+      const scannedSet = new Set(scannedIds.map((s) => s.conversationId))
 
+      toProcess = conversations.filter((c) => !scannedSet.has(c.id))
+      alreadyScanned = conversations.length - toProcess.length
+
+      console.log(`Skipping ${alreadyScanned} already scanned conversations`)
+      console.log(`${toProcess.length} new conversations to process`)
+    } else {
+      console.log('Force mode: processing all conversations')
+    }
+
+    if (toProcess.length === 0) {
+      const duration = Date.now() - startTime
+
+      await prisma.syncHistory.update({
+        where: { id: syncHistoryId },
+        data: {
+          status: 'success',
+          conversationsProcessed: 0,
+          conversationsAlreadyScanned: alreadyScanned,
+          shipmentsAdded: 0,
+          completedAt: new Date(),
+          durationMs: duration,
+        },
+      })
+
+      return NextResponse.json({
+        success: true,
+        message: 'All conversations already scanned',
+        conversationsProcessed: 0,
+        conversationsAlreadyScanned: alreadyScanned,
+        shipmentsAdded: 0,
+        durationMs: duration,
+      })
+    }
+
+    // Process in parallel batches
+    const results = {
+      added: 0,
+      skipped: 0,
+      alreadyScanned,
+      noTracking: 0,
+      errors: [] as string[],
+    }
+
+    for (let i = 0; i < toProcess.length; i += batchSize) {
+      const batch = toProcess.slice(i, i + batchSize)
+      console.log(`\nProcessing batch ${Math.floor(i / batchSize) + 1} of ${Math.ceil(toProcess.length / batchSize)} (${batch.length} conversations)`)
+      
+      const batchResults = await processBatch(batch, force)
+      
+      results.added += batchResults.added
+      results.skipped += batchResults.skipped
+      results.noTracking += batchResults.noTracking
+      results.errors.push(...batchResults.errors)
+
+      console.log(`Batch complete: ${batchResults.added} added, ${batchResults.skipped} skipped, ${batchResults.noTracking} no tracking`)
+
+      // Small delay between batches
+      if (i + batchSize < toProcess.length) {
+        await new Promise((resolve) => setTimeout(resolve, 500))
+      }
+    }
+
+    const duration = Date.now() - startTime
+
+    // Update sync history with results
+    await prisma.syncHistory.update({
+      where: { id: syncHistoryId },
+      data: {
+        status: results.errors.length > 0 ? 'partial_success' : 'success',
+        conversationsProcessed: toProcess.length,
+        conversationsAlreadyScanned: alreadyScanned,
+        shipmentsAdded: results.added,
+        shipmentsSkipped: results.skipped,
+        conversationsWithNoTracking: results.noTracking,
+        errors: results.errors,
+        completedAt: new Date(),
+        durationMs: duration,
+      },
+    })
+
+    console.log('=== Scan Complete ===')
+    console.log(`Processed ${toProcess.length} conversations in ${duration}ms`)
+    console.log(`Shipments added: ${results.added}`)
+    console.log(`Shipments skipped (duplicates): ${results.skipped}`)
+    console.log(`Conversations with no tracking: ${results.noTracking}`)
+    console.log(`Errors: ${results.errors.length}`)
+
+    return NextResponse.json({
+      success: true,
+      conversationsProcessed: toProcess.length,
+      conversationsAlreadyScanned: alreadyScanned,
+      shipmentsAdded: results.added,
+      shipmentsSkipped: results.skipped,
+      conversationsWithNoTracking: results.noTracking,
+      errors: results.errors.slice(0, 10), // Limit error list in response
+      durationMs: duration,
+    })
+  } catch (error: any) {
+    console.error('=== FATAL ERROR ===')
+    console.error('Error:', error.message)
+    console.error('Stack:', error.stack)
+
+    // Update sync history with error
+    if (syncHistoryId) {
+      try {
         await prisma.syncHistory.update({
           where: { id: syncHistoryId },
           data: {
-            conversationsProcessed: summary.conversationsProcessed,
-            conversationsAlreadyScanned: summary.conversationsAlreadyScanned,
-            shipmentsAdded: 0,
-            shipmentsSkipped: 0,
-            conversationsWithNoTracking: 0,
-            errors: [],
-            status: 'success',
+            status: 'error',
+            errors: [error.message],
             completedAt: new Date(),
             durationMs: Date.now() - startTime,
           },
         })
-
-        console.log('=== Scan Complete (All Already Scanned) ===', summary)
-
-        return NextResponse.json({
-          success: true,
-          summary,
-        })
+      } catch (updateErr) {
+        console.error('Failed to update sync history:', updateErr)
       }
-
-      // 4. Process only new conversations in parallel batches
-      const totalResults = {
-        added: 0,
-        skipped: 0,
-        alreadyScanned: alreadyScannedCount,
-        noTracking: 0,
-        errors: [] as string[],
-      }
-
-      for (let i = 0; i < conversations.length; i += batchSize) {
-        const batch = conversations.slice(i, i + batchSize)
-        console.log(`Processing batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(conversations.length / batchSize)} (${batch.length} conversations)`)
-        
-        const batchResults = await processBatch(batch, force)
-        
-        totalResults.added += batchResults.added
-        totalResults.skipped += batchResults.skipped
-        totalResults.noTracking += batchResults.noTracking
-        totalResults.errors.push(...batchResults.errors)
-      }
-
-      const summary = {
-        conversationsProcessed: allConversations.length,
-        conversationsAlreadyScanned: totalResults.alreadyScanned,
-        shipmentsAdded: totalResults.added,
-        shipmentsSkipped: totalResults.skipped,
-        conversationsWithNoTracking: totalResults.noTracking,
-        batchSize,
-      }
-
-      // Update sync history with results
-      await prisma.syncHistory.update({
-        where: { id: syncHistoryId },
-        data: {
-          conversationsProcessed: summary.conversationsProcessed,
-          conversationsAlreadyScanned: summary.conversationsAlreadyScanned,
-          shipmentsAdded: summary.shipmentsAdded,
-          shipmentsSkipped: summary.shipmentsSkipped,
-          conversationsWithNoTracking: summary.conversationsWithNoTracking,
-          errors: totalResults.errors,
-          status: totalResults.errors.length > 0 ? 'partial' : 'success',
-          completedAt: new Date(),
-          durationMs: Date.now() - startTime,
-        },
-      })
-
-      console.log('=== Scan Complete ===', summary)
-
-      return NextResponse.json({
-        success: true,
-        summary,
-        errors: totalResults.errors.length > 0 ? totalResults.errors : undefined,
-      })
-    } else {
-      // Force mode or no conversations - process all
-      const totalResults = {
-        added: 0,
-        skipped: 0,
-        alreadyScanned: 0,
-        noTracking: 0,
-        errors: [] as string[],
-      }
-
-      for (let i = 0; i < allConversations.length; i += batchSize) {
-        const batch = allConversations.slice(i, i + batchSize)
-        console.log(`Processing batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(allConversations.length / batchSize)} (${batch.length} conversations)`)
-        
-        const batchResults = await processBatch(batch, force)
-        
-        totalResults.added += batchResults.added
-        totalResults.skipped += batchResults.skipped
-        totalResults.alreadyScanned += batchResults.alreadyScanned
-        totalResults.noTracking += batchResults.noTracking
-        totalResults.errors.push(...batchResults.errors)
-      }
-
-      const summary = {
-        conversationsProcessed: allConversations.length,
-        conversationsAlreadyScanned: totalResults.alreadyScanned,
-        shipmentsAdded: totalResults.added,
-        shipmentsSkipped: totalResults.skipped,
-        conversationsWithNoTracking: totalResults.noTracking,
-        batchSize,
-      }
-
-      await prisma.syncHistory.update({
-        where: { id: syncHistoryId },
-        data: {
-          conversationsProcessed: summary.conversationsProcessed,
-          conversationsAlreadyScanned: summary.conversationsAlreadyScanned,
-          shipmentsAdded: summary.shipmentsAdded,
-          shipmentsSkipped: summary.shipmentsSkipped,
-          conversationsWithNoTracking: summary.conversationsWithNoTracking,
-          errors: totalResults.errors,
-          status: totalResults.errors.length > 0 ? 'partial' : 'success',
-          completedAt: new Date(),
-          durationMs: Date.now() - startTime,
-        },
-      })
-
-      console.log('=== Scan Complete ===', summary)
-
-      return NextResponse.json({
-        success: true,
-        summary,
-        errors: totalResults.errors.length > 0 ? totalResults.errors : undefined,
-      })
-    }
-  } catch (error: any) {
-    console.error('=== FATAL ERROR ===')
-    console.error('Error type:', error.constructor.name)
-    console.error('Error message:', error.message)
-    console.error('Stack trace:', error.stack)
-    
-    // Update sync history with error
-    if (syncHistoryId) {
-      await prisma.syncHistory.update({
-        where: { id: syncHistoryId },
-        data: {
-          status: 'failed',
-          errors: [error.message || 'Unknown error'],
-          completedAt: new Date(),
-          durationMs: Date.now() - startTime,
-        },
-      })
     }
 
     return NextResponse.json(
       { 
+        success: false,
         error: error.message || 'Failed to scan Front inbox',
-        details: error.stack,
+        durationMs: Date.now() - startTime,
       },
       { status: 500 }
     )

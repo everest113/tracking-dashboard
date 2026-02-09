@@ -35,6 +35,13 @@ export interface TrackingInfo {
   events: TrackingEvent[]
 }
 
+export interface TrackerRegistration {
+  trackerId: string
+  trackingNumber: string
+  courierCode?: string
+  shipmentReference?: string
+}
+
 export interface Ship24Error {
   error: string
   message?: string
@@ -52,7 +59,7 @@ export function mapShip24Status(ship24Status: string): string {
     // Ship24 standard statuses
     'info_received': 'pending',
     'in_transit': 'in_transit',
-    'out_for_delivery': 'in_transit',
+    'out_for_delivery': 'out_for_delivery',
     'available_for_pickup': 'in_transit',
     'delivered': 'delivered',
     'delivery_delayed': 'exception',
@@ -89,7 +96,174 @@ export function normalizeCarrierCode(carrier: string | null): string | null {
 }
 
 /**
- * Get tracking information for a shipment using Ship24
+ * Register a tracker with Ship24 (async, for webhook-based tracking)
+ * Returns trackerId that should be stored in database
+ */
+export async function registerTracker(
+  trackingNumber: string,
+  carrier: string | null,
+  shipmentReference?: string
+): Promise<TrackerRegistration> {
+  const apiKey = process.env.SHIP24_API_KEY
+  
+  if (!apiKey) {
+    throw new Error('SHIP24_API_KEY not configured')
+  }
+  
+  const url = `${SHIP24_API_URL}/trackers`
+  
+  const requestBody: any = {
+    trackingNumber: trackingNumber
+  }
+  
+  // Include courier code if known
+  const carrierCode = normalizeCarrierCode(carrier)
+  if (carrierCode) {
+    requestBody.courierCode = [carrierCode]
+  }
+  
+  // Add shipment reference if provided (e.g., PO number)
+  if (shipmentReference) {
+    requestBody.shipmentReference = shipmentReference
+  }
+  
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(requestBody)
+  })
+  
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
+    throw new Error(
+      `Ship24 tracker registration failed (${response.status}): ${errorData.message || errorData.error || response.statusText}`
+    )
+  }
+  
+  const data = await response.json()
+  
+  // Extract trackerId from response
+  const trackerId = data.data?.tracker?.trackerId
+  
+  if (!trackerId) {
+    throw new Error('Ship24 did not return a trackerId')
+  }
+  
+  return {
+    trackerId,
+    trackingNumber,
+    courierCode: carrierCode || undefined,
+    shipmentReference
+  }
+}
+
+/**
+ * Bulk register multiple trackers (more efficient)
+ */
+export async function registerTrackersBulk(
+  trackers: Array<{ trackingNumber: string; carrier: string | null; shipmentReference?: string }>
+): Promise<TrackerRegistration[]> {
+  const apiKey = process.env.SHIP24_API_KEY
+  
+  if (!apiKey) {
+    throw new Error('SHIP24_API_KEY not configured')
+  }
+  
+  const url = `${SHIP24_API_URL}/trackers/bulk`
+  
+  const requestBody = trackers.map(t => {
+    const body: any = {
+      trackingNumber: t.trackingNumber
+    }
+    
+    const carrierCode = normalizeCarrierCode(t.carrier)
+    if (carrierCode) {
+      body.courierCode = [carrierCode]
+    }
+    
+    if (t.shipmentReference) {
+      body.shipmentReference = t.shipmentReference
+    }
+    
+    return body
+  })
+  
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(requestBody)
+  })
+  
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
+    throw new Error(
+      `Ship24 bulk registration failed (${response.status}): ${errorData.message || errorData.error || response.statusText}`
+    )
+  }
+  
+  const data = await response.json()
+  
+  // Extract trackerIds from response
+  const registrations: TrackerRegistration[] = []
+  const trackersData = data.data?.trackers || []
+  
+  for (const tracker of trackersData) {
+    if (tracker.trackerId) {
+      registrations.push({
+        trackerId: tracker.trackerId,
+        trackingNumber: tracker.trackingNumber,
+        courierCode: tracker.courierCode?.[0],
+        shipmentReference: tracker.shipmentReference
+      })
+    }
+  }
+  
+  return registrations
+}
+
+/**
+ * Get tracking results for an existing tracker by trackerId (fast, cached)
+ * This uses Ship24's cached data and doesn't re-fetch from courier
+ */
+export async function getTrackerResults(trackerId: string): Promise<TrackingInfo> {
+  const apiKey = process.env.SHIP24_API_KEY
+  
+  if (!apiKey) {
+    throw new Error('SHIP24_API_KEY not configured')
+  }
+  
+  const url = `${SHIP24_API_URL}/trackers/${trackerId}/results`
+  
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    }
+  })
+  
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
+    throw new Error(
+      `Ship24 API error (${response.status}): ${errorData.message || errorData.error || response.statusText}`
+    )
+  }
+  
+  const data = await response.json()
+  
+  // Transform Ship24 response to our standard format
+  return transformShip24Response(data, trackerId)
+}
+
+/**
+ * Get tracking information for a shipment using Ship24 (synchronous)
+ * This creates a tracker and fetches results immediately (slower, but works without pre-registration)
  */
 export async function getTrackingInfo(
   trackingNumber: string,
@@ -101,10 +275,6 @@ export async function getTrackingInfo(
     throw new Error('SHIP24_API_KEY not configured')
   }
   
-  // First, try to register/update the tracker
-  await registerTracker(trackingNumber, carrier, apiKey)
-  
-  // Then fetch the tracking data
   const url = `${SHIP24_API_URL}/trackers/track`
   
   const requestBody: any = {
@@ -140,32 +310,9 @@ export async function getTrackingInfo(
 }
 
 /**
- * Register or update a tracker in Ship24
- */
-async function registerTracker(
-  trackingNumber: string,
-  carrier: string | null,
-  apiKey: string
-): Promise<void> {
-  const url = `${SHIP24_API_URL}/trackers/track`
-  
-  const requestBody: any = {
-    trackingNumber: trackingNumber
-  }
-  
-  const carrierCode = normalizeCarrierCode(carrier)
-  if (carrierCode) {
-    requestBody.courierCode = [carrierCode]
-  }
-  
-  // Ship24's /track endpoint also registers the tracker if it doesn't exist
-  // So we don't need a separate registration call
-}
-
-/**
  * Transform Ship24 API response to our standard TrackingInfo format
  */
-function transformShip24Response(ship24Data: any, trackingNumber: string): TrackingInfo {
+function transformShip24Response(ship24Data: any, trackingIdentifier: string): TrackingInfo {
   // Ship24 response structure:
   // { data: { trackings: [{ tracker: {...}, shipment: {...}, events: [...] }] } }
   
@@ -211,7 +358,7 @@ function transformShip24Response(ship24Data: any, trackingNumber: string): Track
   })
   
   return {
-    tracking_number: trackingNumber,
+    tracking_number: tracker.trackingNumber || trackingIdentifier,
     status_code: mapShip24StatusToCode(latestStatus),
     status_description: latestStatus,
     carrier_status_code: tracker.courierCode || '',

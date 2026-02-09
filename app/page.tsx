@@ -1,6 +1,7 @@
 import ShipmentTable from '@/components/ShipmentTable'
 import LastSyncDisplay from '@/components/LastSyncDisplay'
 import { ManualTrackingUpdate } from '@/components/ManualTrackingUpdate'
+import BackfillTrackers from '@/components/BackfillTrackers'
 
 export default function Home() {
   return (
@@ -18,7 +19,10 @@ export default function Home() {
             </div>
             <div className="flex flex-col items-end gap-3">
               <LastSyncDisplay />
-              <ManualTrackingUpdate />
+              <div className="flex gap-2">
+                <BackfillTrackers />
+                <ManualTrackingUpdate />
+              </div>
             </div>
           </div>
         </div>
