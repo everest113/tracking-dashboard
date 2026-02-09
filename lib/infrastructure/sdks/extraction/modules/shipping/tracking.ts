@@ -16,7 +16,7 @@ export async function extractTracking(
 ): Promise<TrackingExtractionResult> {
   // Validate input
   if (!messages || messages.length === 0) {
-    return { shipments: [] }
+    return { supplier: null, shipments: [] }
   }
 
   // Create extraction client
@@ -56,6 +56,6 @@ export async function extractTracking(
     }
   } catch (error) {
     console.error('Tracking extraction error:', error)
-    return { shipments: [] }
+    return { supplier: null, shipments: [] }
   }
 }

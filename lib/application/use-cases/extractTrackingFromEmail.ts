@@ -14,7 +14,7 @@ export async function extractTrackingFromEmail(
 ): Promise<TrackingExtractionResult> {
   // Validate input
   if (!messages || messages.length === 0) {
-    return { shipments: [] }
+    return { supplier: null, shipments: [] }
   }
 
   // Extract using shipping module

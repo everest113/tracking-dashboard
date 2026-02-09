@@ -7,13 +7,13 @@ import { z } from 'zod'
 export const ExtractedShipmentSchema = z.object({
   trackingNumber: z.string().min(1, 'Tracking number required'),
   carrier: z.enum(['ups', 'usps', 'fedex', 'dhl', 'other']),
-  poNumber: z.string().optional(),
-  shippedDate: z.string().optional(), // ISO date string (YYYY-MM-DD)
-  confidence: z.number().min(0).max(1),
+  poNumber: z.string().nullable().default(null),  // Explicitly nullable with default
+  shippedDate: z.string().nullable().default(null), // ISO date string (YYYY-MM-DD)
+  confidence: z.number().min(0).max(1).default(0.8),
 })
 
 export const TrackingExtractionResultSchema = z.object({
-  supplier: z.string().optional(),
+  supplier: z.string().nullable().default(null),
   shipments: z.array(ExtractedShipmentSchema),
 })
 
