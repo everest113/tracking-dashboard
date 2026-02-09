@@ -5,13 +5,15 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 model Shipment {
   id                 Int       @id @default(autoincrement())
-  poNumber           String    @map("po_number") @db.VarChar(255)
+  poNumber           String?   @map("po_number") @db.VarChar(255)
   trackingNumber     String    @unique @map("tracking_number") @db.VarChar(255)
   carrier            String?   @db.VarChar(100)
+  supplier           String?   @db.VarChar(255)
   status             String    @default("pending") @db.VarChar(50)
   origin             String?   @db.Text
   destination        String?   @db.Text
@@ -19,6 +21,7 @@ model Shipment {
   estimatedDelivery  DateTime? @map("estimated_delivery")
   deliveredDate      DateTime? @map("delivered_date")
   lastChecked        DateTime? @map("last_checked")
+  frontConversationId String?  @map("front_conversation_id") @db.VarChar(255)
   createdAt          DateTime  @default(now()) @map("created_at")
   updatedAt          DateTime  @updatedAt @map("updated_at")
   
@@ -26,6 +29,7 @@ model Shipment {
 
   @@index([poNumber], map: "idx_po_number")
   @@index([status], map: "idx_status")
+  @@index([frontConversationId], map: "idx_front_conversation")
   @@map("shipments")
 }
 
@@ -42,4 +46,34 @@ model TrackingEvent {
 
   @@index([shipmentId], map: "idx_shipment_id")
   @@map("tracking_events")
+}
+
+model ScannedConversation {
+  id              Int      @id @default(autoincrement())
+  conversationId  String   @unique @map("conversation_id") @db.VarChar(255)
+  subject         String?  @db.Text
+  shipmentsFound  Int      @default(0) @map("shipments_found")
+  scannedAt       DateTime @default(now()) @map("scanned_at")
+  
+  @@index([conversationId], map: "idx_conversation_id")
+  @@map("scanned_conversations")
+}
+
+model SyncHistory {
+  id                          Int      @id @default(autoincrement())
+  conversationsProcessed      Int      @default(0) @map("conversations_processed")
+  conversationsAlreadyScanned Int      @default(0) @map("conversations_already_scanned")
+  shipmentsAdded              Int      @default(0) @map("shipments_added")
+  shipmentsSkipped            Int      @default(0) @map("shipments_skipped")
+  conversationsWithNoTracking Int      @default(0) @map("conversations_with_no_tracking")
+  batchSize                   Int      @default(10) @map("batch_size")
+  limit                       Int      @default(100)
+  durationMs                  Int?     @map("duration_ms")
+  errors                      String[] @default([])
+  status                      String   @default("success") @db.VarChar(50)
+  startedAt                   DateTime @default(now()) @map("started_at")
+  completedAt                 DateTime? @map("completed_at")
+  
+  @@index([startedAt], map: "idx_started_at")
+  @@map("sync_history")
 }

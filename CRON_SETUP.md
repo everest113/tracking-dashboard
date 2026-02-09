@@ -230,3 +230,25 @@ This gives you more control and visibility outside Vercel.
 - Reduce `take` limit (fewer shipments per run)
 - Optimize tracking API calls (batch requests if supported)
 - Increase frequency, process fewer items per run
+
+---
+
+## Manual Trigger
+
+A manual trigger button is available in the dashboard UI that lets you immediately run a tracking update without waiting for the scheduled cron.
+
+**Location:** Top right of the dashboard, next to "Last Sync"
+
+**How it works:**
+1. Click "Update All Tracking Now"
+2. The system calls `/api/manual-update-tracking`
+3. That endpoint internally calls the cron endpoint with proper auth
+4. Shows results (success/errors) in an alert
+
+**Direct API call:**
+```bash
+curl https://your-app.vercel.app/api/manual-update-tracking \
+  -X POST
+```
+
+No auth required on the manual endpoint - it's already protected by being server-side only.

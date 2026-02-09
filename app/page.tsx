@@ -1,16 +1,26 @@
 import ShipmentTable from '@/components/ShipmentTable'
+import LastSyncDisplay from '@/components/LastSyncDisplay'
+import { ManualTrackingUpdate } from '@/components/ManualTrackingUpdate'
 
 export default function Home() {
   return (
-    <main className="min-h-screen bg-gray-50">
+    <main className="min-h-screen bg-background">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900">
-            Shipment Tracking Dashboard
-          </h1>
-          <p className="mt-2 text-sm text-gray-600">
-            Monitor all shipments and tracking status
-          </p>
+          <div className="flex items-start justify-between">
+            <div>
+              <h1 className="text-3xl font-bold tracking-tight">
+                Shipment Tracking Dashboard
+              </h1>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Monitor all shipments and tracking status
+              </p>
+            </div>
+            <div className="flex flex-col items-end gap-3">
+              <LastSyncDisplay />
+              <ManualTrackingUpdate />
+            </div>
+          </div>
         </div>
 
         <ShipmentTable />
