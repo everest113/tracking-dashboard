@@ -6,7 +6,7 @@
 import { describe, it, expect } from 'vitest'
 import { getShipmentTrackingService } from '@/lib/application/ShipmentTrackingService'
 import { getShipmentRepository } from '@/lib/infrastructure/repositories/PrismaShipmentRepository'
-import { prisma } from '@/lib/infrastructure/database/prisma'
+import { prisma } from '@/lib/prisma'
 
 describe('Full Stack Integration', () => {
   const service = getShipmentTrackingService()

@@ -6,7 +6,7 @@
 import { describe, it, expect } from 'vitest'
 import { POST } from '@/app/api/front/scan/route'
 import { createMockRequest } from '../../helpers/api'
-import { prisma } from '@/lib/infrastructure/database/prisma'
+import { prisma } from '@/lib/prisma'
 
 describe('Front Inbox Scan Workflow', () => {
 

@@ -1,41 +1,56 @@
 /**
- * Example integration test
- * Demonstrates test setup and basic patterns
+ * Example Integration Test
+ * Shows how to write integration tests with database access
  */
 
 import { describe, it, expect } from 'vitest'
-import { createTestShipment, getAllShipments } from '../helpers/db'
-import { SAMPLE_SHIPMENTS } from '../fixtures/shipments'
+import { createTestShipment } from '../helpers/db'
+import { prisma } from '@/lib/prisma'
 
-describe('Example Integration Test', () => {
+describe('Example Integration Tests', () => {
   it('should create a test shipment', async () => {
-    // Arrange & Act
-    const shipment = await createTestShipment(SAMPLE_SHIPMENTS.pending)
+    const shipment = await createTestShipment({
+      tracking_number: `TEST${Date.now()}`,
+      status: 'pending',
+    })
 
-    // Assert
-    expect(shipment).toBeDefined()
     expect(shipment.id).toBeGreaterThan(0)
-    expect(shipment.tracking_number).toBeTruthy()
+    expect(shipment.status).toBe('pending')
+
+    // Verify it's in the database
+    const dbShipment = await prisma.shipments.findUnique({
+      where: { id: shipment.id },
+    })
+
+    expect(dbShipment).toBeDefined()
+    expect(dbShipment?.tracking_number).toBe(shipment.tracking_number)
   })
 
   it('should have clean database between tests', async () => {
-    // This test should not see data from previous test
-    const shipments = await getAllShipments()
+    // This test verifies that beforeEach cleanup works
+    const count = await prisma.shipments.count()
     
-    // Should be empty (cleaned by beforeEach in setup.ts)
-    expect(shipments).toHaveLength(0)
+    // Should only have shipments from this test (previous test cleaned up)
+    expect(count).toBe(0)
+
+    await createTestShipment({
+      tracking_number: `CLEAN${Date.now()}`,
+    })
+
+    const newCount = await prisma.shipments.count()
+    expect(newCount).toBe(1)
   })
 
-  it('should create multiple shipments', async () => {
-    // Arrange
-    await createTestShipment({ ...SAMPLE_SHIPMENTS.pending, tracking_number: 'TEST1' })
-    await createTestShipment({ ...SAMPLE_SHIPMENTS.in_transit, tracking_number: 'TEST2' })
-    await createTestShipment({ ...SAMPLE_SHIPMENTS.delivered, tracking_number: 'TEST3' })
+  it.skip('should handle concurrent operations', async () => {
+    // TODO: Test database transaction handling
+    const promises = Array.from({ length: 5 }, (_, i) =>
+      createTestShipment({
+        tracking_number: `CONCURRENT${Date.now()}${i}`,
+      })
+    )
 
-    // Act
-    const shipments = await getAllShipments()
-
-    // Assert
-    expect(shipments).toHaveLength(3)
+    const shipments = await Promise.all(promises)
+    expect(shipments.length).toBe(5)
+    expect(new Set(shipments.map(s => s.id)).size).toBe(5)
   })
 })

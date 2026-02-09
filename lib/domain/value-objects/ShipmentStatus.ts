@@ -146,14 +146,14 @@ export const ShipmentStatus = {
   },
 
   canTransitionTo(from: ShipmentStatus, to: ShipmentStatus): boolean {
-    // Can't change status after delivered
-    if (ShipmentStatus.isDelivered(from)) {
-      return false
-    }
-    
-    // Can always transition to exception
+    // Can always transition to exception from any status
     if (ShipmentStatus.hasException(to)) {
       return true
+    }
+    
+    // Can't change status after delivered (except to exception, handled above)
+    if (ShipmentStatus.isDelivered(from)) {
+      return false
     }
     
     return true
@@ -164,5 +164,26 @@ export const ShipmentStatus = {
    */
   equals(a: ShipmentStatus, b: ShipmentStatus): boolean {
     return a.type === b.type
+  },
+
+  /**
+   * Check if status is an exception
+   */
+  isException(status: ShipmentStatus): boolean {
+    return status.type === 'exception'
+  },
+
+  /**
+   * Check if shipment is active (not delivered or exceptional)
+   */
+  isActive(status: ShipmentStatus): boolean {
+    return !ShipmentStatus.isDelivered(status) && !ShipmentStatus.hasException(status)
+  },
+
+  /**
+   * Check if status is terminal (delivered or failed)
+   */
+  isTerminal(status: ShipmentStatus): boolean {
+    return status.type === 'delivered' || status.type === 'exception'
   }
 }

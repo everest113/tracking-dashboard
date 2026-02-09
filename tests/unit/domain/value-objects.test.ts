@@ -12,8 +12,8 @@ describe('TrackingNumber Value Object', () => {
     it('should create valid tracking number', () => {
       const result = TrackingNumber.create('1Z999AA10123456784')
       
-      expect(result.isSuccess).toBe(true)
-      if (result.isSuccess) {
+      expect(result.success).toBe(true)
+      if (result.success) {
         expect(TrackingNumber.toString(result.value)).toBe('1Z999AA10123456784')
       }
     })
@@ -21,8 +21,8 @@ describe('TrackingNumber Value Object', () => {
     it('should reject empty tracking number', () => {
       const result = TrackingNumber.create('')
       
-      expect(result.isSuccess).toBe(false)
-      if (!result.isSuccess) {
+      expect(result.success).toBe(false)
+      if (!result.success) {
         expect(result.error).toBeDefined()
       }
     })
@@ -30,8 +30,8 @@ describe('TrackingNumber Value Object', () => {
     it('should trim whitespace', () => {
       const result = TrackingNumber.create('  1Z999AA10123456784  ')
       
-      expect(result.isSuccess).toBe(true)
-      if (result.isSuccess) {
+      expect(result.success).toBe(true)
+      if (result.success) {
         expect(TrackingNumber.toString(result.value)).toBe('1Z999AA10123456784')
       }
     })
@@ -39,8 +39,8 @@ describe('TrackingNumber Value Object', () => {
     it('should normalize tracking number format', () => {
       const result = TrackingNumber.create('1z999aa10123456784') // lowercase
       
-      expect(result.isSuccess).toBe(true)
-      if (result.isSuccess) {
+      expect(result.success).toBe(true)
+      if (result.success) {
         expect(TrackingNumber.toString(result.value)).toBe('1Z999AA10123456784')
       }
     })
@@ -51,8 +51,8 @@ describe('TrackingNumber Value Object', () => {
       const tn1 = TrackingNumber.create('1Z999AA10123456784')
       const tn2 = TrackingNumber.create('1Z999AA10123456784')
       
-      expect(tn1.isSuccess && tn2.isSuccess).toBe(true)
-      if (tn1.isSuccess && tn2.isSuccess) {
+      expect(tn1.success && tn2.success).toBe(true)
+      if (tn1.success && tn2.success) {
         expect(TrackingNumber.equals(tn1.value, tn2.value)).toBe(true)
       }
     })
@@ -61,8 +61,8 @@ describe('TrackingNumber Value Object', () => {
       const tn1 = TrackingNumber.create('1Z999AA10123456784')
       const tn2 = TrackingNumber.create('1Z999AA10123456789')
       
-      expect(tn1.isSuccess && tn2.isSuccess).toBe(true)
-      if (tn1.isSuccess && tn2.isSuccess) {
+      expect(tn1.success && tn2.success).toBe(true)
+      if (tn1.success && tn2.success) {
         expect(TrackingNumber.equals(tn1.value, tn2.value)).toBe(false)
       }
     })
@@ -94,7 +94,7 @@ describe('ShipmentStatus Value Object', () => {
     })
 
     it('should create exception status', () => {
-      const status = ShipmentStatus.exception()
+      const status = ShipmentStatus.exception('Test exception')
       
       expect(ShipmentStatus.toString(status)).toBe('exception')
       expect(ShipmentStatus.isException(status)).toBe(true)
@@ -130,7 +130,7 @@ describe('ShipmentStatus Value Object', () => {
         ShipmentStatus.delivered(new Date()),
       ]
       
-      const exception = ShipmentStatus.exception()
+      const exception = ShipmentStatus.exception('Test exception')
       
       statuses.forEach(status => {
         expect(ShipmentStatus.canTransitionTo(status, exception)).toBe(true)
