@@ -19,7 +19,7 @@ export const FrontConversationSchema = z.object({
   recipient: z.object({
     handle: z.string(),
     role: z.string(),
-  }),
+  }).nullable(),  // Recipient can be null in some cases
   tags: z.array(z.object({
     id: z.string(),
     name: z.string(),
