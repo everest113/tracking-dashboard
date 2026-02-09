@@ -51,7 +51,7 @@ export const FrontMessageSchema = z.object({
   }).nullable(),  // System/automated messages can have null author
   recipients: z.array(z.object({
     handle: z.string(),
-    name: z.string().optional(),
+    name: z.string().nullish(),  // Recipient name can be null
     role: z.string().optional(),
   })),
   is_inbound: z.boolean().optional(),
