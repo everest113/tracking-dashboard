@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { getErrorMessage } from '@/lib/utils/fetch-helpers'
 import { prisma } from '@/lib/prisma'
 
 /**
@@ -78,10 +79,10 @@ export async function GET() {
       needsUpdate,
       timestamp: new Date().toISOString()
     })
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error fetching tracking stats:', error)
     return NextResponse.json(
-      { error: error.message },
+      { error: getErrorMessage(error) },
       { status: 500 }
     )
   }

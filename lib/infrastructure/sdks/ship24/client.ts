@@ -1,190 +1,90 @@
-import { z } from 'zod'
+/**
+ * Ship24 API Client
+ * Refactored to use base SDK architecture with proper validation
+ */
+
+import { BaseSdkClient } from '../base-client'
 import {
   Ship24TrackerResponseSchema,
   Ship24BulkTrackerResponseSchema,
   Ship24TrackingResponseSchema,
-  type Ship24TrackerResponse,
-  type Ship24BulkTrackerResponse,
-  type Ship24TrackingResponse,
 } from './schemas'
+import type { z } from 'zod'
 
-/**
- * Ship24 SDK Client
- * Handles raw API communication and response validation with Zod
- * Does NOT transform to domain models (that's the mapper's job)
- */
+type Ship24TrackerResponse = z.infer<typeof Ship24TrackerResponseSchema>
+type Ship24BulkTrackerResponse = z.infer<typeof Ship24BulkTrackerResponseSchema>
+type Ship24TrackingResponse = z.infer<typeof Ship24TrackingResponseSchema>
 
-export interface Ship24Config {
-  apiKey: string
-  baseUrl?: string
-}
-
-export interface RegisterTrackerRequest {
-  trackingNumber: string
-  courierCode?: string[]
-  shipmentReference?: string
-}
-
-export class Ship24ApiError extends Error {
-  constructor(
-    message: string,
-    public statusCode?: number,
-    public response?: unknown
-  ) {
-    super(message)
-    this.name = 'Ship24ApiError'
-  }
-}
-
-export class Ship24Client {
-  private readonly apiKey: string
-  private readonly baseUrl: string
-
-  constructor(config: Ship24Config) {
-    this.apiKey = config.apiKey
-    this.baseUrl = config.baseUrl || 'https://api.ship24.com/public/v1'
+export class Ship24Client extends BaseSdkClient {
+  constructor(apiKey: string) {
+    super({
+      baseUrl: 'https://api.ship24.com/public/v1',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+      },
+    })
   }
 
   /**
    * Register a single tracker
    */
-  async registerTracker(request: RegisterTrackerRequest): Promise<Ship24TrackerResponse> {
-    const response = await this.post('/trackers', request)
-    
-    // Validate response with Zod
-    const parsed = Ship24TrackerResponseSchema.safeParse(response)
-    
-    if (!parsed.success) {
-      throw new Ship24ApiError(
-        `Invalid Ship24 response: ${parsed.error.message}`,
-        undefined,
-        response
-      )
-    }
-    
-    return parsed.data
+  async registerTracker(
+    trackingNumber: string,
+    carrier?: string
+  ): Promise<Ship24TrackerResponse> {
+    return this.post(
+      '/trackers',
+      {
+        trackingNumber,
+        ...(carrier && { shipmentReference: { carrierCode: carrier } }),
+      },
+      Ship24TrackerResponseSchema
+    )
   }
 
   /**
    * Register multiple trackers in bulk
    */
-  async registerTrackersBulk(requests: RegisterTrackerRequest[]): Promise<Ship24BulkTrackerResponse> {
-    const response = await this.post('/trackers/bulk', requests)
-    
-    const parsed = Ship24BulkTrackerResponseSchema.safeParse(response)
-    
-    if (!parsed.success) {
-      throw new Ship24ApiError(
-        `Invalid Ship24 bulk response: ${parsed.error.message}`,
-        undefined,
-        response
-      )
-    }
-    
-    return parsed.data
+  async registerTrackersBulk(
+    trackers: Array<{
+      trackingNumber: string
+      carrier?: string
+      poNumber?: string
+    }>
+  ): Promise<Ship24BulkTrackerResponse> {
+    return this.post(
+      '/trackers/register',
+      {
+        trackers: trackers.map(t => ({
+          trackingNumber: t.trackingNumber,
+          ...(t.carrier && { shipmentReference: { carrierCode: t.carrier } }),
+          ...(t.poNumber && { shipmentReference: { ...t.carrier && { carrierCode: t.carrier }, referenceNumber: t.poNumber } }),
+        })),
+      },
+      Ship24BulkTrackerResponseSchema
+    )
   }
 
   /**
-   * Get tracking results for a tracker by ID (cached)
+   * Get tracker results (cached from Ship24)
    */
   async getTrackerResults(trackerId: string): Promise<Ship24TrackingResponse> {
-    const response = await this.get(`/trackers/${trackerId}/results`)
-    
-    const parsed = Ship24TrackingResponseSchema.safeParse(response)
-    
-    if (!parsed.success) {
-      throw new Ship24ApiError(
-        `Invalid Ship24 tracking response: ${parsed.error.message}`,
-        undefined,
-        response
-      )
-    }
-    
-    return parsed.data
-  }
-
-  /**
-   * Create tracker and get results synchronously
-   */
-  async trackShipment(request: RegisterTrackerRequest): Promise<Ship24TrackingResponse> {
-    const response = await this.post('/trackers/track', request)
-    
-    const parsed = Ship24TrackingResponseSchema.safeParse(response)
-    
-    if (!parsed.success) {
-      throw new Ship24ApiError(
-        `Invalid Ship24 tracking response: ${parsed.error.message}`,
-        undefined,
-        response
-      )
-    }
-    
-    return parsed.data
-  }
-
-  /**
-   * HTTP GET request
-   */
-  private async get(path: string): Promise<unknown> {
-    const url = `${this.baseUrl}${path}`
-    
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${this.apiKey}`,
-        'Content-Type': 'application/json',
-      },
-    })
-    
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
-      throw new Ship24ApiError(
-        `Ship24 API error: ${errorData.message || errorData.error || response.statusText}`,
-        response.status,
-        errorData
-      )
-    }
-    
-    return response.json()
-  }
-
-  /**
-   * HTTP POST request
-   */
-  private async post(path: string, body: unknown): Promise<unknown> {
-    const url = `${this.baseUrl}${path}`
-    
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${this.apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    })
-    
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
-      throw new Ship24ApiError(
-        `Ship24 API error: ${errorData.message || errorData.error || response.statusText}`,
-        response.status,
-        errorData
-      )
-    }
-    
-    return response.json()
+    return this.get(
+      `/trackers/${trackerId}/results`,
+      Ship24TrackingResponseSchema
+    )
   }
 }
 
 /**
- * Factory function to create Ship24 client from environment
+ * Factory function to create Ship24 client
  */
 export function createShip24Client(): Ship24Client {
   const apiKey = process.env.SHIP24_API_KEY
   
   if (!apiKey) {
-    throw new Error('SHIP24_API_KEY environment variable not set')
+    throw new Error('SHIP24_API_KEY environment variable is not set')
   }
-  
-  return new Ship24Client({ apiKey })
+
+  return new Ship24Client(apiKey)
 }

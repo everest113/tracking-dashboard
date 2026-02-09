@@ -1,102 +1,109 @@
+/**
+ * Front API Zod schemas for runtime validation
+ */
+
 import { z } from 'zod'
 
 /**
- * Front API Response Schemas
- * Docs: https://dev.frontapp.com/reference/introduction
+ * Front Conversation schema
  */
-
-/**
- * Front Author Schema
- */
-export const FrontAuthorSchema = z.object({
-  email: z.string().email().optional(),
-  name: z.string().optional(),
+export const FrontConversationSchema = z.object({
+  id: z.string(),
+  subject: z.string(),
+  status: z.string(),
+  assignee: z.object({
+    id: z.string(),
+    email: z.string(),
+    username: z.string(),
+  }).optional(),
+  recipient: z.object({
+    handle: z.string(),
+    role: z.string(),
+  }),
+  tags: z.array(z.object({
+    id: z.string(),
+    name: z.string(),
+  })).optional(),
+  links: z.object({
+    related: z.object({
+      events: z.string(),
+      followers: z.string(),
+      messages: z.string(),
+      comments: z.string(),
+      inboxes: z.string(),
+    }),
+  }),
+  _links: z.object({
+    related: z.object({
+      messages: z.string(),
+    }),
+  }),
+  created_at: z.number(),
+  is_private: z.boolean(),
 })
 
-export type FrontAuthor = z.infer<typeof FrontAuthorSchema>
-
 /**
- * Front Recipient Schema
- */
-export const FrontRecipientSchema = z.object({
-  handle: z.string(),
-  name: z.string().optional(),
-})
-
-export type FrontRecipient = z.infer<typeof FrontRecipientSchema>
-
-/**
- * Front Message Schema
+ * Front Message schema  
  */
 export const FrontMessageSchema = z.object({
   id: z.string(),
   type: z.string(),
   body: z.string(),
   text: z.string(),
-  subject: z.string(),
+  subject: z.string().optional(),
   created_at: z.number(),
-  author: FrontAuthorSchema,
-  recipients: z.array(FrontRecipientSchema),
-})
-
-export type FrontMessage = z.infer<typeof FrontMessageSchema>
-
-/**
- * Front Conversation Links Schema
- */
-export const FrontConversationLinksSchema = z.object({
-  related: z.object({
-    messages: z.string(),
-  }),
-})
-
-/**
- * Front Conversation Schema
- */
-export const FrontConversationSchema = z.object({
-  id: z.string(),
-  subject: z.string(),
-  status: z.string(),
-  created_at: z.number(),
-  _links: FrontConversationLinksSchema,
-})
-
-export type FrontConversation = z.infer<typeof FrontConversationSchema>
-
-/**
- * Front Inbox Schema
- */
-export const FrontInboxSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-})
-
-export type FrontInbox = z.infer<typeof FrontInboxSchema>
-
-/**
- * Front Pagination Schema
- */
-export const FrontPaginationSchema = z.object({
-  next: z.string().optional(),
-  prev: z.string().optional(),
+  author: z.object({
+    email: z.string().optional(),
+    name: z.string().optional(),
+    username: z.string().optional(),
+  }).optional(),
+  recipients: z.array(z.object({
+    handle: z.string(),
+    name: z.string().optional(),
+    role: z.string().optional(),
+  })),
+  is_inbound: z.boolean().optional(),
+  is_draft: z.boolean().optional(),
+  blurb: z.string().optional(),
+  attachments: z.array(z.object({
+    id: z.string(),
+    filename: z.string(),
+    url: z.string(),
+    content_type: z.string(),
+    size: z.number(),
+  })).optional(),
+  metadata: z.object({
+    headers: z.record(z.string(), z.string()).optional(),
+  }).optional(),
 })
 
 /**
- * Front API List Response Schema (generic)
+ * Front List Response schema
  */
-export const FrontListResponseSchema = <T extends z.ZodTypeAny>(itemSchema: T) =>
+export const FrontListResponseSchema = <T extends z.ZodType>(itemSchema: T) =>
   z.object({
+    _pagination: z.object({
+      next: z.string().optional(),
+      prev: z.string().optional(),
+    }),
+    _links: z.object({
+      self: z.string(),
+    }),
     _results: z.array(itemSchema),
-    _pagination: FrontPaginationSchema.optional(),
   })
 
 /**
- * Specific Response Schemas
+ * Type inference
  */
-export const FrontInboxListResponseSchema = FrontListResponseSchema(FrontInboxSchema)
-export const FrontConversationListResponseSchema = FrontListResponseSchema(FrontConversationSchema)
-export const FrontMessageListResponseSchema = FrontListResponseSchema(FrontMessageSchema)
-
-export type FrontInboxListResponse = z.infer<typeof FrontInboxListResponseSchema>
-export type FrontConversationListResponse = z.infer<typeof FrontConversationListResponseSchema>
-export type FrontMessageListResponse = z.infer<typeof FrontMessageListResponseSchema>
+export type FrontConversation = z.infer<typeof FrontConversationSchema>
+export type FrontMessage = z.infer<typeof FrontMessageSchema>
+export type FrontListResponse<T> = {
+  _pagination: {
+    next?: string
+    prev?: string
+  }
+  _links: {
+    self: string
+  }
+  _results: T[]
+}

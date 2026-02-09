@@ -1,13 +1,16 @@
 import { NextResponse } from 'next/server'
 import { getFrontClient } from '@/lib/infrastructure/sdks/front/client'
+import type { FrontConversation, FrontMessage } from '@/lib/infrastructure/sdks/front/schemas'
 import { extractTrackingFromEmail } from '@/lib/application/use-cases/extractTrackingFromEmail'
 import { getShipmentTrackingService } from '@/lib/application/ShipmentTrackingService'
 import { prisma } from '@/lib/prisma'
+import { getErrorMessage } from '@/lib/utils/fetch-helpers'
 
-// Process conversations in parallel batches
+/**
+ * Process conversations in parallel batches
+ */
 async function processBatch(
-  conversations: any[],
-  force: boolean
+  conversations: FrontConversation[]
 ): Promise<{
   added: number
   skipped: number
@@ -25,19 +28,16 @@ async function processBatch(
 
   const frontClient = getFrontClient()
 
-  // Process all conversations in parallel
   await Promise.allSettled(
     conversations.map(async (conversation) => {
       try {
         console.log(`Processing conversation: ${conversation.id}`)
         
-        // Get ALL messages for this conversation
         const messages = await frontClient.getConversationMessages(conversation.id)
         
         if (messages.length === 0) {
           console.log(`No messages found in ${conversation.id}`)
           
-          // Mark as scanned even if no messages (avoid re-checking)
           await prisma.scanned_conversations.upsert({
             where: { conversation_id: conversation.id },
             update: { scanned_at: new Date() },
@@ -54,143 +54,117 @@ async function processBatch(
 
         console.log(`Found ${messages.length} messages in ${conversation.id}`)
 
-        // Prepare messages for extraction (include sent date for fallback)
-        const messagesToExtract = messages.map(msg => ({
+        const messagesToExtract = messages.map((msg: FrontMessage) => ({
           subject: msg.subject || conversation.subject,
           body: msg.text || msg.body,
-          senderEmail: msg.author?.email,
-          senderName: msg.author?.name,
-          sentDate: msg.created_at ? new Date(msg.created_at * 1000) : undefined,
+          senderEmail: msg.author?.email || msg.recipients[0]?.handle || '',
+          senderName: msg.author?.name || msg.author?.username || '',
+          date: new Date(msg.created_at * 1000).toISOString(),
         }))
 
-        // Extract tracking info and supplier using OpenAI
-        const extraction = await extractTrackingFromEmail(messagesToExtract)
-        console.log(`Extracted ${extraction.shipments.length} shipments from ${conversation.id}`)
+        console.log(`Extracting tracking from ${messagesToExtract.length} messages...`)
+        const extractionResult = await extractTrackingFromEmail(messagesToExtract)
 
-        // Use AI-extracted supplier name, or fall back to sender info
-        const supplierName = extraction.supplier 
-          || messages[0]?.author?.name 
-          || messages[0]?.author?.email 
-          || 'Unknown Supplier'
+        if (!extractionResult || extractionResult.shipments.length === 0) {
+          console.log(`No tracking found in ${conversation.id}`)
+          
+          await prisma.scanned_conversations.upsert({
+            where: { conversation_id: conversation.id },
+            update: { scanned_at: new Date() },
+            create: {
+              conversation_id: conversation.id,
+              subject: conversation.subject,
+              shipments_found: 0,
+            },
+          })
+          
+          results.noTracking++
+          return
+        }
 
-        console.log(`Supplier identified: ${supplierName}`)
+        console.log(`Found ${extractionResult.shipments.length} shipments in ${conversation.id}`)
 
-        // Get email sent date for fallback (use first message in thread)
-        const emailSentDate = messages[0]?.created_at 
-          ? new Date(messages[0].created_at * 1000) 
-          : null
+        const service = getShipmentTrackingService()
+        let addedCount = 0
+        let skippedCount = 0
 
-        let shipmentsAddedThisConvo = 0
-
-        // Create shipments for each tracking number found
-        for (const shipment of extraction.shipments) {
+        for (const shipment of extractionResult.shipments) {
           try {
-            // Validate tracking number
-            if (!shipment.trackingNumber || typeof shipment.trackingNumber !== 'string') {
-              console.warn(`Skipping shipment with invalid tracking number:`, shipment)
-              continue
-            }
-
-            // Check if tracking number already exists
             const existing = await prisma.shipments.findUnique({
-              where: { tracking_number: shipment.trackingNumber },
+              where: { tracking_number: shipment.trackingNumber }
             })
 
             if (existing) {
-              console.log(`Shipment ${shipment.trackingNumber} already exists`)
-              results.skipped++
+              console.log(`Shipment already exists: ${shipment.trackingNumber}`)
+              skippedCount++
+              
+              if (!existing.front_conversation_id) {
+                await prisma.shipments.update({
+                  where: { tracking_number: shipment.trackingNumber },
+                  data: { 
+                    front_conversation_id: conversation.id,
+                    updated_at: new Date()
+                  }
+                })
+              }
+              
               continue
             }
 
-            // Use PO number from AI extraction, or leave undefined if not found
-            const poNumber = shipment.poNumber && typeof shipment.poNumber === 'string' 
-              ? shipment.poNumber 
-              : undefined
-
-            if (poNumber) {
-              console.log(`PO number found: ${poNumber}`)
-            } else {
-              console.log(`No PO number found - leaving empty`)
-            }
-
-            // Use shipped date from AI extraction, or fall back to email sent date
-            let shipped_date: Date | null = null
-            if (shipment.shippedDate) {
-              shipped_date = new Date(shipment.shippedDate)
-            } else if (emailSentDate) {
-              shipped_date = emailSentDate
-              console.log(`Using email sent date as shipped date: ${emailSentDate.toISOString()}`)
-            }
-
-            // Ensure carrier is a valid string
-            const carrier = shipment.carrier && typeof shipment.carrier === 'string'
-              ? shipment.carrier
-              : undefined
-
-            // Prepare shipment data
-            const shipmentData: any = {
-              po_number: poNumber,
-              tracking_number: shipment.trackingNumber,
-              carrier,
-              supplier: supplierName,
-              status: 'pending',
-              front_conversation_id: conversation.id,
-              shipped_date: shipped_date,
-            }
-
-            // Register tracker with Ship24 (non-blocking)
-            try {
-              const service = getShipmentTrackingService()
-              const result = await service.registerTracker(
-                shipment.trackingNumber,
-                carrier || null,
-                poNumber
-              )
-              
-              if (result.success && result.trackerId) {
-                shipmentData.ship24_tracker_id = result.trackerId
-                console.log(`✅ Registered tracker: ${shipment.trackingNumber} → ${result.trackerId}`)
+            const newShipment = await prisma.shipments.create({
+              data: {
+                tracking_number: shipment.trackingNumber,
+                carrier: shipment.carrier ?? null,
+                po_number: shipment.poNumber ?? null,
+                supplier: extractionResult.supplier ?? null,
+                status: 'pending',
+                front_conversation_id: conversation.id,
+                updated_at: new Date(),
               }
-            } catch (trackerError: any) {
-              // Log but don't fail the shipment creation
-              console.warn(`⚠️  Failed to register tracker for ${shipment.trackingNumber}:`, trackerError.message)
-              // Will be picked up by backfill endpoint later
-            }
-
-            // Create shipment
-            await prisma.shipments.create({
-              data: shipmentData,
             })
 
-            console.log(`Created shipment ${shipment.trackingNumber} - Supplier: ${supplierName} - PO: ${poNumber || 'none'} - Shipped: ${shipped_date?.toISOString() || 'unknown'}`)
-            results.added++
-            shipmentsAddedThisConvo++
-          } catch (err: any) {
-            console.error(`Error creating shipment ${shipment.trackingNumber}:`, err)
-            results.errors.push(`Failed to create shipment ${shipment.trackingNumber}: ${err.message}`)
+            console.log(`Created shipment: ${newShipment.tracking_number}`)
+            addedCount++
+
+            // Auto-register with Ship24 in background
+            service.registerTracker(
+              newShipment.tracking_number,
+              newShipment.carrier ?? undefined,
+              newShipment.po_number ?? undefined
+            ).then((result) => {
+              if (result.success) {
+                console.log(`Registered tracker for ${newShipment.tracking_number}: ${result.trackerId}`)
+              }
+            }).catch((err) => {
+              console.error(`Error registering tracker:`, getErrorMessage(err))
+            })
+
+          } catch (shipmentErr) {
+            console.error(`Error adding shipment:`, getErrorMessage(shipmentErr))
+            results.errors.push(getErrorMessage(shipmentErr))
+            skippedCount++
           }
         }
 
-        // Mark conversation as scanned
         await prisma.scanned_conversations.upsert({
           where: { conversation_id: conversation.id },
           update: { 
             scanned_at: new Date(),
-            shipments_found: shipmentsAddedThisConvo,
+            shipments_found: addedCount
           },
           create: {
             conversation_id: conversation.id,
             subject: conversation.subject,
-            shipments_found: shipmentsAddedThisConvo,
+            shipments_found: addedCount,
           },
         })
 
-        if (extraction.shipments.length === 0) {
-          results.noTracking++
-        }
-      } catch (err: any) {
-        console.error(`Error processing conversation ${conversation.id}:`, err)
-        results.errors.push(`Failed to process conversation ${conversation.id}: ${err.message}`)
+        results.added += addedCount
+        results.skipped += skippedCount
+
+      } catch (error) {
+        console.error(`Error processing conversation ${conversation.id}:`, getErrorMessage(error))
+        results.errors.push(`${conversation.id}: ${getErrorMessage(error)}`)
       }
     })
   )
@@ -200,212 +174,150 @@ async function processBatch(
 
 export async function POST(request: Request) {
   const startTime = Date.now()
-  let syncHistoryId: number | null = null
-
+  
   try {
-    console.log('=== Scan Front Inbox Started ===')
-    
-    const { 
-      after,  // Date string (YYYY-MM-DD) - fetch conversations from this date
-      limit = 1000,  // Max conversations to fetch
-      force = false,
-      batchSize = 10
-    } = await request.json().catch(() => ({}))
-    
-    console.log('Settings:', { after, limit, force, batchSize })
+    console.log('=== Front Scan Started ===')
 
-    // Check environment variables
-    if (!process.env.FRONT_API_TOKEN) {
-      console.error('Missing FRONT_API_TOKEN')
-      return NextResponse.json(
-        { error: 'Front API token not configured' },
-        { status: 500 }
-      )
-    }
+    const body = await request.json()
+    const { after, limit = 100, batchSize = 10 } = body
 
-    if (!process.env.OPENAI_API_KEY) {
-      console.error('Missing OPENAI_API_KEY')
-      return NextResponse.json(
-        { error: 'OpenAI API key not configured (required for tracking extraction)' },
-        { status: 500 }
-      )
-    }
-
-    // Create sync history record
-    const syncRecord = await prisma.sync_history.create({
-      data: {
-        status: 'running',
-        limit,
-        batch_size: batchSize,
-      },
-    })
-    syncHistoryId = syncRecord.id
-
-    // Fetch conversations from Front
-    console.log('Fetching conversations from Front...')
     const frontClient = getFrontClient()
-    const conversations = await frontClient.listConversations({
+
+    const afterDate = after 
+      ? new Date(after)
+      : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+
+    console.log(`Fetching conversations after: ${afterDate.toISOString()}`)
+
+    const conversations = await frontClient.getInboxConversations('top', {
       limit,
-      after,
+      after: afterDate
     })
 
-    console.log(`Found ${conversations.length} total conversations`)
+    console.log(`Found ${conversations.length} conversations`)
 
     if (conversations.length === 0) {
-      const duration = Date.now() - startTime
-
-      await prisma.sync_history.update({
-        where: { id: syncHistoryId },
-        data: {
-          status: 'success',
-          completed_at: new Date(),
-          duration_ms: duration,
-        },
-      })
-
       return NextResponse.json({
         success: true,
-        message: 'No conversations found',
-        conversations_processed: 0,
-        shipments_added: 0,
-        duration_ms: duration,
-      })
-    }
-
-    // Filter out already scanned conversations (unless force=true)
-    let toProcess = conversations
-    let alreadyScanned = 0
-
-    if (!force) {
-      const scannedIds = await prisma.scanned_conversations.findMany({
-        select: { conversation_id: true },
-      })
-      const scannedSet = new Set(scannedIds.map((s) => s.conversation_id))
-
-      toProcess = conversations.filter((c) => !scannedSet.has(c.id))
-      alreadyScanned = conversations.length - toProcess.length
-
-      console.log(`Skipping ${alreadyScanned} already scanned conversations`)
-      console.log(`${toProcess.length} new conversations to process`)
-    } else {
-      console.log('Force mode: processing all conversations')
-    }
-
-    if (toProcess.length === 0) {
-      const duration = Date.now() - startTime
-
-      await prisma.sync_history.update({
-        where: { id: syncHistoryId },
-        data: {
-          status: 'success',
-          conversations_processed: 0,
-          conversations_already_scanned: alreadyScanned,
-          shipments_added: 0,
-          completed_at: new Date(),
-          duration_ms: duration,
+        summary: {
+          conversationsProcessed: 0,
+          conversationsAlreadyScanned: 0,
+          shipmentsAdded: 0,
+          shipmentsSkipped: 0,
+          conversationsWithNoTracking: 0,
+          batchSize,
+          limit,
         },
+        errors: [],
+        durationMs: Date.now() - startTime,
+        timestamp: new Date().toISOString()
       })
+    }
 
+    const conversationIds = conversations.map((c: FrontConversation) => c.id)
+    const alreadyScanned = await prisma.scanned_conversations.findMany({
+      where: {
+        conversation_id: { in: conversationIds }
+      },
+      select: { conversation_id: true }
+    })
+
+    const scannedIds = new Set(alreadyScanned.map(s => s.conversation_id))
+    const unscannedConversations = conversations.filter(
+      (c: FrontConversation) => !scannedIds.has(c.id)
+    )
+
+    console.log(`${unscannedConversations.length} conversations need scanning (${scannedIds.size} already scanned)`)
+
+    if (unscannedConversations.length === 0) {
       return NextResponse.json({
         success: true,
-        message: 'All conversations already scanned',
-        conversations_processed: 0,
-        conversations_already_scanned: alreadyScanned,
-        shipments_added: 0,
-        duration_ms: duration,
+        summary: {
+          conversationsProcessed: 0,
+          conversationsAlreadyScanned: scannedIds.size,
+          shipmentsAdded: 0,
+          shipmentsSkipped: 0,
+          conversationsWithNoTracking: 0,
+          batchSize,
+          limit,
+        },
+        errors: [],
+        durationMs: Date.now() - startTime,
+        timestamp: new Date().toISOString()
       })
     }
 
-    // Process in parallel batches
     const results = {
       added: 0,
       skipped: 0,
-      alreadyScanned,
+      alreadyScanned: scannedIds.size,
       noTracking: 0,
       errors: [] as string[],
     }
 
-    for (let i = 0; i < toProcess.length; i += batchSize) {
-      const batch = toProcess.slice(i, i + batchSize)
-      console.log(`\nProcessing batch ${Math.floor(i / batchSize) + 1} of ${Math.ceil(toProcess.length / batchSize)} (${batch.length} conversations)`)
+    for (let i = 0; i < unscannedConversations.length; i += batchSize) {
+      const batch = unscannedConversations.slice(i, i + batchSize)
+      console.log(`Processing batch ${Math.floor(i / batchSize) + 1} (${batch.length} conversations)`)
       
-      const batchResults = await processBatch(batch, force)
-      
+      const batchResults = await processBatch(batch)
       results.added += batchResults.added
       results.skipped += batchResults.skipped
       results.noTracking += batchResults.noTracking
       results.errors.push(...batchResults.errors)
-
-      console.log(`Batch complete: ${batchResults.added} added, ${batchResults.skipped} skipped, ${batchResults.noTracking} no tracking`)
-
-      // Small delay between batches
-      if (i + batchSize < toProcess.length) {
-        await new Promise((resolve) => setTimeout(resolve, 500))
+      
+      if (i + batchSize < unscannedConversations.length) {
+        await new Promise(resolve => setTimeout(resolve, 1000))
       }
     }
 
     const duration = Date.now() - startTime
 
-    // Update sync history with results
-    await prisma.sync_history.update({
-      where: { id: syncHistoryId },
-      data: {
-        status: results.errors.length > 0 ? 'partial_success' : 'success',
-        conversations_processed: toProcess.length,
-        conversations_already_scanned: alreadyScanned,
-        shipments_added: results.added,
-        shipments_skipped: results.skipped,
-        conversations_with_no_tracking: results.noTracking,
-        errors: results.errors,
-        completed_at: new Date(),
-        duration_ms: duration,
-      },
-    })
+    const summary = {
+      conversationsProcessed: unscannedConversations.length,
+      conversationsAlreadyScanned: results.alreadyScanned,
+      shipmentsAdded: results.added,
+      shipmentsSkipped: results.skipped,
+      conversationsWithNoTracking: results.noTracking,
+      batchSize,
+      limit,
+    }
 
-    console.log('=== Scan Complete ===')
-    console.log(`Processed ${toProcess.length} conversations in ${duration}ms`)
-    console.log(`Shipments added: ${results.added}`)
-    console.log(`Shipments skipped (duplicates): ${results.skipped}`)
-    console.log(`Conversations with no tracking: ${results.noTracking}`)
-    console.log(`Errors: ${results.errors.length}`)
+    console.log('=== Front Scan Complete ===')
+
+    await prisma.sync_history.create({
+      data: {
+        conversations_processed: summary.conversationsProcessed,
+        conversations_already_scanned: summary.conversationsAlreadyScanned,
+        shipments_added: summary.shipmentsAdded,
+        shipments_skipped: summary.shipmentsSkipped,
+        conversations_with_no_tracking: summary.conversationsWithNoTracking,
+        batch_size: batchSize,
+        limit,
+        duration_ms: duration,
+        errors: results.errors,
+        status: results.errors.length > 0 ? 'partial' : 'success',
+        completed_at: new Date()
+      }
+    })
 
     return NextResponse.json({
       success: true,
-      conversations_processed: toProcess.length,
-      conversations_already_scanned: alreadyScanned,
-      shipments_added: results.added,
-      shipments_skipped: results.skipped,
-      conversations_with_no_tracking: results.noTracking,
-      errors: results.errors.slice(0, 10), // Limit error list in response
-      duration_ms: duration,
+      summary,
+      errors: results.errors,
+      durationMs: duration,
+      timestamp: new Date().toISOString()
     })
-  } catch (error: any) {
-    console.error('=== FATAL ERROR ===')
-    console.error('Error:', error.message)
-    console.error('Stack:', error.stack)
 
-    // Update sync history with error
-    if (syncHistoryId) {
-      try {
-        await prisma.sync_history.update({
-          where: { id: syncHistoryId },
-          data: {
-            status: 'error',
-            errors: [error.message],
-            completed_at: new Date(),
-            duration_ms: Date.now() - startTime,
-          },
-        })
-      } catch (updateErr) {
-        console.error('Failed to update sync history:', updateErr)
-      }
-    }
+  } catch (error) {
+    console.error('=== Front Scan Error ===')
+    console.error('Error:', getErrorMessage(error))
 
     return NextResponse.json(
-      { 
+      {
         success: false,
-        error: error.message || 'Failed to scan Front inbox',
-        duration_ms: Date.now() - startTime,
+        error: getErrorMessage(error),
+        durationMs: Date.now() - startTime,
+        timestamp: new Date().toISOString()
       },
       { status: 500 }
     )

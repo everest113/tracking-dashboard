@@ -1,4 +1,5 @@
 import type { Shipment } from '@/lib/domain/entities/Shipment'
+import { getErrorMessage } from '@/lib/utils/fetch-helpers'
 import { Shipment as S } from '@/lib/domain/entities/Shipment'
 import { TrackingNumber as TN } from '@/lib/domain/value-objects/TrackingNumber'
 import { ShipmentStatus as SS } from '@/lib/domain/value-objects/ShipmentStatus'
@@ -95,8 +96,8 @@ export const createProcessWebhookUseCase = (
       trackingNumber: TN.toString(trackingNumber),
       shipment: savedShipment,
     })
-  } catch (error: any) {
-    console.error(`Failed to process webhook for ${rawTrackingNumber}:`, error.message)
+  } catch (error: unknown) {
+    console.error(`Failed to process webhook for ${rawTrackingNumber}:`, getErrorMessage(error))
     
     return Ok({
       success: false,
@@ -104,7 +105,7 @@ export const createProcessWebhookUseCase = (
       oldStatus: 'unknown',
       newStatus: 'unknown',
       trackingNumber: rawTrackingNumber,
-      error: error.message,
+      error: getErrorMessage(error),
     })
   }
 }

@@ -1,4 +1,5 @@
 'use client'
+import { getErrorMessage } from '@/lib/utils/fetch-helpers'
 
 import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
@@ -43,7 +44,7 @@ export default function SyncDialog({ onSuccess }: { onSuccess: () => void }) {
   const fallbackDate = threeDaysAgo.toISOString().split('T')[0]
   
   const [syncDate, setSyncDate] = useState(fallbackDate)
-  const [startTime, setStartTime] = useState<number | null>(null)
+  const [duration, setDuration] = useState<string | null>(null)
   const [progressEvents, setProgressEvents] = useState<ProgressEvent[]>([])
 
   // Fetch last sync date on component mount
@@ -73,9 +74,23 @@ export default function SyncDialog({ onSuccess }: { onSuccess: () => void }) {
     setProgressEvents(prev => [...prev, { type, message, timestamp: Date.now() }])
   }
 
+  const calculateDuration = (startTime: number): string => {
+    const endTime = Date.now()
+    const durationMs = endTime - startTime
+    const seconds = Math.floor(durationMs / 1000)
+    const minutes = Math.floor(seconds / 60)
+    const remainingSeconds = seconds % 60
+    
+    if (minutes > 0) {
+      return `${minutes}m ${remainingSeconds}s`
+    } else {
+      return `${seconds}s`
+    }
+  }
+
   const handleSync = async () => {
+    const startTime = Date.now()
     setStatus('running')
-    setStartTime(Date.now())
     setResult(null)
     setProgressEvents([])
 
@@ -95,10 +110,11 @@ export default function SyncDialog({ onSuccess }: { onSuccess: () => void }) {
       const data: ScanResult = await response.json()
 
       if (!response.ok) {
-        addProgressEvent('error', `Sync failed: ${(data as any).error}`)
+        addProgressEvent('error', `Sync failed: ${(typeof data === 'object' && data !== null && 'error' in data ? String((data as { error: string }).error) : 'Unknown error')}`)
+        setDuration(calculateDuration(startTime))
         setStatus('error')
         toast.error('Sync failed', {
-          description: (data as any).error || 'An error occurred',
+          description: (typeof data === 'object' && data !== null && 'error' in data ? String((data as { error: string }).error) : 'Unknown error') || 'An error occurred',
         })
         return
       }
@@ -129,6 +145,7 @@ export default function SyncDialog({ onSuccess }: { onSuccess: () => void }) {
 
       addProgressEvent('complete', '✓ Sync complete!')
 
+      setDuration(calculateDuration(startTime))
       setStatus('success')
 
       if (summary.shipmentsAdded > 0) {
@@ -141,12 +158,13 @@ export default function SyncDialog({ onSuccess }: { onSuccess: () => void }) {
           description: `Scanned ${summary.conversationsProcessed} conversations`,
         })
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Sync error:', error)
-      addProgressEvent('error', `✗ Error: ${error.message}`)
+      addProgressEvent('error', `✗ Error: ${getErrorMessage(error)}`)
+      setDuration(calculateDuration(startTime))
       setStatus('error')
       toast.error('An unexpected error occurred', {
-        description: error.message || 'Please try again later.',
+        description: getErrorMessage(error) || 'Please try again later.',
       })
     }
   }
@@ -154,7 +172,7 @@ export default function SyncDialog({ onSuccess }: { onSuccess: () => void }) {
   const resetDialog = () => {
     setStatus('idle')
     setResult(null)
-    setStartTime(null)
+    setDuration(null)
     setProgressEvents([])
   }
 
@@ -171,11 +189,7 @@ export default function SyncDialog({ onSuccess }: { onSuccess: () => void }) {
     }
   }
 
-  const getDuration = () => {
-    if (!startTime) return null
-    const duration = Date.now() - startTime
-    return (duration / 1000).toFixed(1) + 's'
-  }
+  
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => {
@@ -202,7 +216,7 @@ export default function SyncDialog({ onSuccess }: { onSuccess: () => void }) {
           <DialogDescription>
             {status === 'idle' && 'Extract tracking numbers from Front conversations'}
             {status === 'running' && 'Processing conversations and extracting tracking information...'}
-            {status === 'success' && `Completed in ${getDuration()}`}
+            {status === 'success' && `Completed in ${(duration || "Calculating...")}`}
             {status === 'error' && 'An error occurred during sync'}
           </DialogDescription>
         </DialogHeader>
@@ -260,7 +274,7 @@ export default function SyncDialog({ onSuccess }: { onSuccess: () => void }) {
               </div>
               <div>
                 <p className="text-muted-foreground">Duration</p>
-                <p className="text-lg">{getDuration()}</p>
+                <p className="text-lg">{(duration || "Calculating...")}</p>
               </div>
             </div>
 

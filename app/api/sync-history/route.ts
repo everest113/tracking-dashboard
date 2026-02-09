@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { getErrorMessage } from '@/lib/utils/fetch-helpers'
 import { prisma } from '@/lib/prisma'
 
 export async function GET(request: Request) {
@@ -23,10 +24,10 @@ export async function GET(request: Request) {
       history,
       lastSync,
     })
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error fetching sync history:', error)
     return NextResponse.json(
-      { error: error.message || 'Failed to fetch sync history' },
+      { error: getErrorMessage(error) || 'Failed to fetch sync history' },
       { status: 500 }
     )
   }

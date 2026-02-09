@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { getErrorMessage } from '@/lib/utils/fetch-helpers'
 import { prisma } from '@/lib/prisma'
 
 export async function GET() {
@@ -15,11 +16,11 @@ export async function GET() {
       models,
       syncHistoryCount,
     })
-  } catch (error: any) {
+  } catch (error: unknown) {
     return NextResponse.json({
       success: false,
-      error: error.message,
-      stack: error.stack,
+      error: getErrorMessage(error),
+      stack: error instanceof Error ? error.stack : undefined,
     }, { status: 500 })
   }
 }

@@ -1,79 +1,57 @@
 'use client'
 
 import { useState } from 'react'
-import { api } from '@/lib/orpc/client'
 import { Button } from '@/components/ui/button'
-import { RefreshCw, CheckCircle, XCircle } from 'lucide-react'
-import { Alert, AlertDescription } from '@/components/ui/alert'
+import { RefreshCw } from 'lucide-react'
+import { toast } from 'sonner'
+import { getErrorMessage } from '@/lib/utils/fetch-helpers'
 
-export function ManualTrackingUpdate() {
+interface TrackingUpdateResponse {
+  success: boolean
+  checked: number
+  updated: number
+  errors: number
+  durationMs: number
+}
+
+export default function ManualTrackingUpdate({ onSuccess }: { onSuccess: () => void }) {
   const [loading, setLoading] = useState(false)
-  const [result, setResult] = useState<{
-    success: boolean
-    message: string
-    details?: any
-  } | null>(null)
 
   const handleUpdate = async () => {
     setLoading(true)
-    setResult(null)
-
     try {
-      const data = await (api.manualUpdateTracking as any).update()
+      const response = await fetch('/api/manual-update-tracking', {
+        method: 'POST',
+      })
 
-      setResult({
-        success: true,
-        message: `Updated ${data.updated} of ${data.checked} shipments in ${Math.round(data.durationMs / 1000)}s`,
-        details: data,
+      const data: unknown = await response.json()
+
+      if (!response.ok) {
+        throw new Error(
+          data && typeof data === 'object' && 'error' in data
+            ? String(data.error)
+            : 'Update failed'
+        )
+      }
+
+      const result = data as TrackingUpdateResponse
+
+      toast.success(`Updated ${result.checked} shipments`, {
+        description: `${result.updated} status changes, ${result.errors} errors`,
       })
-    } catch (error: any) {
-      setResult({
-        success: false,
-        message: error.message || 'Network error',
-      })
+
+      onSuccess()
+    } catch (error) {
+      toast.error(getErrorMessage(error))
     } finally {
       setLoading(false)
     }
   }
 
   return (
-    <div className="space-y-3">
-      <Button
-        onClick={handleUpdate}
-        disabled={loading}
-        variant="outline"
-        className="w-full sm:w-auto"
-      >
-        {loading ? (
-          <>
-            <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-            Updating Tracking...
-          </>
-        ) : (
-          <>
-            <RefreshCw className="mr-2 h-4 w-4" />
-            Update All Tracking Now
-          </>
-        )}
-      </Button>
-
-      {result && (
-        <Alert variant={result.success ? 'default' : 'destructive'}>
-          {result.success ? (
-            <CheckCircle className="h-4 w-4" />
-          ) : (
-            <XCircle className="h-4 w-4" />
-          )}
-          <AlertDescription>
-            {result.message}
-            {result.details?.errors > 0 && (
-              <div className="mt-1 text-xs opacity-75">
-                {result.details.errors} errors occurred
-              </div>
-            )}
-          </AlertDescription>
-        </Alert>
-      )}
-    </div>
+    <Button onClick={handleUpdate} disabled={loading} variant="outline">
+      <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+      {loading ? 'Updating...' : 'Update Tracking'}
+    </Button>
   )
 }

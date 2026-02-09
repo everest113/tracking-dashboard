@@ -1,13 +1,14 @@
-import { os } from '@orpc/server'
 import { publicProcedure } from './base'
 import { z } from 'zod'
 import { shipmentSchema } from '@/lib/validations'
 import { getShipmentTrackingService } from '@/lib/application/ShipmentTrackingService'
+import { Prisma } from '@prisma/client'
+import { getErrorMessage } from '@/lib/utils/fetch-helpers'
 
-export const appRouter = os.router({
+export const appRouter = {
   shipments: {
     list: publicProcedure
-      .output(z.array(z.any()))
+      .output(z.array(z.unknown()))
       .handler(async ({ context }) => {
         const shipments = await context.prisma.shipments.findMany({
           orderBy: { created_at: 'desc' },
@@ -18,7 +19,7 @@ export const appRouter = os.router({
 
     create: publicProcedure
       .input(shipmentSchema)
-      .output(z.any())
+      .output(z.unknown())
       .handler(async ({ context, input }) => {
         const existingShipment = await context.prisma.shipments.findUnique({
           where: { tracking_number: input.trackingNumber },
@@ -28,7 +29,7 @@ export const appRouter = os.router({
           throw new Error('A shipment with this tracking number already exists')
         }
 
-        const shipmentData: any = {
+        const shipmentData: Prisma.shipmentsCreateInput = {
           tracking_number: input.trackingNumber,
           carrier: input.carrier,
           status: 'pending',
@@ -51,8 +52,8 @@ export const appRouter = os.router({
           if (result.success && result.trackerId) {
             shipmentData.ship24_tracker_id = result.trackerId
           }
-        } catch (trackerError: any) {
-          console.warn(`⚠️  Failed to register tracker for ${input.trackingNumber}:`, trackerError.message)
+        } catch (trackerError: unknown) {
+          console.warn(`⚠️  Failed to register tracker for ${input.trackingNumber}:`, getErrorMessage(trackerError))
         }
 
         const shipment = await context.prisma.shipments.create({
@@ -61,8 +62,7 @@ export const appRouter = os.router({
 
         return shipment
       }),
-  } as any,
-
+  },
   trackingStats: {
     get: publicProcedure
       .output(z.object({
@@ -107,15 +107,14 @@ export const appRouter = os.router({
           timestamp: new Date().toISOString()
         }
       }),
-  } as any,
-
+  },
   syncHistory: {
     get: publicProcedure
       .input(z.object({ limit: z.number().default(10) }).default({ limit: 10 }))
       .output(z.object({
         success: z.boolean(),
-        history: z.array(z.any()),
-        lastSync: z.any().nullable(),
+        history: z.array(z.unknown()),
+        lastSync: z.unknown().nullable(),
       }))
       .handler(async ({ context, input }) => {
         const limit = input.limit
@@ -128,14 +127,14 @@ export const appRouter = os.router({
           orderBy: { completed_at: 'desc' },
         })
 
-        const mapRecord = (record: any) => ({
+        const mapRecord = (record: { id: number; started_at: Date; completed_at: Date | null; conversations_processed: number; shipments_added: number; conversations_already_scanned: number; shipments_skipped: number; conversations_with_no_tracking: number; errors: unknown; status: string; duration_ms: number | null }) => ({
           id: record.id,
           startedAt: record.started_at,
           completedAt: record.completed_at,
           status: record.status,
           conversationsProcessed: record.conversations_processed,
           shipmentsAdded: record.shipments_added,
-          errors: record.errors,
+          errors: Array.isArray(record.errors) ? record.errors : [],
         })
 
         return {
@@ -144,8 +143,7 @@ export const appRouter = os.router({
           lastSync: lastSyncRecord ? mapRecord(lastSyncRecord) : null,
         }
       }),
-  } as any,
-
+  },
   manualUpdateTracking: {
     update: publicProcedure
       .output(z.object({
@@ -164,7 +162,7 @@ export const appRouter = os.router({
           message: 'Use /api/manual-update-tracking for full functionality',
         }
       }),
-  } as any,
-})
+  },
+} as const
 
 export type AppRouter = typeof appRouter

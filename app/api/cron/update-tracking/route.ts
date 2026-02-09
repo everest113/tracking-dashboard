@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
+import { getErrorMessage } from '@/lib/utils/fetch-helpers'
 import { getShipmentTrackingService } from '@/lib/application/ShipmentTrackingService'
+import type { TrackingUpdateResult } from '@/lib/application/types'
 
 /**
  * Cron endpoint to update tracking information for active shipments
@@ -29,9 +30,9 @@ export async function GET(request: Request) {
     const summary = {
       success: true,
       checked: results.length,
-      updated: results.filter((r: any) => r.statusChanged).length,
-      delivered: results.filter((r: any) => r.newStatus === 'delivered').length,
-      errors: results.filter((r: any) => !r.success).length,
+      updated: results.filter((r: TrackingUpdateResult) => r.statusChanged).length,
+      delivered: results.filter((r: TrackingUpdateResult) => r.newStatus === 'delivered').length,
+      errors: results.filter((r: TrackingUpdateResult) => !r.success).length,
       durationMs: duration,
       timestamp: new Date().toISOString(),
     }
@@ -41,16 +42,18 @@ export async function GET(request: Request) {
 
     return NextResponse.json(summary)
 
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? getErrorMessage(error) : 'Unknown error'
+    const errorStack = error instanceof Error ? error.stack : undefined
+    
     console.error('=== Cron: Tracking Update Error ===')
-    console.error('Error:', error.message)
-    console.error('Stack:', error.stack)
+    console.error('Error:', errorMessage)
+    console.error('Stack:', errorStack)
 
     return NextResponse.json(
       {
         success: false,
-        error: error.message || 'Failed to update tracking',
-        durationMs: Date.now() - startTime,
+        error: errorMessage,
         timestamp: new Date().toISOString(),
       },
       { status: 500 }

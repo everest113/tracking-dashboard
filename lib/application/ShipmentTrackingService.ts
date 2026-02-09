@@ -7,6 +7,7 @@ import { createRegisterTrackerUseCase } from './use-cases/registerTracker'
 import { createUpdateShipmentTrackingUseCase } from './use-cases/updateShipmentTracking'
 import { createProcessWebhookUseCase } from './use-cases/processWebhook'
 import type { Ship24Tracking } from '../infrastructure/sdks/ship24/schemas'
+import type { TrackingUpdateResult, TrackerRegistrationResult } from './types'
 
 /**
  * Shipment Tracking Service - Functional Style
@@ -14,12 +15,12 @@ import type { Ship24Tracking } from '../infrastructure/sdks/ship24/schemas'
  */
 
 export interface ShipmentTrackingService {
-  registerTracker(trackingNumber: string, carrier: string | null, poNumber?: string): Promise<any>
-  registerTrackersBulk(shipments: Array<{ trackingNumber: string; carrier: string | null; poNumber?: string }>): Promise<any>
-  updateActiveShipments(limit?: number): Promise<any>
-  backfillTrackers(): Promise<any>
-  processWebhook(trackerId: string, trackingNumber: string, tracking: Ship24Tracking): Promise<any>
-  getShipment(trackingNumber: string): Promise<any>
+  registerTracker(trackingNumber: string, carrier?: string | null, poNumber?: string): Promise<TrackerRegistrationResult>
+  registerTrackersBulk(shipments: Array<{ trackingNumber: string; carrier?: string | null; poNumber?: string }>): Promise<TrackerRegistrationResult[]>
+  updateActiveShipments(limit?: number): Promise<TrackingUpdateResult[]>
+  backfillTrackers(): Promise<{ total: number; registered: number; skipped: number; errors: string[] }>
+  processWebhook(trackerId: string, trackingNumber: string, tracking: Ship24Tracking): Promise<{ success: boolean; statusChanged: boolean; oldStatus: string; newStatus: string }>
+  getShipment(trackingNumber: string): Promise<S | null>
 }
 
 /**
@@ -39,15 +40,15 @@ export const createShipmentTrackingService = (): ShipmentTrackingService => {
     /**
      * Register a single tracker
      */
-    async registerTracker(trackingNumber: string, carrier: string | null, poNumber?: string) {
+    async registerTracker(trackingNumber: string, carrier?: string | null, poNumber?: string) {
       // Validate tracking number
       const tnResult = TN.create(trackingNumber)
       if (!tnResult.success) {
         const errorMsg = tnResult.error.message
         return {
-          success: false,
-          trackerId: null,
-          error: errorMsg,
+        success: false,
+        trackingNumber,
+        error: errorMsg,
         }
       }
 
@@ -61,9 +62,9 @@ export const createShipmentTrackingService = (): ShipmentTrackingService => {
         if (!statusResult.success) {
           const errorMsg = statusResult.error.message
           return {
-            success: false,
-            trackerId: null,
-            error: errorMsg,
+        success: false,
+        trackingNumber,
+        error: errorMsg,
           }
         }
 
@@ -88,9 +89,9 @@ export const createShipmentTrackingService = (): ShipmentTrackingService => {
       if (!result.success) {
         const errorMsg = result.error.message
         return {
-          success: false,
-          trackerId: null,
-          error: errorMsg,
+        success: false,
+        trackingNumber,
+        error: errorMsg,
         }
       }
 
@@ -108,7 +109,6 @@ export const createShipmentTrackingService = (): ShipmentTrackingService => {
       for (const item of shipments) {
         const result = await this.registerTracker(item.trackingNumber, item.carrier, item.poNumber)
         results.push({
-          trackingNumber: item.trackingNumber,
           ...result,
         })
       }
@@ -150,7 +150,7 @@ export const createShipmentTrackingService = (): ShipmentTrackingService => {
     /**
      * Backfill tracker registration for unregistered shipments
      */
-    async backfillTrackers() {
+    async backfillTrackers(): Promise<{ total: number; registered: number; skipped: number; errors: string[] }> {
       const unregistered = await repository.findUnregisteredShipments()
       const results = []
 
@@ -159,7 +159,7 @@ export const createShipmentTrackingService = (): ShipmentTrackingService => {
         
         const output = result.success ? result.value : {
           success: false,
-          trackerId: null,
+          
           error: result.error.message,
         }
 
@@ -172,8 +172,8 @@ export const createShipmentTrackingService = (): ShipmentTrackingService => {
       return {
         total: unregistered.length,
         registered: results.filter(r => r.success).length,
-        failed: results.filter(r => !r.success).length,
-        results,
+        skipped: results.filter(r => !r.success).length,
+        errors: results.filter(r => !r.success).map(r => r.error || "Unknown error"),
       }
     },
 

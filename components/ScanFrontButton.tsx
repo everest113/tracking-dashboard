@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { getErrorMessage } from '@/lib/types/api-responses'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 import { Loader2 } from 'lucide-react'
@@ -33,7 +34,7 @@ export default function ScanFrontButton({ onSuccess }: { onSuccess: () => void }
 
       if (!response.ok) {
         toast.error('Failed to scan Front inbox', {
-          description: (data as any).error || 'An error occurred',
+          description: typeof data === 'object' && data !== null && 'error' in data ? String((data as { error: string }).error) : 'Unknown error',
         })
         return
       }
@@ -63,10 +64,10 @@ export default function ScanFrontButton({ onSuccess }: { onSuccess: () => void }
           description: `${data.errors.length} error(s) occurred. Check console for details.`,
         })
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Scan error:', error)
       toast.error('An unexpected error occurred', {
-        description: error.message || 'Please try again later.',
+        description: getErrorMessage(error) || 'Please try again later.',
       })
     } finally {
       setIsScanning(false)

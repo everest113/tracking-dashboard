@@ -1,12 +1,21 @@
 import { NextResponse } from 'next/server'
+import { getErrorMessage } from '@/lib/utils/fetch-helpers'
 import { prisma } from '@/lib/prisma'
 import { getShipmentTrackingService } from '@/lib/application/ShipmentTrackingService'
+
+interface UnregisteredShipment {
+  id: number
+  tracking_number: string
+  carrier: string | null
+  po_number: string | null
+  status: string
+}
 
 /**
  * Backfill Ship24 trackers for all existing shipments
  * This registers all shipments that don't have a ship24_tracker_id yet
  */
-export async function POST(request: Request) {
+export async function POST() {
   const startTime = Date.now()
   
   try {
@@ -40,7 +49,7 @@ export async function POST(request: Request) {
     }
 
     let registered = 0
-    let skipped = 0
+    const skipped = 0
     let errors = 0
     const errorMessages: string[] = []
 
@@ -55,7 +64,7 @@ export async function POST(request: Request) {
       
       try {
         // Prepare tracker data
-        const trackerData = batch.map((s: any) => ({
+        const trackerData = batch.map((s: UnregisteredShipment) => ({
           trackingNumber: s.tracking_number,
           carrier: s.carrier,
           poNumber: s.po_number || undefined
@@ -68,7 +77,7 @@ export async function POST(request: Request) {
 
         // Update database with tracker IDs
         for (const result of results) {
-          const shipment = batch.find((s: any) => s.tracking_number === result.trackingNumber)
+          const shipment = batch.find((s: UnregisteredShipment) => s.tracking_number === result.trackingNumber)
           
           if (shipment) {
             if (result.success && result.trackerId) {
@@ -83,9 +92,11 @@ export async function POST(request: Request) {
                 
                 registered++
                 console.log(`  ✅ Registered: ${shipment.tracking_number} → ${result.trackerId}`)
-              } catch (updateErr: any) {
+              } catch (updateErr) {
                 errors++
-                const msg = `Failed to update ${shipment.tracking_number}: ${updateErr.message}`
+                const msg = updateErr instanceof Error 
+                  ? `Failed to update ${shipment.tracking_number}: ${updateErr.message}`
+                  : `Failed to update ${shipment.tracking_number}: Unknown error`
                 console.error(`  ❌ ${msg}`)
                 errorMessages.push(msg)
               }
@@ -103,9 +114,11 @@ export async function POST(request: Request) {
           await new Promise(resolve => setTimeout(resolve, 500))
         }
 
-      } catch (batchErr: any) {
+      } catch (batchErr) {
         errors += batch.length
-        const msg = `Batch ${Math.floor(i / BATCH_SIZE) + 1} failed: ${batchErr.message}`
+        const msg = batchErr instanceof Error
+          ? `Batch ${Math.floor(i / BATCH_SIZE) + 1} failed: ${batchErr.message}`
+          : `Batch ${Math.floor(i / BATCH_SIZE) + 1} failed: Unknown error`
         console.error(`  ❌ ${msg}`)
         errorMessages.push(msg)
       }
@@ -129,15 +142,18 @@ export async function POST(request: Request) {
 
     return NextResponse.json(summary)
 
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? getErrorMessage(error) : 'Failed to backfill trackers'
+    const errorStack = error instanceof Error ? error.stack : undefined
+    
     console.error('=== Backfill Error ===')
-    console.error('Error:', error.message)
-    console.error('Stack:', error.stack)
+    console.error('Error:', errorMessage)
+    console.error('Stack:', errorStack)
 
     return NextResponse.json(
       {
         success: false,
-        error: error.message || 'Failed to backfill trackers',
+        error: errorMessage,
         durationMs: Date.now() - startTime,
         timestamp: new Date().toISOString()
       },

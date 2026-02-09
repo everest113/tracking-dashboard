@@ -6,6 +6,7 @@ import { Ship24Mapper } from '@/lib/infrastructure/mappers/Ship24Mapper'
 import { TrackingNumber } from '@/lib/domain/value-objects/TrackingNumber'
 import { Result, Ok, Err } from '@/lib/domain/core/Result'
 
+import { getErrorMessage } from '@/lib/utils/fetch-helpers'
 /**
  * Register Tracker Use Case - Functional Style
  * Pure function that takes dependencies and returns an async function
@@ -17,7 +18,8 @@ export interface RegisterTrackerInput {
 
 export interface RegisterTrackerOutput {
   readonly success: boolean
-  readonly trackerId: string | null
+  readonly trackingNumber: string
+  readonly trackerId?: string
   readonly shipment?: Shipment
   readonly error?: string
 }
@@ -38,17 +40,17 @@ export const createRegisterTrackerUseCase = (
     if (S.hasTracker(shipment)) {
       return Ok({
         success: true,
-        trackerId: shipment.ship24TrackerId,
+        trackingNumber: TrackingNumber.toString(shipment.trackingNumber),
+        trackerId: shipment.ship24TrackerId || undefined,
         shipment,
       })
     }
 
     // Register with Ship24
-    const response = await ship24.registerTracker({
-      trackingNumber: TrackingNumber.toString(shipment.trackingNumber),
-      courierCode: Ship24Mapper.normalizeCarrierCode(shipment.carrier),
-      shipmentReference: shipment.poNumber || undefined,
-    })
+    const response = await ship24.registerTracker(
+      TrackingNumber.toString(shipment.trackingNumber),
+      Ship24Mapper.normalizeCarrierCode(shipment.carrier)?.[0]
+    )
 
     const trackerId = response.data.tracker.trackerId
 
@@ -66,16 +68,17 @@ export const createRegisterTrackerUseCase = (
 
     return Ok({
       success: true,
+      trackingNumber: TrackingNumber.toString(savedShipment.trackingNumber),
       trackerId,
       shipment: savedShipment,
     })
-  } catch (error: any) {
-    console.error(`Failed to register tracker for ${TrackingNumber.toString(shipment.trackingNumber)}:`, error.message)
+  } catch (error: unknown) {
+    console.error(`Failed to register tracker for ${TrackingNumber.toString(shipment.trackingNumber)}:`, getErrorMessage(error))
     
     return Ok({
-      success: false,
-      trackerId: null,
-      error: error.message,
+        trackingNumber: TrackingNumber.toString(input.shipment.trackingNumber),
+        success: false,
+        error: getErrorMessage(error),
     })
   }
 }

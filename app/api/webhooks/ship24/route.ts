@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server'
+import { getErrorMessage } from '@/lib/utils/fetch-helpers'
 import { prisma } from '@/lib/prisma'
 import { Ship24Mapper } from '@/lib/infrastructure/mappers/Ship24Mapper'
 import { ShipmentStatus } from '@/lib/domain/value-objects/ShipmentStatus'
 import crypto from 'crypto'
+import type { Prisma } from '@prisma/client'
 
 /**
  * Verify Ship24 webhook signature
@@ -25,7 +27,7 @@ function verifyShip24Signature(
       Buffer.from(signature),
       Buffer.from(expectedSignature)
     )
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Signature verification error:', error)
     return false
   }
@@ -78,22 +80,6 @@ export async function POST(request: Request) {
     console.log('=== Ship24 Webhook Received ===')
     console.log('Payload:', JSON.stringify(payload, null, 2))
 
-    // Ship24 webhook structure:
-    // {
-    //   "webhook": {
-    //     "id": "webhook-id",
-    //     "trackerId": "tracker-id",
-    //     ...
-    //   },
-    //   "data": {
-    //     "trackings": [{
-    //       "tracker": { trackerId, trackingNumber, ... },
-    //       "shipment": { status, statusMilestone, delivery: {...}, ... },
-    //       "events": [...]
-    //     }]
-    //   }
-    // }
-
     const tracking = payload.data?.trackings?.[0]
     
     if (!tracking) {
@@ -111,7 +97,7 @@ export async function POST(request: Request) {
     }
 
     // Find shipment in database by trackerId or trackingNumber
-    let dbShipment = await prisma.shipments.findFirst({
+    const dbShipment = await prisma.shipments.findFirst({
       where: {
         OR: [
           { ship24_tracker_id: trackerId },
@@ -132,7 +118,7 @@ export async function POST(request: Request) {
     const oldStatus = dbShipment.status
 
     // Prepare update data
-    const updateData: any = {
+    const updateData: Prisma.shipmentsUpdateInput = {
       status: newStatus,
       last_checked: new Date(),
     }
@@ -217,15 +203,18 @@ export async function POST(request: Request) {
       timestamp: new Date().toISOString()
     })
 
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? getErrorMessage(error) : 'Failed to process webhook'
+    const errorStack = error instanceof Error ? error.stack : undefined
+    
     console.error('=== Webhook Error ===')
-    console.error('Error:', error.message)
-    console.error('Stack:', error.stack)
+    console.error('Error:', errorMessage)
+    console.error('Stack:', errorStack)
 
     return NextResponse.json(
       {
         success: false,
-        error: error.message || 'Failed to process webhook',
+        error: errorMessage,
         durationMs: Date.now() - startTime,
         timestamp: new Date().toISOString()
       },

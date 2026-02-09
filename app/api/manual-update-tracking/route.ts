@@ -1,173 +1,117 @@
 import { NextResponse } from 'next/server'
+import type { TrackingUpdateResult } from '@/lib/application/types'
+import { getErrorMessage } from '@/lib/utils/fetch-helpers'
 import { prisma } from '@/lib/prisma'
 import { createShip24Client } from '@/lib/infrastructure/sdks/ship24/client'
 import { Ship24Mapper } from '@/lib/infrastructure/mappers/Ship24Mapper'
-import { ShipmentStatus } from '@/lib/domain/value-objects/ShipmentStatus'
 
 /**
- * Manual trigger endpoint for tracking updates
- * Uses Ship24 cached results (fast) instead of re-tracking
+ * Manual tracking update endpoint
+ * Fetches latest tracking info from Ship24 cache for active shipments
  */
-export async function POST(request: Request) {
+export async function POST() {
   const startTime = Date.now()
   
   try {
     console.log('=== Manual Tracking Update Started ===')
 
-    // Get all NON-DELIVERED shipments that have a tracker ID
-    const activeShipments = await prisma.shipments.findMany({
+    const limit = 50
+    const shipments = await prisma.shipments.findMany({
       where: {
         status: {
-          notIn: ['delivered']
+          notIn: ['delivered'],
         },
         ship24_tracker_id: {
-          not: null
-        }
+          not: null,
+        },
       },
       orderBy: {
-        last_checked: 'asc'
+        last_checked: 'asc',
       },
-      take: 50 // Limit to prevent timeout
+      take: limit,
     })
 
-    console.log(`Found ${activeShipments.length} active shipments with registered trackers`)
+    console.log(`Found ${shipments.length} shipments to update`)
 
-    if (activeShipments.length === 0) {
+    if (shipments.length === 0) {
       return NextResponse.json({
         success: true,
-        message: 'No active shipments with registered trackers',
         checked: 0,
         updated: 0,
-        timestamp: new Date().toISOString(),
+        errors: 0,
+        durationMs: Date.now() - startTime,
+        timestamp: new Date().toISOString()
       })
     }
 
-    let updated = 0
-    let skipped = 0
-    let errors = 0
-    const errorMessages: string[] = []
-    const statusChanges: Array<{ trackingNumber: string; old: string; new: string }> = []
-    const deliveredShipments: string[] = []
-
     const ship24Client = createShip24Client()
+    const results: TrackingUpdateResult[] = []
+    let errors = 0
 
-    // Process each shipment
-    for (const shipment of activeShipments) {
+    for (const shipment of shipments) {
       try {
-        console.log(`[${shipment.tracking_number}] Fetching cached results (tracker: ${shipment.ship24_tracker_id})`)
-        
-        // Fetch tracking data from Ship24's cache (fast)
+        console.log(`Updating ${shipment.tracking_number}...`)
+
         const response = await ship24Client.getTrackerResults(shipment.ship24_tracker_id!)
-        const tracking = response.data.trackings[0]
         
-        if (!tracking) {
-          throw new Error('No tracking data found')
-        }
-
-        // Map to domain
-        const trackingUpdate = Ship24Mapper.toDomainTrackingUpdate(tracking)
-        
-        const newStatus = ShipmentStatus.toString(trackingUpdate.status)
-        const oldStatus = shipment.status
-        
-        // Prepare update data
-        const updateData: any = {
-          last_checked: new Date(),
-          status: newStatus,
-        }
-        
-        // Update dates if available
-        if (trackingUpdate.estimatedDelivery) {
-          updateData.estimated_delivery = trackingUpdate.estimatedDelivery
-        }
-        
-        if (trackingUpdate.deliveredDate) {
-          updateData.delivered_date = trackingUpdate.deliveredDate
-        }
-
-        if (trackingUpdate.shippedDate) {
-          updateData.shipped_date = trackingUpdate.shippedDate
-        }
-        
-        // Update carrier if we got it from Ship24
-        if (trackingUpdate.carrier && !shipment.carrier) {
-          updateData.carrier = trackingUpdate.carrier
-        }
-        
-        // Use a transaction to ensure atomicity
-        await prisma.$transaction(async (tx) => {
-          // Update shipment
-          await tx.shipments.update({
-            where: { id: shipment.id },
-            data: updateData
-          })
+        if (response.data?.trackings?.[0]) {
+          const tracking = response.data.trackings[0]
+          const trackingUpdate = Ship24Mapper.toDomainTrackingUpdate(tracking)
           
-          // Store latest tracking event if we have events
-          if (trackingUpdate.events && trackingUpdate.events.length > 0) {
-            const latestEvent = trackingUpdate.events[0]
-            
-            // Check if this event already exists
-            const existingEvent = await tx.tracking_events.findFirst({
-              where: {
-                shipment_id: shipment.id,
-                event_time: latestEvent.occurredAt,
-                message: latestEvent.description
-              }
-            })
-            
-            // Only create if it doesn't exist
-            if (!existingEvent) {
-              await tx.tracking_events.create({
-                data: {
-                  shipment_id: shipment.id,
-                  status: latestEvent.status,
-                  location: latestEvent.location,
-                  message: latestEvent.description,
-                  event_time: latestEvent.occurredAt
-                }
-              })
-            }
-          }
-        })
-        
-        // Log status changes
-        if (oldStatus !== newStatus) {
-          statusChanges.push({
-            trackingNumber: shipment.tracking_number,
-            old: oldStatus,
-            new: newStatus
-          })
-          console.log(`  ✅ Status changed: ${oldStatus} → ${newStatus}`)
-          
-          if (newStatus === 'delivered') {
-            deliveredShipments.push(shipment.tracking_number)
-            console.log(`  🎉 DELIVERED: ${shipment.tracking_number}`)
-          }
-        } else {
-          console.log(`  ⏸️  No change (still ${newStatus})`)
-          skipped++
-        }
+          const newStatus = trackingUpdate.status.type
+          const oldStatus = shipment.status
 
-        updated++
-        
-        // Rate limiting: add a small delay between API calls
-        await new Promise(resolve => setTimeout(resolve, 100))
-        
-      } catch (err: any) {
-        errors++
-        const errorMsg = `${shipment.tracking_number}: ${err.message}`
-        console.error(`  ❌ Failed:`, err.message)
-        errorMessages.push(errorMsg)
-        
-        // Still update lastChecked to avoid repeatedly hitting failed lookups
-        try {
           await prisma.shipments.update({
             where: { id: shipment.id },
-            data: { last_checked: new Date() }
+            data: {
+              status: newStatus,
+              last_checked: new Date(),
+              ...(trackingUpdate.estimatedDelivery && {
+                estimated_delivery: trackingUpdate.estimatedDelivery
+              }),
+              ...(trackingUpdate.deliveredDate && {
+                delivered_date: trackingUpdate.deliveredDate
+              }),
+              ...(trackingUpdate.shippedDate && {
+                shipped_date: trackingUpdate.shippedDate
+              }),
+            }
           })
-        } catch (updateErr) {
-          console.error(`  ❌ Failed to update lastChecked:`, updateErr)
+
+          const statusChanged = oldStatus !== newStatus
+
+          results.push({
+            success: true,
+            trackingNumber: shipment.tracking_number,
+            oldStatus,
+            newStatus,
+            statusChanged,
+          })
+
+          if (statusChanged) {
+            console.log(`  ✓ ${shipment.tracking_number}: ${oldStatus} → ${newStatus}`)
+          }
+        } else {
+          results.push({
+            success: false,
+            trackingNumber: shipment.tracking_number,
+            oldStatus: shipment.status,
+            newStatus: shipment.status,
+            statusChanged: false,
+            error: 'No tracking data available'
+          })
         }
+      } catch (error) {
+        console.error(`  ✗ Error updating ${shipment.tracking_number}:`, getErrorMessage(error))
+        errors++
+        results.push({
+          success: false,
+          trackingNumber: shipment.tracking_number,
+          oldStatus: shipment.status,
+          newStatus: shipment.status,
+          statusChanged: false,
+          error: getErrorMessage(error)
+        })
       }
     }
 
@@ -175,15 +119,12 @@ export async function POST(request: Request) {
 
     const summary = {
       success: true,
-      checked: activeShipments.length,
-      updated,
-      skipped,
+      checked: shipments.length,
+      updated: results.filter((r: TrackingUpdateResult) => r.statusChanged).length,
+      delivered: results.filter((r: TrackingUpdateResult) => r.newStatus === 'delivered').length,
       errors,
-      statusChanges,
-      deliveredShipments,
-      errorMessages: errorMessages.slice(0, 10),
       durationMs: duration,
-      timestamp: new Date().toISOString(),
+      timestamp: new Date().toISOString()
     }
 
     console.log('=== Manual Update Complete ===')
@@ -191,17 +132,16 @@ export async function POST(request: Request) {
 
     return NextResponse.json(summary)
 
-  } catch (error: any) {
+  } catch (error) {
     console.error('=== Manual Update Error ===')
-    console.error('Error:', error.message)
-    console.error('Stack:', error.stack)
+    console.error('Error:', getErrorMessage(error))
 
     return NextResponse.json(
       {
         success: false,
-        error: error.message || 'Failed to update tracking',
+        error: getErrorMessage(error),
         durationMs: Date.now() - startTime,
-        timestamp: new Date().toISOString(),
+        timestamp: new Date().toISOString()
       },
       { status: 500 }
     )

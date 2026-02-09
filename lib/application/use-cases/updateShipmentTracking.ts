@@ -5,6 +5,7 @@ import { ShipmentStatus } from '@/lib/domain/value-objects/ShipmentStatus'
 import type { ShipmentRepository } from '@/lib/infrastructure/repositories/PrismaShipmentRepository'
 import type { Ship24Client } from '@/lib/infrastructure/sdks/ship24/client'
 import { Ship24Mapper } from '@/lib/infrastructure/mappers/Ship24Mapper'
+import { getErrorMessage } from '@/lib/utils/fetch-helpers'
 import { Result, Ok, Err, DomainError } from '@/lib/domain/core/Result'
 
 /**
@@ -74,15 +75,15 @@ export const createUpdateShipmentTrackingUseCase = (
       newStatus,
       shipment: savedShipment,
     })
-  } catch (error: any) {
-    console.error(`Failed to update tracking for ${TrackingNumber.toString(shipment.trackingNumber)}:`, error.message)
+  } catch (error: unknown) {
+    console.error(`Failed to update tracking for ${TrackingNumber.toString(shipment.trackingNumber)}:`, getErrorMessage(error))
     
     return Ok({
       success: false,
       statusChanged: false,
       oldStatus,
       newStatus: oldStatus,
-      error: error.message,
+      error: getErrorMessage(error),
     })
   }
 }
