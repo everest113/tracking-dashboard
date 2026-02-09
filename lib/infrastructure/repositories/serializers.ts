@@ -12,10 +12,13 @@ export type ShipmentResponse = {
   poNumber: string | null
   supplier: string | null
   status: string
-  deliveredAt: Date | null
+  origin: string | null
+  destination: string | null
+  shippedDate: Date | null
+  estimatedDelivery: Date | null
+  deliveredDate: Date | null
+  lastChecked: Date | null
   ship24TrackerId: string | null
-  ship24TrackerStatus: string | null
-  ship24LastUpdate: Date | null
   frontConversationId: string | null
   createdAt: Date
   updatedAt: Date
@@ -25,12 +28,11 @@ export type ShipmentResponse = {
 export type TrackingEventResponse = {
   id: number
   shipmentId: number
-  status: string
+  status: string | null
   location: string | null
-  timestamp: Date
-  description: string | null
-  eventTime: Date
-  rawData: unknown
+  message: string | null
+  eventTime: Date | null
+  createdAt: Date
 }
 
 export function serializeShipment(
@@ -43,10 +45,13 @@ export function serializeShipment(
     poNumber: shipment.po_number,
     supplier: shipment.supplier,
     status: shipment.status,
-    deliveredAt: shipment.delivered_at,
+    origin: shipment.origin,
+    destination: shipment.destination,
+    shippedDate: shipment.shipped_date,
+    estimatedDelivery: shipment.estimated_delivery,
+    deliveredDate: shipment.delivered_date,
+    lastChecked: shipment.last_checked,
     ship24TrackerId: shipment.ship24_tracker_id,
-    ship24TrackerStatus: shipment.ship24_tracker_status,
-    ship24LastUpdate: shipment.ship24_last_update,
     frontConversationId: shipment.front_conversation_id,
     createdAt: shipment.created_at,
     updatedAt: shipment.updated_at,
@@ -60,10 +65,9 @@ export function serializeTrackingEvent(event: tracking_events): TrackingEventRes
     shipmentId: event.shipment_id,
     status: event.status,
     location: event.location,
-    timestamp: event.timestamp,
-    description: event.description,
+    message: event.message,
     eventTime: event.event_time,
-    rawData: event.raw_data,
+    createdAt: event.created_at,
   }
 }
 

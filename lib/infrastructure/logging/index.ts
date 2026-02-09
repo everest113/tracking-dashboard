@@ -3,7 +3,7 @@
  * Automatically selects the right logger for the environment (server/client)
  */
 
-import type { ILogger, LogContext, LoggerConfig } from './types'
+import type { ILogger, LogContext, LoggerConfig, LogLevel } from './types'
 
 let cachedLogger: ILogger | null = null
 
@@ -32,19 +32,58 @@ export function getLogger(config: LoggerConfig = {}): ILogger {
   }
 }
 
-// Console fallback logger
+// Console fallback logger (implements full ILogger interface)
 function createConsoleLogger(): ILogger {
-  const log = (level: string, message: string, metadata?: unknown) => {
+  let minLevel: LogLevel = 'debug'
+  
+  const levelValues: Record<LogLevel, number> = {
+    trace: 0,
+    debug: 1,
+    info: 2,
+    warn: 3,
+    error: 4,
+    fatal: 5,
+  }
+  
+  const shouldLog = (level: LogLevel): boolean => {
+    return levelValues[level] >= levelValues[minLevel]
+  }
+  
+  const log = (level: LogLevel, message: string, metadata?: unknown) => {
+    if (!shouldLog(level)) return
+    
     const meta = metadata ? ` ${JSON.stringify(metadata)}` : ''
-    console[level as keyof Console]?.(`[${level.toUpperCase()}] ${message}${meta}`)
+    const logMessage = `[${level.toUpperCase()}] ${message}${meta}`
+    
+    switch (level) {
+      case 'trace':
+      case 'debug':
+        console.debug(logMessage)
+        break
+      case 'info':
+        console.info(logMessage)
+        break
+      case 'warn':
+        console.warn(logMessage)
+        break
+      case 'error':
+      case 'fatal':
+        console.error(logMessage)
+        break
+    }
   }
 
   return {
+    trace: (msg, meta) => log('trace', msg, meta),
     debug: (msg, meta) => log('debug', msg, meta),
     info: (msg, meta) => log('info', msg, meta),
     warn: (msg, meta) => log('warn', msg, meta),
     error: (msg, meta) => log('error', msg, meta),
+    fatal: (msg, meta) => log('fatal', msg, meta),
     child: () => createConsoleLogger(),
+    setLevel: (level: LogLevel) => {
+      minLevel = level
+    },
   }
 }
 
