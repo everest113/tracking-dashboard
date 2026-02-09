@@ -50,15 +50,16 @@ export class FrontClient extends BaseSdkClient {
   }
 
   /**
-   * Get conversations from an inbox
+   * Get a single page of conversations from an inbox
    */
-  async getInboxConversations(
+  async getInboxConversationsPage(
     inboxId: string,
     options: {
       limit?: number
       after?: number | Date
+      pageToken?: string
     } = {}
-  ): Promise<FrontConversation[]> {
+  ): Promise<FrontListResponse<FrontConversation>> {
     const params = new URLSearchParams()
     
     if (options.limit) {
@@ -72,14 +73,86 @@ export class FrontClient extends BaseSdkClient {
       params.append('q[after]', timestamp.toString())
     }
 
+    // If pageToken is provided, use it directly as the endpoint
+    if (options.pageToken) {
+      // pageToken is a full URL from _pagination.next
+      const url = new URL(options.pageToken)
+      return await this.get<FrontListResponse<FrontConversation>>(
+        url.pathname + url.search,
+        FrontListResponseSchema(FrontConversationSchema)
+      )
+    }
+
     const queryString = params.toString()
     const endpoint = `/inboxes/${inboxId}/conversations${queryString ? `?${queryString}` : ''}`
 
-    const response = await this.get<FrontListResponse<FrontConversation>>(
+    return await this.get<FrontListResponse<FrontConversation>>(
       endpoint,
       FrontListResponseSchema(FrontConversationSchema)
     )
+  }
 
+  /**
+   * Get ALL conversations from an inbox (handles pagination automatically)
+   */
+  async getAllInboxConversations(
+    inboxId: string,
+    options: {
+      pageSize?: number
+      after?: number | Date
+      maxPages?: number  // Safety limit to prevent infinite loops
+    } = {}
+  ): Promise<FrontConversation[]> {
+    const pageSize = options.pageSize || 100
+    const maxPages = options.maxPages || 1000  // Safety limit
+    
+    let allConversations: FrontConversation[] = []
+    let currentPage = 0
+    let nextPageToken: string | null | undefined = undefined
+
+    do {
+      console.log(`Fetching page ${currentPage + 1} (${allConversations.length} conversations so far)...`)
+      
+      const response = await this.getInboxConversationsPage(inboxId, {
+        limit: pageSize,
+        after: options.after,
+        pageToken: nextPageToken || undefined,
+      })
+
+      allConversations = allConversations.concat(response._results)
+      nextPageToken = response._pagination.next
+
+      currentPage++
+
+      // Safety check
+      if (currentPage >= maxPages) {
+        console.warn(`Reached maximum page limit (${maxPages}). Stopping pagination.`)
+        break
+      }
+
+      // Small delay to avoid rate limiting
+      if (nextPageToken) {
+        await new Promise(resolve => setTimeout(resolve, 100))
+      }
+
+    } while (nextPageToken)
+
+    console.log(`Fetched ${allConversations.length} total conversations across ${currentPage} pages`)
+    return allConversations
+  }
+
+  /**
+   * Get conversations from an inbox (single page - deprecated, use getAllInboxConversations)
+   * @deprecated Use getAllInboxConversations for automatic pagination
+   */
+  async getInboxConversations(
+    inboxId: string,
+    options: {
+      limit?: number
+      after?: number | Date
+    } = {}
+  ): Promise<FrontConversation[]> {
+    const response = await this.getInboxConversationsPage(inboxId, options)
     return response._results
   }
 

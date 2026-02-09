@@ -179,7 +179,7 @@ export async function POST(request: Request) {
     console.log('=== Front Scan Started ===')
 
     const body = await request.json()
-    const { after, limit = 100, batchSize = 10 } = body
+    const { after, batchSize = 10, pageSize = 100, maxPages } = body
 
     const frontClient = getFrontClient()
 
@@ -201,12 +201,14 @@ export async function POST(request: Request) {
 
     console.log(`Using inbox ID: ${inboxId}`)
 
-    const conversations = await frontClient.getInboxConversations(inboxId, {
-      limit,
-      after: afterDate
+    // Fetch ALL conversations (paginated automatically)
+    const conversations = await frontClient.getAllInboxConversations(inboxId, {
+      pageSize,
+      after: afterDate,
+      maxPages,
     })
 
-    console.log(`Found ${conversations.length} conversations`)
+    console.log(`Found ${conversations.length} total conversations`)
 
     if (conversations.length === 0) {
       return NextResponse.json({
@@ -218,7 +220,7 @@ export async function POST(request: Request) {
           shipmentsSkipped: 0,
           conversationsWithNoTracking: 0,
           batchSize,
-          limit,
+          totalConversations: 0,
         },
         errors: [],
         durationMs: Date.now() - startTime,
@@ -251,7 +253,7 @@ export async function POST(request: Request) {
           shipmentsSkipped: 0,
           conversationsWithNoTracking: 0,
           batchSize,
-          limit,
+          totalConversations: conversations.length,
         },
         errors: [],
         durationMs: Date.now() - startTime,
@@ -291,7 +293,7 @@ export async function POST(request: Request) {
       shipmentsSkipped: results.skipped,
       conversationsWithNoTracking: results.noTracking,
       batchSize,
-      limit,
+      totalConversations: conversations.length,
     }
 
     console.log('=== Front Scan Complete ===')
@@ -304,7 +306,7 @@ export async function POST(request: Request) {
         shipments_skipped: summary.shipmentsSkipped,
         conversations_with_no_tracking: summary.conversationsWithNoTracking,
         batch_size: batchSize,
-        limit,
+        limit: conversations.length,  // Total conversations fetched
         duration_ms: duration,
         errors: results.errors,
         status: results.errors.length > 0 ? 'partial' : 'success',
