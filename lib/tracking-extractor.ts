@@ -1,8 +1,16 @@
 import OpenAI from 'openai'
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-})
+// Lazy-load OpenAI client to avoid initialization during build
+let openai: OpenAI | null = null
+
+function getOpenAIClient() {
+  if (!openai) {
+    openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+    })
+  }
+  return openai
+}
 
 export type ExtractedShipment = {
   trackingNumber: string
@@ -31,6 +39,8 @@ export async function extractTrackingInfo(
     sentDate?: Date // Email sent timestamp for fallback
   }>
 ): Promise<ExtractionResult> {
+  const client = getOpenAIClient()
+  
   // Build comprehensive context from all messages
   const threadContext = messages.map((msg, idx) => `
 --- Message ${idx + 1} ---
@@ -105,7 +115,7 @@ IMPORTANT:
 - **If no valid tracking numbers found, return empty shipments array**`
 
   try {
-    const completion = await openai.chat.completions.create({
+    const completion = await client.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [
         {
