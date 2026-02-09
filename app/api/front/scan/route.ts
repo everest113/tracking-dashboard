@@ -189,16 +189,17 @@ export async function POST(request: Request) {
 
     console.log(`Fetching conversations after: ${afterDate.toISOString()}`)
 
-        // Find the inbox by name
-    const inboxName = process.env.FRONT_SUPPLIERS_INBOX || 'Suppliers'
-    const inboxId = await frontClient.findInboxByName(inboxName)
+    // Use inbox ID directly from environment
+    const inboxId = process.env.FRONT_INBOX_ID
     
     if (!inboxId) {
       return NextResponse.json(
-        { success: false, error: `Inbox '${inboxName}' not found` },
-        { status: 404 }
+        { success: false, error: 'FRONT_INBOX_ID environment variable is not set' },
+        { status: 500 }
       )
     }
+
+    console.log(`Using inbox ID: ${inboxId}`)
 
     const conversations = await frontClient.getInboxConversations(inboxId, {
       limit,
