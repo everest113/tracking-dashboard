@@ -4,39 +4,27 @@ import { buildTrackingExtractionInstructions } from './prompts'
 
 /**
  * Extract tracking information from email messages
- * 
- * This is a domain-optimized extraction module built on top of
- * the generic extraction core. It includes:
- * - Shipping-specific prompt engineering
- * - Tracking number validation and normalization
- * - Supplier identification logic
  */
 export async function extractTracking(
   messages: EmailMessage[]
 ): Promise<TrackingExtractionResult> {
-  // Validate input
   if (!messages || messages.length === 0) {
-    return { supplier: null, shipments: [] }
+    return { supplier: '', shipments: [] }
   }
 
-  // Create extraction client
   const client = createExtractionClient()
-
-  // Build prompt from messages
   const instructions = buildTrackingExtractionInstructions(messages)
 
   try {
-    // Extract using core client
     const result = await client.extract({
-      input: '', // Instructions already contain the full context
+      input: '',
       schema: TrackingExtractionResultSchema,
       instructions,
     })
 
-    // Post-process: Normalize tracking numbers
+    // Normalize tracking numbers
     const normalizedShipments = result.shipments
       .filter(shipment => {
-        // Filter out invalid tracking numbers
         if (!shipment.trackingNumber || typeof shipment.trackingNumber !== 'string') {
           console.warn('Skipping shipment with invalid tracking number:', shipment)
           return false
@@ -56,6 +44,6 @@ export async function extractTracking(
     }
   } catch (error) {
     console.error('Tracking extraction error:', error)
-    return { supplier: null, shipments: [] }
+    return { supplier: '', shipments: [] }
   }
 }
