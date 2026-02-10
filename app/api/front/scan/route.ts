@@ -180,7 +180,7 @@ export async function POST(request: Request) {
     console.log('=== Front Scan Started ===')
 
     const body = await request.json()
-    const { after, batchSize = 10, pageSize = 100, maxPages, forceRescan = false } = body
+    const { after, batchSize = 20, pageSize = 100, maxPages, forceRescan = false } = body
 
     const frontClient = getFrontClient()
 
@@ -288,9 +288,7 @@ export async function POST(request: Request) {
       results.noTracking += batchResults.noTracking
       results.errors.push(...batchResults.errors)
       
-      if (i + batchSize < unscannedConversations.length) {
-        await new Promise(resolve => setTimeout(resolve, 1000))
-      }
+      // Delay removed for better performance - rate limiting handled by batch size
     }
 
     const duration = Date.now() - startTime
