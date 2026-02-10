@@ -127,18 +127,40 @@ async function processBatch(
             console.log(`Created shipment: ${newShipment.tracking_number}`)
             addedCount++
 
-            // Auto-register with Ship24 in background
-            service.registerTracker(
-              newShipment.tracking_number,
-              newShipment.carrier ?? undefined,
-              newShipment.po_number ?? undefined
-            ).then((result) => {
-              if (result.success) {
-                console.log(`Registered tracker for ${newShipment.tracking_number}: ${result.trackerId}`)
+            // Register with Ship24 and store result
+            try {
+              const ship24Result = await service.registerTracker(
+                newShipment.tracking_number,
+                newShipment.carrier ?? undefined,
+                newShipment.po_number ?? undefined
+              )
+
+              if (ship24Result.success) {
+                console.log(`✓ Registered Ship24 tracker: ${ship24Result.trackerId}`)
+                // Update shipment with tracker ID
+                await prisma.shipments.update({
+                  where: { tracking_number: newShipment.tracking_number },
+                  data: { 
+                    ship24_tracker_id: ship24Result.trackerId,
+                    last_error: null  // Clear any previous errors
+                  }
+                })
+              } else {
+                console.error(`✗ Ship24 registration failed for ${newShipment.tracking_number}: ${ship24Result.error}`)
+                // Store error in database for debugging
+                await prisma.shipments.update({
+                  where: { tracking_number: newShipment.tracking_number },
+                  data: { last_error: ship24Result.error }
+                })
               }
-            }).catch((err) => {
-              console.error(`Error registering tracker:`, getErrorMessage(err))
-            })
+            } catch (ship24Err) {
+              console.error(`✗ Ship24 registration error:`, getErrorMessage(ship24Err))
+              // Store error in database
+              await prisma.shipments.update({
+                where: { tracking_number: newShipment.tracking_number },
+                data: { last_error: getErrorMessage(ship24Err) }
+              }).catch(() => {/* Ignore update errors */})
+            }
 
           } catch (shipmentErr) {
             console.error(`Error adding shipment:`, getErrorMessage(shipmentErr))
