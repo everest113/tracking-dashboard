@@ -20,7 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Package, MapPin, Clock, ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight, CheckCircle2, AlertCircle, TruckIcon, Search } from 'lucide-react'
+import { Package, MapPin, Clock, ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight, CheckCircle2, AlertCircle, TruckIcon, Search, Copy, Check } from 'lucide-react'
 
 interface TrackingEvent {
   id: number
@@ -75,6 +75,7 @@ export default function ShipmentTable({ shipments, pagination, onQueryChange, lo
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [sortField, setSortField] = useState<SortField | null>(null)
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc')
+  const [copiedTracking, setCopiedTracking] = useState<string | null>(null)
 
   // Debounce filter changes
   useEffect(() => {
@@ -232,6 +233,18 @@ export default function ShipmentTable({ shipments, pagination, onQueryChange, lo
     return events[0]
   }
 
+  const handleCopyTracking = async (trackingNumber: string) => {
+    try {
+      await navigator.clipboard.writeText(trackingNumber)
+      setCopiedTracking(trackingNumber)
+      setTimeout(() => {
+        setCopiedTracking((prev) => (prev === trackingNumber ? null : prev))
+      }, 2000)
+    } catch (error) {
+      console.error('Failed to copy tracking number', error)
+    }
+  }
+
   return (
     <div className="space-y-4">
       {/* Filters */}
@@ -327,7 +340,21 @@ export default function ShipmentTable({ shipments, pagination, onQueryChange, lo
                   <TableRow key={shipment.id} className={loading ? 'opacity-50' : ''}>
                     <TableCell>
                       <div className="flex flex-col gap-1">
-                        <span className="font-mono font-medium">{shipment.trackingNumber}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono font-medium">{shipment.trackingNumber}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleCopyTracking(shipment.trackingNumber)}
+                            className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-input text-muted-foreground hover:text-foreground hover:bg-muted"
+                            aria-label={`Copy tracking number ${shipment.trackingNumber}`}
+                          >
+                            {copiedTracking === shipment.trackingNumber ? (
+                              <Check className="h-3.5 w-3.5 text-green-600" />
+                            ) : (
+                              <Copy className="h-3.5 w-3.5" />
+                            )}
+                          </button>
+                        </div>
                         <div className="flex items-center gap-1">
                           <span className="text-xs text-muted-foreground uppercase">
                             {shipment.carrier || 'Unknown'}
