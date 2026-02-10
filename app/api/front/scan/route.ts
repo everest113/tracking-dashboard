@@ -115,8 +115,9 @@ async function processBatch(
               data: {
                 tracking_number: shipment.trackingNumber,
                 carrier: shipment.carrier ?? null,
-                po_number: shipment.poNumber ?? null,
-                supplier: extractionResult.supplier ?? null,
+                po_number: shipment.poNumber || null,  // Empty string -> null
+                supplier: extractionResult.supplier || null,  // Empty string -> null
+                shipped_date: shipment.shippedDate ? new Date(shipment.shippedDate) : null,
                 status: 'pending',
                 front_conversation_id: conversation.id,
                 updated_at: new Date(),
