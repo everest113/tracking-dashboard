@@ -180,7 +180,7 @@ export async function POST(request: Request) {
     console.log('=== Front Scan Started ===')
 
     const body = await request.json()
-    const { after, batchSize = 10, pageSize = 100, maxPages } = body
+    const { after, batchSize = 10, pageSize = 100, maxPages, forceRescan = false } = body
 
     const frontClient = getFrontClient()
 
@@ -229,8 +229,16 @@ export async function POST(request: Request) {
       })
     }
 
+    // Developer Mode: Allow rescanning already analyzed conversations
+    const isDevMode = process.env.DEV_ALLOW_RESCAN === 'true'
+    const shouldRescan = forceRescan && isDevMode
+    
+    if (shouldRescan) {
+      console.log('🔄 DEV MODE: Force rescanning ALL conversations (ignoring scan history)')
+    }
+
     const conversationIds = conversations.map((c: FrontConversation) => c.id)
-    const alreadyScanned = await prisma.scanned_conversations.findMany({
+    const alreadyScanned = shouldRescan ? [] : await prisma.scanned_conversations.findMany({
       where: {
         conversation_id: { in: conversationIds }
       },
@@ -238,11 +246,11 @@ export async function POST(request: Request) {
     })
 
     const scannedIds = new Set(alreadyScanned.map(s => s.conversation_id))
-    const unscannedConversations = conversations.filter(
-      (c: FrontConversation) => !scannedIds.has(c.id)
-    )
+    const unscannedConversations = shouldRescan 
+      ? conversations 
+      : conversations.filter((c: FrontConversation) => !scannedIds.has(c.id))
 
-    console.log(`${unscannedConversations.length} conversations need scanning (${scannedIds.size} already scanned)`)
+    console.log(`${unscannedConversations.length} conversations need scanning (${scannedIds.size} already scanned)${shouldRescan ? ' [FORCE RESCAN]' : ''}`)
 
     if (unscannedConversations.length === 0) {
       return NextResponse.json({

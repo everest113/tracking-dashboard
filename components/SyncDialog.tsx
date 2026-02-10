@@ -16,6 +16,7 @@ import { toast } from 'sonner'
 import { Loader2, RefreshCw, CheckCircle2, XCircle, AlertCircle } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Checkbox } from '@/components/ui/checkbox'
 import ProgressStream, { ProgressEvent } from './ProgressStream'
 
 type ScanResult = {
@@ -38,6 +39,10 @@ export default function SyncDialog({ onSuccess }: { onSuccess: () => void }) {
   const [status, setStatus] = useState<SyncStatus>('idle')
   const [result, setResult] = useState<ScanResult | null>(null)
   
+  // Developer mode state
+  const [isDevMode, setIsDevMode] = useState(false)
+  const [forceRescan, setForceRescan] = useState(false)
+  
   // Initialize with 3 days ago as fallback
   const threeDaysAgo = new Date()
   threeDaysAgo.setDate(threeDaysAgo.getDate() - 3)
@@ -47,6 +52,19 @@ export default function SyncDialog({ onSuccess }: { onSuccess: () => void }) {
   const [duration, setDuration] = useState<string | null>(null)
   const [progressEvents, setProgressEvents] = useState<ProgressEvent[]>([])
 
+  // Check if dev mode is enabled
+  useEffect(() => {
+    const checkDevMode = async () => {
+      try {
+        const isDev = process.env.NODE_ENV === 'development'
+        setIsDevMode(isDev)
+      } catch (error) {
+        setIsDevMode(false)
+      }
+    }
+    checkDevMode()
+  }, [])
+
   // Fetch last sync date on component mount
   useEffect(() => {
     const fetchLastSync = async () => {
@@ -55,15 +73,12 @@ export default function SyncDialog({ onSuccess }: { onSuccess: () => void }) {
         const data = await response.json()
         
         if (data.success && data.lastSync) {
-          // Set default to the time of the last sync (not after, but from)
-          // This ensures we catch anything that happened during or after the last sync
           const lastSyncDate = new Date(data.lastSync.startedAt)
           const defaultDate = lastSyncDate.toISOString().split('T')[0]
           setSyncDate(defaultDate)
         }
       } catch (error) {
         console.error('Failed to fetch last sync date:', error)
-        // Keep the fallback date (3 days ago) if fetch fails
       }
     }
 
@@ -96,15 +111,23 @@ export default function SyncDialog({ onSuccess }: { onSuccess: () => void }) {
 
     const formattedDate = new Date(syncDate).toLocaleDateString()
     addProgressEvent('processing', 'Initializing sync...')
+    
+    if (forceRescan && isDevMode) {
+      addProgressEvent('processing', '🔄 DEV MODE: Force rescanning enabled - will reprocess ALL conversations')
+    }
+    
     addProgressEvent('processing', `Connecting to Front inbox...`)
     addProgressEvent('processing', `Fetching conversations from ${formattedDate}`)
 
     try {
-      // Call API with date parameter
+      // Call API with date parameter and optional forceRescan
       const response = await fetch('/api/front/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ after: syncDate }),
+        body: JSON.stringify({ 
+          after: syncDate,
+          forceRescan: forceRescan && isDevMode  // Only send if dev mode enabled
+        }),
       })
 
       const data: ScanResult = await response.json()
@@ -128,7 +151,7 @@ export default function SyncDialog({ onSuccess }: { onSuccess: () => void }) {
         addProgressEvent('complete', `✓ Processed ${summary.conversationsProcessed} conversations`)
       }
       if (summary.conversationsAlreadyScanned > 0) {
-        addProgressEvent('skipped', `↻ ${summary.conversationsAlreadyScanned} already scanned (saved AI credits!)`)
+        addProgressEvent('skipped', `↻ ${summary.conversationsAlreadyScanned} already scanned${forceRescan ? ' (but rescanned anyway)' : ' (saved AI credits!)'}`)
       }
       if (summary.shipmentsAdded > 0) {
         addProgressEvent('found', `📦 ${summary.shipmentsAdded} new shipments added!`)
@@ -189,8 +212,6 @@ export default function SyncDialog({ onSuccess }: { onSuccess: () => void }) {
     }
   }
 
-  
-
   return (
     <Dialog open={isOpen} onOpenChange={(open) => {
       setIsOpen(open)
@@ -200,6 +221,7 @@ export default function SyncDialog({ onSuccess }: { onSuccess: () => void }) {
         <Button variant="default">
           <RefreshCw className="h-4 w-4" />
           Sync Front Inbox
+          {isDevMode && <span className="ml-1 text-xs opacity-70">[DEV]</span>}
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-[600px]">
@@ -236,6 +258,33 @@ export default function SyncDialog({ onSuccess }: { onSuccess: () => void }) {
                 All conversations created on or after this date will be scanned
               </p>
             </div>
+
+            {/* Developer Mode: Force Rescan Option */}
+            {isDevMode && (
+              <div className="rounded-lg border border-orange-200 bg-orange-50 p-4">
+                <div className="flex items-start space-x-3">
+                  <Checkbox
+                    id="forceRescan"
+                    checked={forceRescan}
+                    onCheckedChange={(checked) => setForceRescan(checked as boolean)}
+                  />
+                  <div className="grid gap-1.5 leading-none">
+                    <label
+                      htmlFor="forceRescan"
+                      className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                    >
+                      🔄 Force rescan (Developer Mode)
+                    </label>
+                    <p className="text-xs text-muted-foreground">
+                      Re-analyze conversations even if already scanned. Useful for testing extraction changes.
+                      <span className="block mt-1 text-orange-600 font-medium">
+                        ⚠️ This will use AI credits for already-scanned conversations
+                      </span>
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
