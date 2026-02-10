@@ -47,6 +47,7 @@ model shipments {
 
 model sync_history {
   id                             Int       @id @default(autoincrement())
+  source                         String    @default("manual") @db.VarChar(50)  // "manual" or "automatic"
   conversations_processed        Int       @default(0)
   conversations_already_scanned  Int       @default(0)
   shipments_added                Int       @default(0)
@@ -61,6 +62,7 @@ model sync_history {
   completed_at                   DateTime?
 
   @@index([started_at], map: "idx_started_at")
+  @@index([source], map: "idx_source")
 }
 
 model tracking_events {

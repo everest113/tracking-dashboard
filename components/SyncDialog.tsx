@@ -25,6 +25,7 @@ type ScanResult = {
     conversationsProcessed: number
     conversationsAlreadyScanned: number
     shipmentsAdded: number
+    shipmentsUpdated?: number
     shipmentsSkipped: number
     conversationsWithNoTracking: number
     batchSize: number
@@ -39,11 +40,9 @@ export default function SyncDialog({ onSuccess }: { onSuccess: () => void }) {
   const [status, setStatus] = useState<SyncStatus>('idle')
   const [result, setResult] = useState<ScanResult | null>(null)
   
-  // Developer mode state
-  const [isDevMode, setIsDevMode] = useState(false)
+  const isDevMode = process.env.NODE_ENV === 'development'
   const [forceRescan, setForceRescan] = useState(false)
   
-  // Initialize with 3 days ago as fallback
   const threeDaysAgo = new Date()
   threeDaysAgo.setDate(threeDaysAgo.getDate() - 3)
   const fallbackDate = threeDaysAgo.toISOString().split('T')[0]
@@ -52,30 +51,23 @@ export default function SyncDialog({ onSuccess }: { onSuccess: () => void }) {
   const [duration, setDuration] = useState<string | null>(null)
   const [progressEvents, setProgressEvents] = useState<ProgressEvent[]>([])
 
-  // Check if dev mode is enabled
   useEffect(() => {
-    const checkDevMode = async () => {
-      try {
-        const isDev = process.env.NODE_ENV === 'development'
-        setIsDevMode(isDev)
-      } catch (error) {
-        setIsDevMode(false)
-      }
-    }
-    checkDevMode()
+    console.log('🔧 SyncDialog dev mode:', isDevMode, '| Force rescan available:', isDevMode)
   }, [])
 
-  // Fetch last sync date on component mount
   useEffect(() => {
     const fetchLastSync = async () => {
       try {
         const response = await fetch('/api/sync-history?limit=1')
         const data = await response.json()
         
-        if (data.success && data.lastSync) {
-          const lastSyncDate = new Date(data.lastSync.startedAt)
-          const defaultDate = lastSyncDate.toISOString().split('T')[0]
-          setSyncDate(defaultDate)
+        if (data.success && data.lastSync && data.lastSync.started_at) {
+          const lastSyncDate = new Date(data.lastSync.started_at)
+          
+          if (!isNaN(lastSyncDate.getTime())) {
+            const defaultDate = lastSyncDate.toISOString().split('T')[0]
+            setSyncDate(defaultDate)
+          }
         }
       } catch (error) {
         console.error('Failed to fetch last sync date:', error)
@@ -113,20 +105,19 @@ export default function SyncDialog({ onSuccess }: { onSuccess: () => void }) {
     addProgressEvent('processing', 'Initializing sync...')
     
     if (forceRescan && isDevMode) {
-      addProgressEvent('processing', '🔄 DEV MODE: Force rescanning enabled - will reprocess ALL conversations')
+      addProgressEvent('processing', '🔄 DEV MODE: Force rescanning enabled - will update existing shipments')
     }
     
     addProgressEvent('processing', `Connecting to Front inbox...`)
     addProgressEvent('processing', `Fetching conversations from ${formattedDate}`)
 
     try {
-      // Call API with date parameter and optional forceRescan
       const response = await fetch('/api/front/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           after: syncDate,
-          forceRescan: forceRescan && isDevMode  // Only send if dev mode enabled
+          forceRescan: forceRescan && isDevMode
         }),
       })
 
@@ -146,7 +137,6 @@ export default function SyncDialog({ onSuccess }: { onSuccess: () => void }) {
       
       const { summary } = data
 
-      // Add final progress events based on actual results
       if (summary.conversationsProcessed > 0) {
         addProgressEvent('complete', `✓ Processed ${summary.conversationsProcessed} conversations`)
       }
@@ -155,6 +145,9 @@ export default function SyncDialog({ onSuccess }: { onSuccess: () => void }) {
       }
       if (summary.shipmentsAdded > 0) {
         addProgressEvent('found', `📦 ${summary.shipmentsAdded} new shipments added!`)
+      }
+      if (summary.shipmentsUpdated && summary.shipmentsUpdated > 0) {
+        addProgressEvent('found', `🔄 ${summary.shipmentsUpdated} existing shipments updated!`)
       }
       if (summary.shipmentsSkipped > 0) {
         addProgressEvent('skipped', `⊗ ${summary.shipmentsSkipped} duplicates skipped`)
@@ -171,13 +164,16 @@ export default function SyncDialog({ onSuccess }: { onSuccess: () => void }) {
       setDuration(calculateDuration(startTime))
       setStatus('success')
 
-      if (summary.shipmentsAdded > 0) {
-        toast.success(`Found ${summary.shipmentsAdded} new shipment(s)`, {
-          description: `Processed ${summary.conversationsProcessed} conversations`,
+      const totalChanges = summary.shipmentsAdded + (summary.shipmentsUpdated || 0)
+      if (totalChanges > 0) {
+        toast.success(`Updated ${totalChanges} shipment(s)`, {
+          description: summary.shipmentsUpdated 
+            ? `${summary.shipmentsAdded} new, ${summary.shipmentsUpdated} updated`
+            : `Processed ${summary.conversationsProcessed} conversations`,
         })
         onSuccess()
       } else {
-        toast.info('No new shipments found', {
+        toast.info('No changes', {
           description: `Scanned ${summary.conversationsProcessed} conversations`,
         })
       }
@@ -259,7 +255,6 @@ export default function SyncDialog({ onSuccess }: { onSuccess: () => void }) {
               </p>
             </div>
 
-            {/* Developer Mode: Force Rescan Option */}
             {isDevMode && (
               <div className="rounded-lg border border-orange-200 bg-orange-50 p-4">
                 <div className="flex items-start space-x-3">
@@ -276,7 +271,7 @@ export default function SyncDialog({ onSuccess }: { onSuccess: () => void }) {
                       🔄 Force rescan (Developer Mode)
                     </label>
                     <p className="text-xs text-muted-foreground">
-                      Re-analyze conversations even if already scanned. Useful for testing extraction changes.
+                      Re-analyze conversations and <strong>update existing shipments</strong> with fresh data from emails.
                       <span className="block mt-1 text-orange-600 font-medium">
                         ⚠️ This will use AI credits for already-scanned conversations
                       </span>
@@ -309,6 +304,12 @@ export default function SyncDialog({ onSuccess }: { onSuccess: () => void }) {
                 <p className="text-muted-foreground">New Shipments</p>
                 <p className="text-2xl font-bold text-green-600">{result.summary.shipmentsAdded}</p>
               </div>
+              {result.summary.shipmentsUpdated !== undefined && result.summary.shipmentsUpdated > 0 && (
+                <div>
+                  <p className="text-muted-foreground">Shipments Updated</p>
+                  <p className="text-2xl font-bold text-blue-600">{result.summary.shipmentsUpdated}</p>
+                </div>
+              )}
               <div>
                 <p className="text-muted-foreground">Already Scanned</p>
                 <p className="text-lg">{result.summary.conversationsAlreadyScanned}</p>

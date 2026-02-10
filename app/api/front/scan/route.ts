@@ -7,12 +7,14 @@ import { prisma } from '@/lib/prisma'
 import { getErrorMessage } from '@/lib/utils/fetch-helpers'
 
 /**
- * Process conversations in parallel batches
+ * Process conversations in parallel batches (OPTIMIZED with bulk Ship24 registration)
  */
 async function processBatch(
-  conversations: FrontConversation[]
+  conversations: FrontConversation[],
+  forceRescan: boolean = false
 ): Promise<{
   added: number
+  updated: number
   skipped: number
   alreadyScanned: number
   noTracking: number
@@ -20,6 +22,7 @@ async function processBatch(
 }> {
   const results = {
     added: 0,
+    updated: 0,
     skipped: 0,
     alreadyScanned: 0,
     noTracking: 0,
@@ -27,7 +30,9 @@ async function processBatch(
   }
 
   const frontClient = getFrontClient()
+  const service = getShipmentTrackingService()
 
+  // Process all conversations in parallel
   await Promise.allSettled(
     conversations.map(async (conversation) => {
       try {
@@ -84,19 +89,41 @@ async function processBatch(
 
         console.log(`Found ${extractionResult.shipments.length} shipments in ${conversation.id}`)
 
-        const service = getShipmentTrackingService()
-        let addedCount = 0
-        let skippedCount = 0
-
+        // Process shipments (create new or update existing if force rescan)
+        const shipmentsToRegister = []
+        
         for (const shipment of extractionResult.shipments) {
-          try {
-            const existing = await prisma.shipments.findUnique({
-              where: { tracking_number: shipment.trackingNumber }
-            })
+          const existing = await prisma.shipments.findUnique({
+            where: { tracking_number: shipment.trackingNumber }
+          })
 
-            if (existing) {
+          if (existing) {
+            if (forceRescan) {
+              // Force rescan: Update existing shipment with fresh data from email
+              console.log(`Force rescan: Updating existing shipment ${shipment.trackingNumber}`)
+              
+              const updateData: any = {
+                updated_at: new Date(),
+              }
+              
+              // Update fields from extraction if they have values
+              if (shipment.carrier) updateData.carrier = shipment.carrier
+              if (shipment.poNumber) updateData.po_number = shipment.poNumber
+              if (extractionResult.supplier) updateData.supplier = extractionResult.supplier
+              if (shipment.shippedDate) updateData.shipped_date = new Date(shipment.shippedDate)
+              if (!existing.front_conversation_id) updateData.front_conversation_id = conversation.id
+              
+              const updatedShipment = await prisma.shipments.update({
+                where: { tracking_number: shipment.trackingNumber },
+                data: updateData,
+              })
+              
+              shipmentsToRegister.push(updatedShipment)
+              results.updated++
+            } else {
+              // Normal mode: Skip existing, just update conversation ID if needed
               console.log(`Shipment already exists: ${shipment.trackingNumber}`)
-              skippedCount++
+              results.skipped++
               
               if (!existing.front_conversation_id) {
                 await prisma.shipments.update({
@@ -107,65 +134,61 @@ async function processBatch(
                   }
                 })
               }
-              
-              continue
             }
+            continue
+          }
 
-            const newShipment = await prisma.shipments.create({
-              data: {
-                tracking_number: shipment.trackingNumber,
-                carrier: shipment.carrier ?? null,
-                po_number: shipment.poNumber || null,  // Empty string -> null
-                supplier: extractionResult.supplier || null,  // Empty string -> null
-                shipped_date: shipment.shippedDate ? new Date(shipment.shippedDate) : null,
-                status: 'pending',
-                front_conversation_id: conversation.id,
-                updated_at: new Date(),
-              }
-            })
-
-            console.log(`Created shipment: ${newShipment.tracking_number}`)
-            addedCount++
-
-            // Register with Ship24 and store result
-            try {
-              const ship24Result = await service.registerTracker(
-                newShipment.tracking_number,
-                newShipment.carrier ?? undefined,
-                newShipment.po_number ?? undefined
-              )
-
-              if (ship24Result.success) {
-                console.log(`✓ Registered Ship24 tracker: ${ship24Result.trackerId}`)
-                // Update shipment with tracker ID
-                await prisma.shipments.update({
-                  where: { tracking_number: newShipment.tracking_number },
-                  data: { 
-                    ship24_tracker_id: ship24Result.trackerId,
-                    last_error: null  // Clear any previous errors
-                  }
-                })
-              } else {
-                console.error(`✗ Ship24 registration failed for ${newShipment.tracking_number}: ${ship24Result.error}`)
-                // Store error in database for debugging
-                await prisma.shipments.update({
-                  where: { tracking_number: newShipment.tracking_number },
-                  data: { last_error: ship24Result.error }
-                })
-              }
-            } catch (ship24Err) {
-              console.error(`✗ Ship24 registration error:`, getErrorMessage(ship24Err))
-              // Store error in database
-              await prisma.shipments.update({
-                where: { tracking_number: newShipment.tracking_number },
-                data: { last_error: getErrorMessage(ship24Err) }
-              }).catch(() => {/* Ignore update errors */})
+          // Create new shipment
+          const newShipment = await prisma.shipments.create({
+            data: {
+              tracking_number: shipment.trackingNumber,
+              carrier: shipment.carrier ?? null,
+              po_number: shipment.poNumber || null,
+              supplier: extractionResult.supplier || null,
+              shipped_date: shipment.shippedDate ? new Date(shipment.shippedDate) : null,
+              status: 'pending',
+              front_conversation_id: conversation.id,
+              updated_at: new Date(),
             }
+          })
 
-          } catch (shipmentErr) {
-            console.error(`Error adding shipment:`, getErrorMessage(shipmentErr))
-            results.errors.push(getErrorMessage(shipmentErr))
-            skippedCount++
+          console.log(`Created shipment: ${newShipment.tracking_number}`)
+          shipmentsToRegister.push(newShipment)
+          results.added++
+        }
+
+        // Batch register/update all shipments with Ship24 (AWAIT for force rescan)
+        if (shipmentsToRegister.length > 0) {
+          console.log(`📦 Bulk registering/updating ${shipmentsToRegister.length} trackers...`)
+          
+          try {
+            // AWAIT the Ship24 registration to ensure data is fetched before continuing
+            // The use case handles:
+            // 1. Registering trackers with Ship24
+            // 2. Fetching initial tracking data
+            // 3. Saving all updates to database (tracker IDs + tracking data)
+            const bulkResults = await service.registerTrackersBulk(
+              shipmentsToRegister.map(s => ({
+                trackingNumber: s.tracking_number,
+                carrier: s.carrier,
+                poNumber: s.po_number || undefined,
+              }))
+            )
+            
+            // Just check for errors (no need to manually update database - use case already did it)
+            const successCount = bulkResults.filter(r => r.success).length
+            const failureCount = bulkResults.filter(r => !r.success).length
+            
+            console.log(`✅ Bulk registered ${successCount}/${bulkResults.length} trackers with Ship24 data`)
+            
+            if (failureCount > 0) {
+              const failedTrackers = bulkResults.filter(r => !r.success)
+              console.error(`❌ Failed to register ${failureCount} trackers:`, failedTrackers.map(r => r.error).join(', '))
+              results.errors.push(`${failureCount} trackers failed registration`)
+            }
+          } catch (err) {
+            console.error(`❌ Bulk registration error:`, getErrorMessage(err))
+            results.errors.push(`Ship24 registration failed: ${getErrorMessage(err)}`)
           }
         }
 
@@ -173,17 +196,14 @@ async function processBatch(
           where: { conversation_id: conversation.id },
           update: { 
             scanned_at: new Date(),
-            shipments_found: addedCount
+            shipments_found: results.added + results.updated
           },
           create: {
             conversation_id: conversation.id,
             subject: conversation.subject,
-            shipments_found: addedCount,
+            shipments_found: results.added + results.updated,
           },
         })
-
-        results.added += addedCount
-        results.skipped += skippedCount
 
       } catch (error) {
         console.error(`Error processing conversation ${conversation.id}:`, getErrorMessage(error))
@@ -202,7 +222,16 @@ export async function POST(request: Request) {
     console.log('=== Front Scan Started ===')
 
     const body = await request.json()
-    const { after, batchSize = 20, pageSize = 100, maxPages, forceRescan = false } = body
+    const { after, batchSize = 50, pageSize = 100, maxPages, forceRescan = false } = body
+    
+    console.log('📥 Request params:', { 
+      after, 
+      batchSize, 
+      pageSize, 
+      maxPages, 
+      forceRescan,
+      isDevModeEnabled: process.env.DEV_ALLOW_RESCAN === 'true'
+    })
 
     const frontClient = getFrontClient()
 
@@ -212,7 +241,6 @@ export async function POST(request: Request) {
 
     console.log(`Fetching conversations after: ${afterDate.toISOString()}`)
 
-    // Use inbox ID directly from environment
     const inboxId = process.env.FRONT_INBOX_ID
     
     if (!inboxId) {
@@ -224,7 +252,6 @@ export async function POST(request: Request) {
 
     console.log(`Using inbox ID: ${inboxId}`)
 
-    // Fetch ALL conversations (paginated automatically)
     const conversations = await frontClient.searchAllInboxConversations(inboxId, {
       pageSize,
       after: afterDate,
@@ -240,6 +267,7 @@ export async function POST(request: Request) {
           conversationsProcessed: 0,
           conversationsAlreadyScanned: 0,
           shipmentsAdded: 0,
+          shipmentsUpdated: 0,
           shipmentsSkipped: 0,
           conversationsWithNoTracking: 0,
           batchSize,
@@ -256,7 +284,7 @@ export async function POST(request: Request) {
     const shouldRescan = forceRescan && isDevMode
     
     if (shouldRescan) {
-      console.log('🔄 DEV MODE: Force rescanning ALL conversations (ignoring scan history)')
+      console.log('🔄 DEV MODE: Force rescanning ALL conversations (will update existing shipments with fresh Ship24 data)')
     }
 
     const conversationIds = conversations.map((c: FrontConversation) => c.id)
@@ -272,7 +300,7 @@ export async function POST(request: Request) {
       ? conversations 
       : conversations.filter((c: FrontConversation) => !scannedIds.has(c.id))
 
-    console.log(`${unscannedConversations.length} conversations need scanning (${scannedIds.size} already scanned)${shouldRescan ? ' [FORCE RESCAN]' : ''}`)
+    console.log(`${unscannedConversations.length} conversations need scanning (${scannedIds.size} already scanned)${shouldRescan ? ' [FORCE RESCAN - WILL UPDATE WITH FRESH SHIP24 DATA]' : ''}`)
 
     if (unscannedConversations.length === 0) {
       return NextResponse.json({
@@ -281,6 +309,7 @@ export async function POST(request: Request) {
           conversationsProcessed: 0,
           conversationsAlreadyScanned: scannedIds.size,
           shipmentsAdded: 0,
+          shipmentsUpdated: 0,
           shipmentsSkipped: 0,
           conversationsWithNoTracking: 0,
           batchSize,
@@ -294,71 +323,84 @@ export async function POST(request: Request) {
 
     const results = {
       added: 0,
+      updated: 0,
       skipped: 0,
       alreadyScanned: scannedIds.size,
       noTracking: 0,
       errors: [] as string[],
     }
 
+    // Process batches (sequentially to ensure Ship24 data is fetched)
+    const batches: FrontConversation[][] = []
+    
     for (let i = 0; i < unscannedConversations.length; i += batchSize) {
-      const batch = unscannedConversations.slice(i, i + batchSize)
-      console.log(`Processing batch ${Math.floor(i / batchSize) + 1} (${batch.length} conversations)`)
-      
-      const batchResults = await processBatch(batch)
-      results.added += batchResults.added
-      results.skipped += batchResults.skipped
-      results.noTracking += batchResults.noTracking
-      results.errors.push(...batchResults.errors)
-      
-      // Delay removed for better performance - rate limiting handled by batch size
+      batches.push(unscannedConversations.slice(i, i + batchSize))
+    }
+
+    console.log(`Processing ${batches.length} batches sequentially for force rescan`)
+
+    // For force rescan, process sequentially to ensure Ship24 data is fetched
+    if (shouldRescan) {
+      for (let i = 0; i < batches.length; i++) {
+        console.log(`Processing batch ${i + 1}/${batches.length}`)
+        const batchResult = await processBatch(batches[i], forceRescan)
+        results.added += batchResult.added
+        results.updated += batchResult.updated
+        results.skipped += batchResult.skipped
+        results.noTracking += batchResult.noTracking
+        results.errors.push(...batchResult.errors)
+      }
+    } else {
+      // Normal mode: Process in parallel for speed
+      const batchResults = await Promise.all(
+        batches.map(batch => processBatch(batch, forceRescan))
+      )
+
+      for (const batchResult of batchResults) {
+        results.added += batchResult.added
+        results.updated += batchResult.updated
+        results.skipped += batchResult.skipped
+        results.noTracking += batchResult.noTracking
+        results.errors.push(...batchResult.errors)
+      }
     }
 
     const duration = Date.now() - startTime
-
-    const summary = {
-      conversationsProcessed: unscannedConversations.length,
-      conversationsAlreadyScanned: results.alreadyScanned,
-      shipmentsAdded: results.added,
-      shipmentsSkipped: results.skipped,
-      conversationsWithNoTracking: results.noTracking,
-      batchSize,
-      totalConversations: conversations.length,
-    }
-
-    console.log('=== Front Scan Complete ===')
-
-    await prisma.sync_history.create({
-      data: {
-        conversations_processed: summary.conversationsProcessed,
-        conversations_already_scanned: summary.conversationsAlreadyScanned,
-        shipments_added: summary.shipmentsAdded,
-        shipments_skipped: summary.shipmentsSkipped,
-        conversations_with_no_tracking: summary.conversationsWithNoTracking,
-        batch_size: batchSize,
-        limit: conversations.length,  // Total conversations fetched
-        duration_ms: duration,
-        errors: results.errors,
-        status: results.errors.length > 0 ? 'partial' : 'success',
-        completed_at: new Date()
-      }
-    })
+    
+    console.log('=== Scan Complete ===')
+    console.log(`Processed: ${unscannedConversations.length} conversations in ${duration}ms`)
+    console.log(`Added: ${results.added}, Updated: ${results.updated}, Skipped: ${results.skipped}, No tracking: ${results.noTracking}`)
+    console.log(`Errors: ${results.errors.length}`)
 
     return NextResponse.json({
       success: true,
-      summary,
+      summary: {
+        conversationsProcessed: unscannedConversations.length,
+        conversationsAlreadyScanned: results.alreadyScanned,
+        shipmentsAdded: results.added,
+        shipmentsUpdated: results.updated,
+        shipmentsSkipped: results.skipped,
+        conversationsWithNoTracking: results.noTracking,
+        batchSize,
+        totalConversations: conversations.length,
+      },
       errors: results.errors,
       durationMs: duration,
       timestamp: new Date().toISOString()
     })
 
-  } catch (error) {
-    console.error('=== Front Scan Error ===')
-    console.error('Error:', getErrorMessage(error))
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? getErrorMessage(error) : 'Failed to scan conversations'
+    const errorStack = error instanceof Error ? error.stack : undefined
+    
+    console.error('=== Scan Error ===')
+    console.error('Error:', errorMessage)
+    console.error('Stack:', errorStack)
 
     return NextResponse.json(
       {
         success: false,
-        error: getErrorMessage(error),
+        error: errorMessage,
         durationMs: Date.now() - startTime,
         timestamp: new Date().toISOString()
       },

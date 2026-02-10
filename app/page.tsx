@@ -7,40 +7,146 @@ import ManualTrackingUpdate from '@/components/ManualTrackingUpdate'
 import BackfillTrackers from '@/components/BackfillTrackers'
 import SyncDialog from '@/components/SyncDialog'
 
+interface TrackingEvent {
+  id: number
+  status: string | null
+  location: string | null
+  message: string | null
+  eventTime: string | null
+}
+
 interface Shipment {
   id: number
-  tracking_number: string
+  trackingNumber: string
   carrier: string | null
   status: string
-  po_number: string | null
+  poNumber: string | null
   supplier: string | null
-  last_checked: string | null
-  created_at: string
+  shippedDate: string | null
+  estimatedDelivery: string | null
+  deliveredDate: string | null
+  ship24Status: string | null
+  ship24LastUpdate: string | null
+  lastChecked: string | null
+  createdAt: string
+  trackingEvents?: TrackingEvent[]
+}
+
+interface ShipmentFilter {
+  trackingNumber?: string
+  poNumber?: string
+  supplier?: string
+  status?: string
+  carrier?: string
+}
+
+interface ShipmentSort {
+  field: string
+  direction: 'asc' | 'desc'
+}
+
+interface PaginationData {
+  page: number
+  pageSize: number
+  total: number
+  totalPages: number
+  hasNext: boolean
+  hasPrev: boolean
 }
 
 export default function Home() {
-  const [refreshKey, setRefreshKey] = useState(0)
   const [shipments, setShipments] = useState<Shipment[]>([])
+  const [pagination, setPagination] = useState<PaginationData>({
+    page: 1,
+    pageSize: 20,
+    total: 0,
+    totalPages: 0,
+    hasNext: false,
+    hasPrev: false,
+  })
+  const [filter, setFilter] = useState<ShipmentFilter>({})
+  const [sort, setSort] = useState<ShipmentSort | undefined>()
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const fetchShipments = async () => {
+    setLoading(true)
+    setError(null)
+    
+    try {
+      // Build query params
+      const params = new URLSearchParams()
+      params.append('page', pagination.page.toString())
+      params.append('pageSize', pagination.pageSize.toString())
+      
+      if (filter.trackingNumber) params.append('trackingNumber', filter.trackingNumber)
+      if (filter.poNumber) params.append('poNumber', filter.poNumber)
+      if (filter.supplier) params.append('supplier', filter.supplier)
+      if (filter.status) params.append('status', filter.status)
+      if (filter.carrier) params.append('carrier', filter.carrier)
+      
+      if (sort) {
+        params.append('sortField', sort.field)
+        params.append('sortDirection', sort.direction)
+      }
+
+      const response = await fetch(`/api/shipments?${params.toString()}`)
+      
+      if (!response.ok) {
+        throw new Error('Failed to fetch shipments')
+      }
+      
+      const data = await response.json()
+      
+      if (data.items) {
+        // Paginated response
+        setShipments(data.items)
+        setPagination(data.pagination)
+      } else if (Array.isArray(data)) {
+        // Simple array response (fallback)
+        setShipments(data)
+        setPagination({
+          page: 1,
+          pageSize: data.length,
+          total: data.length,
+          totalPages: 1,
+          hasNext: false,
+          hasPrev: false,
+        })
+      }
+    } catch (err) {
+      console.error('Failed to fetch shipments:', err)
+      setError('Failed to fetch shipments')
+      setShipments([])
+    } finally {
+      setLoading(false)
+    }
+  }
 
   useEffect(() => {
-    const fetchShipments = async () => {
-      try {
-        const response = await fetch('/api/shipments')
-        const data = await response.json()
-        setShipments(data)
-      } catch (error) {
-        console.error('Failed to fetch shipments:', error)
-      } finally {
-        setLoading(false)
-      }
-    }
-    
     fetchShipments()
-  }, [refreshKey])
-  
+  }, [pagination.page, filter, sort])
+
+  const handleQueryChange = (newQuery: {
+    pagination?: { page: number; pageSize: number }
+    filter?: ShipmentFilter
+    sort?: ShipmentSort
+  }) => {
+    if (newQuery.pagination) {
+      setPagination(prev => ({ ...prev, ...newQuery.pagination }))
+    }
+    if (newQuery.filter !== undefined) {
+      setFilter(newQuery.filter)
+      // Reset to page 1 when filter changes
+      setPagination(prev => ({ ...prev, page: 1 }))
+    }
+    if (newQuery.sort !== undefined) {
+      setSort(newQuery.sort)
+    }
+  }
+
   const handleRefresh = () => {
-    setRefreshKey(prev => prev + 1)
+    fetchShipments()
   }
 
   return (
@@ -67,7 +173,20 @@ export default function Home() {
           </div>
         </div>
 
-        {loading ? <p>Loading...</p> : <ShipmentTable shipments={shipments} />}
+        {loading && !shipments.length ? (
+          <p>Loading...</p>
+        ) : error ? (
+          <div className="rounded-lg border border-red-200 bg-red-50 p-4">
+            <p className="text-sm text-red-800">{error}</p>
+          </div>
+        ) : (
+          <ShipmentTable 
+            shipments={shipments} 
+            pagination={pagination}
+            onQueryChange={handleQueryChange}
+            loading={loading}
+          />
+        )}
       </div>
     </main>
   )

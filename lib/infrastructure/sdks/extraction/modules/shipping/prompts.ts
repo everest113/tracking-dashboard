@@ -42,6 +42,13 @@ Tracking number formats:
 - FedEx: 12-14 digits
 - DHL: 10-11 digits
 
+**CRITICAL: Extract ONLY the tracking number itself, WITHOUT the carrier name prefix.**
+Example:
+✅ Correct: "92001902111503000000000000"
+❌ Wrong: "USPS92001902111503000000000000"
+✅ Correct: "1Z999AA10123456784"
+❌ Wrong: "UPS1Z999AA10123456784"
+
 Supplier Identification Priority:
 1. Company name from email signature/footer (highest priority)
 2. Company name from email domain
@@ -65,6 +72,7 @@ Example response:
 
 IMPORTANT: 
 - **ONLY include shipments with valid tracking numbers** - do not return empty or null trackingNumber
+- **DO NOT include carrier name in the tracking number field** - tracking number and carrier are separate fields
 - Normalize tracking numbers (remove spaces, dashes)
 - Return carrier as lowercase: "ups", "usps", "fedex", "dhl", or "other"
 - If unsure about carrier, use "other"

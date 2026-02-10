@@ -1,9 +1,10 @@
 'use client'
 
-import { useState } from 'react'
-import { formatDistanceToNow } from 'date-fns'
+import { useState, useEffect } from 'react'
+import { format, formatDistanceToNow, addDays } from 'date-fns'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
+import { Button } from '@/components/ui/button'
 import {
   Table,
   TableBody,
@@ -19,33 +20,154 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Package, MapPin, Clock, ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight, CheckCircle2, AlertCircle, TruckIcon, Search } from 'lucide-react'
+
+interface TrackingEvent {
+  id: number
+  status: string | null
+  location: string | null
+  message: string | null
+  eventTime: string | null
+}
 
 interface Shipment {
   id: number
-  tracking_number: string
+  trackingNumber: string
   carrier: string | null
   status: string
-  po_number: string | null
+  poNumber: string | null
   supplier: string | null
-  last_checked: string | null
-  created_at: string
+  shippedDate: string | null
+  estimatedDelivery: string | null
+  deliveredDate: string | null
+  ship24Status: string | null
+  ship24LastUpdate: string | null
+  lastChecked: string | null
+  createdAt: string
+  lastError: string | null
+  trackingEvents?: TrackingEvent[]
 }
 
-export default function ShipmentTable({ shipments }: { shipments: Shipment[] }) {
-  const [search, setSearch] = useState('')
+interface PaginationData {
+  page: number
+  pageSize: number
+  total: number
+  totalPages: number
+  hasNext: boolean
+  hasPrev: boolean
+}
+
+interface ShipmentTableProps {
+  shipments: Shipment[]
+  pagination: PaginationData
+  onQueryChange: (query: {
+    pagination?: { page: number; pageSize: number }
+    filter?: Record<string, string>
+    sort?: { field: string; direction: 'asc' | 'desc' }
+  }) => void
+  loading?: boolean
+}
+
+type SortField = 'shippedDate' | 'estimatedDelivery' | 'deliveredDate' | 'createdAt'
+
+export default function ShipmentTable({ shipments, pagination, onQueryChange, loading }: ShipmentTableProps) {
+  const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
+  const [sortField, setSortField] = useState<SortField | null>(null)
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc')
 
-  const filtered = shipments.filter((shipment) => {
-    const matchesSearch =
-      search === '' ||
-      shipment.tracking_number.toLowerCase().includes(search.toLowerCase()) ||
-      shipment.po_number?.toLowerCase().includes(search.toLowerCase()) ||
-      shipment.supplier?.toLowerCase().includes(search.toLowerCase())
+  // Debounce filter changes
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      applyFilters()
+    }, 300)
 
-    const matchesStatus = statusFilter === 'all' || shipment.status === statusFilter
+    return () => clearTimeout(timer)
+  }, [searchQuery, statusFilter])
 
-    return matchesSearch && matchesStatus
-  })
+  const applyFilters = () => {
+    const filter: Record<string, string> = {}
+    
+    // Single search across tracking, PO, and supplier
+    if (searchQuery) filter.search = searchQuery
+    if (statusFilter !== 'all') filter.status = statusFilter
+
+    const sort = sortField ? {
+      field: sortField,
+      direction: sortDirection,
+    } : undefined
+
+    onQueryChange({
+      pagination: { page: 1, pageSize: pagination.pageSize },
+      filter: Object.keys(filter).length > 0 ? filter : undefined,
+      sort,
+    })
+  }
+
+  const handleSort = (field: SortField) => {
+    let newDirection: 'asc' | 'desc' = 'asc'
+    
+    if (sortField === field) {
+      // Toggle direction or clear
+      if (sortDirection === 'asc') {
+        newDirection = 'desc'
+      } else {
+        // Clear sort
+        setSortField(null)
+        onQueryChange({
+          pagination: { page: pagination.page, pageSize: pagination.pageSize },
+          filter: buildCurrentFilter(),
+          sort: undefined,
+        })
+        return
+      }
+    }
+
+    setSortField(field)
+    setSortDirection(newDirection)
+    
+    onQueryChange({
+      pagination: { page: pagination.page, pageSize: pagination.pageSize },
+      filter: buildCurrentFilter(),
+      sort: { field, direction: newDirection },
+    })
+  }
+
+  const buildCurrentFilter = (): Record<string, string> | undefined => {
+    const filter: Record<string, string> = {}
+    if (searchQuery) filter.search = searchQuery
+    if (statusFilter !== 'all') filter.status = statusFilter
+    return Object.keys(filter).length > 0 ? filter : undefined
+  }
+
+  const getSortIcon = (field: SortField) => {
+    if (sortField !== field) {
+      return <ArrowUpDown className="h-4 w-4 text-muted-foreground" />
+    }
+    if (sortDirection === 'asc') {
+      return <ArrowUp className="h-4 w-4" />
+    }
+    return <ArrowDown className="h-4 w-4" />
+  }
+
+  const clearFilters = () => {
+    setSearchQuery('')
+    setStatusFilter('all')
+    setSortField(null)
+    onQueryChange({
+      pagination: { page: 1, pageSize: pagination.pageSize },
+    })
+  }
+
+  const handlePageChange = (newPage: number) => {
+    onQueryChange({
+      pagination: { page: newPage, pageSize: pagination.pageSize },
+      filter: buildCurrentFilter(),
+      sort: sortField ? { field: sortField, direction: sortDirection } : undefined,
+    })
+  }
+
+  const hasActiveFilters = searchQuery || statusFilter !== 'all' || sortField
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -64,18 +186,69 @@ export default function ShipmentTable({ shipments }: { shipments: Shipment[] }) 
     }
   }
 
+  const formatDate = (dateStr: string | null) => {
+    if (!dateStr) return null
+    try {
+      return format(new Date(dateStr), 'MMM d, yyyy')
+    } catch {
+      return null
+    }
+  }
+
+  const formatDateTime = (dateStr: string | null) => {
+    if (!dateStr) return null
+    try {
+      return format(new Date(dateStr), 'MMM d, h:mm a')
+    } catch {
+      return null
+    }
+  }
+
+  // Calculate expected delivery estimate (shipped + 5 business days)
+  const getExpectedDelivery = (shipment: Shipment) => {
+    // If we have carrier estimate, use it
+    if (shipment.estimatedDelivery) {
+      return {
+        date: formatDate(shipment.estimatedDelivery),
+        source: 'carrier' as const
+      }
+    }
+    
+    // Otherwise estimate based on shipped date (if available)
+    if (shipment.shippedDate && shipment.status !== 'delivered') {
+      const shipped = new Date(shipment.shippedDate)
+      const estimated = addDays(shipped, 5) // 5 business days estimate
+      return {
+        date: formatDate(estimated.toISOString()),
+        source: 'estimated' as const
+      }
+    }
+    
+    return null
+  }
+
+  const getLatestEvent = (events?: TrackingEvent[]) => {
+    if (!events || events.length === 0) return null
+    return events[0]
+  }
+
   return (
     <div className="space-y-4">
-      <div className="flex gap-4">
-        <Input
-          placeholder="Search tracking #, PO, or supplier..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="max-w-sm"
-        />
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-[180px]">
-            <SelectValue placeholder="Filter by status" />
+      {/* Filters */}
+      <div className="flex flex-wrap gap-3">
+        <div className="relative flex-1 max-w-md">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search tracking #, PO #, or supplier..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-9"
+            disabled={loading}
+          />
+        </div>
+        <Select value={statusFilter} onValueChange={setStatusFilter} disabled={loading}>
+          <SelectTrigger className="w-[160px]">
+            <SelectValue placeholder="Status" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Statuses</SelectItem>
@@ -86,6 +259,11 @@ export default function ShipmentTable({ shipments }: { shipments: Shipment[] }) 
             <SelectItem value="exception">Exception</SelectItem>
           </SelectContent>
         </Select>
+        {hasActiveFilters && (
+          <Button variant="ghost" size="sm" onClick={clearFilters} disabled={loading}>
+            Clear filters
+          </Button>
+        )}
       </div>
 
       <div className="rounded-md border">
@@ -93,46 +271,212 @@ export default function ShipmentTable({ shipments }: { shipments: Shipment[] }) 
           <TableHeader>
             <TableRow>
               <TableHead>Tracking Number</TableHead>
-              <TableHead>PO Number</TableHead>
-              <TableHead>Supplier</TableHead>
-              <TableHead>Carrier</TableHead>
+              <TableHead>PO / Supplier</TableHead>
               <TableHead>Status</TableHead>
-              <TableHead>Last Checked</TableHead>
+              <TableHead>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 px-2 hover:bg-transparent"
+                  onClick={() => handleSort('shippedDate')}
+                  disabled={loading}
+                >
+                  Shipped
+                  {getSortIcon('shippedDate')}
+                </Button>
+              </TableHead>
+              <TableHead>
+                Expected
+              </TableHead>
+              <TableHead>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 px-2 hover:bg-transparent"
+                  onClick={() => handleSort('deliveredDate')}
+                  disabled={loading}
+                >
+                  Delivered
+                  {getSortIcon('deliveredDate')}
+                </Button>
+              </TableHead>
+              <TableHead>Latest Update</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filtered.length === 0 ? (
+            {loading && shipments.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center text-muted-foreground">
-                  No shipments found
+                <TableCell colSpan={7} className="text-center text-muted-foreground">
+                  Loading...
+                </TableCell>
+              </TableRow>
+            ) : shipments.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={7} className="text-center text-muted-foreground">
+                  {hasActiveFilters ? 'No shipments match your search' : 'No shipments found'}
                 </TableCell>
               </TableRow>
             ) : (
-              filtered.map((shipment) => (
-                <TableRow key={shipment.id}>
-                  <TableCell className="font-mono">{shipment.tracking_number}</TableCell>
-                  <TableCell>{shipment.po_number || '-'}</TableCell>
-                  <TableCell>{shipment.supplier || '-'}</TableCell>
-                  <TableCell className="uppercase">{shipment.carrier || '-'}</TableCell>
-                  <TableCell>
-                    <Badge className={getStatusColor(shipment.status)}>
-                      {shipment.status.replace('_', ' ')}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    {shipment.last_checked
-                      ? formatDistanceToNow(new Date(shipment.last_checked), { addSuffix: true })
-                      : 'Never'}
-                  </TableCell>
-                </TableRow>
-              ))
+              shipments.map((shipment) => {
+                const latestEvent = getLatestEvent(shipment.trackingEvents)
+                const shippedDate = formatDate(shipment.shippedDate)
+                const expectedInfo = getExpectedDelivery(shipment)
+                const deliveredDate = formatDateTime(shipment.deliveredDate)
+
+                return (
+                  <TableRow key={shipment.id} className={loading ? 'opacity-50' : ''}>
+                    <TableCell>
+                      <div className="flex flex-col gap-1">
+                        <span className="font-mono font-medium">{shipment.trackingNumber}</span>
+                        <div className="flex items-center gap-1">
+                          <span className="text-xs text-muted-foreground uppercase">
+                            {shipment.carrier || 'Unknown'}
+                          </span>
+                          {shipment.lastError && (
+                            <AlertCircle className="h-3 w-3 text-red-500" title={shipment.lastError} />
+                          )}
+                        </div>
+                      </div>
+                    </TableCell>
+
+                    <TableCell>
+                      <div className="flex flex-col gap-1">
+                        {shipment.supplier && (
+                          <span className="text-sm">{shipment.supplier}</span>
+                        )}
+                        {shipment.poNumber && (
+                          <span className="text-xs text-muted-foreground">PO: {shipment.poNumber}</span>
+                        )}
+                        {!shipment.supplier && !shipment.poNumber && <span className="text-muted-foreground">-</span>}
+                      </div>
+                    </TableCell>
+
+                    <TableCell>
+                      <div className="flex flex-col gap-1">
+                        <Badge className={getStatusColor(shipment.status)}>
+                          {shipment.status.replace('_', ' ')}
+                        </Badge>
+                        {shipment.ship24Status && shipment.ship24Status !== shipment.status && (
+                          <span className="text-xs text-muted-foreground">
+                            {shipment.ship24Status}
+                          </span>
+                        )}
+                      </div>
+                    </TableCell>
+
+                    <TableCell>
+                      {shippedDate ? (
+                        <div className="flex items-center gap-1.5 text-sm">
+                          <Package className="h-3.5 w-3.5 text-blue-500" />
+                          <span>{shippedDate}</span>
+                        </div>
+                      ) : (
+                        <span className="text-muted-foreground">-</span>
+                      )}
+                    </TableCell>
+
+                    <TableCell>
+                      {expectedInfo ? (
+                        <div className="flex flex-col gap-0.5">
+                          <div className="flex items-center gap-1.5 text-sm">
+                            {expectedInfo.source === 'carrier' ? (
+                              <TruckIcon className="h-3.5 w-3.5 text-orange-500" />
+                            ) : (
+                              <Clock className="h-3.5 w-3.5 text-gray-400" />
+                            )}
+                            <span>{expectedInfo.date}</span>
+                          </div>
+                          {expectedInfo.source === 'estimated' && (
+                            <span className="text-xs text-muted-foreground ml-5">~5 days</span>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-muted-foreground">-</span>
+                      )}
+                    </TableCell>
+
+                    <TableCell>
+                      {deliveredDate ? (
+                        <div className="flex items-center gap-1.5 text-sm font-medium text-green-600">
+                          <CheckCircle2 className="h-3.5 w-3.5" />
+                          <span>{deliveredDate}</span>
+                        </div>
+                      ) : (
+                        <span className="text-muted-foreground">-</span>
+                      )}
+                    </TableCell>
+
+                    <TableCell>
+                      {latestEvent ? (
+                        <div className="flex flex-col gap-1 max-w-[250px]">
+                          {latestEvent.location && (
+                            <div className="flex items-center gap-1 text-sm">
+                              <MapPin className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+                              <span className="truncate">{latestEvent.location}</span>
+                            </div>
+                          )}
+                          {latestEvent.message && (
+                            <span className="text-xs text-muted-foreground truncate">
+                              {latestEvent.message}
+                            </span>
+                          )}
+                          {latestEvent.eventTime && (
+                            <span className="text-xs text-muted-foreground">
+                              {formatDistanceToNow(new Date(latestEvent.eventTime), { addSuffix: true })}
+                            </span>
+                          )}
+                        </div>
+                      ) : shipment.ship24LastUpdate ? (
+                        <span className="text-xs text-muted-foreground">
+                          {formatDistanceToNow(new Date(shipment.ship24LastUpdate), { addSuffix: true })}
+                        </span>
+                      ) : shipment.lastChecked ? (
+                        <span className="text-xs text-muted-foreground">
+                          Checked {formatDistanceToNow(new Date(shipment.lastChecked), { addSuffix: true })}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">Never</span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                )
+              })
             )}
           </TableBody>
         </Table>
       </div>
 
-      <div className="text-sm text-muted-foreground">
-        Showing {filtered.length} of {shipments.length} shipments
+      {/* Pagination */}
+      <div className="flex items-center justify-between">
+        <div className="text-sm text-muted-foreground">
+          Showing {shipments.length > 0 ? (pagination.page - 1) * pagination.pageSize + 1 : 0} to {Math.min(pagination.page * pagination.pageSize, pagination.total)} of {pagination.total} shipments
+        </div>
+        
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => handlePageChange(pagination.page - 1)}
+            disabled={!pagination.hasPrev || loading}
+          >
+            <ChevronLeft className="h-4 w-4" />
+            Previous
+          </Button>
+          
+          <div className="text-sm text-muted-foreground">
+            Page {pagination.page} of {pagination.totalPages}
+          </div>
+          
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => handlePageChange(pagination.page + 1)}
+            disabled={!pagination.hasNext || loading}
+          >
+            Next
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+        </div>
       </div>
     </div>
   )

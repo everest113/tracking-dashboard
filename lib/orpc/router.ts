@@ -4,17 +4,100 @@ import { shipmentSchema } from '@/lib/validations'
 import { getShipmentTrackingService } from '@/lib/application/ShipmentTrackingService'
 import { Prisma } from '@prisma/client'
 import { getErrorMessage } from '@/lib/utils/fetch-helpers'
+import {
+  ShipmentListQuerySchema,
+  createPaginatedResponseSchema,
+  buildShipmentWhereClause,
+  buildShipmentOrderByClause,
+} from './schemas'
+import { serializeShipments } from '@/lib/infrastructure/repositories/serializers'
+
+/**
+ * Shipment response schema (camelCase API format)
+ */
+const ShipmentResponseSchema = z.object({
+  id: z.number(),
+  trackingNumber: z.string(),
+  carrier: z.string().nullable(),
+  status: z.string(),
+  poNumber: z.string().nullable(),
+  supplier: z.string().nullable(),
+  shippedDate: z.string().nullable(),
+  estimatedDelivery: z.string().nullable(),
+  deliveredDate: z.string().nullable(),
+  ship24Status: z.string().nullable(),
+  ship24LastUpdate: z.string().nullable(),
+  lastChecked: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  trackingEvents: z.array(z.object({
+    id: z.number(),
+    status: z.string().nullable(),
+    location: z.string().nullable(),
+    message: z.string().nullable(),
+    eventTime: z.string().nullable(),
+  })).optional(),
+})
 
 export const appRouter = {
   shipments: {
     list: publicProcedure
-      .output(z.array(z.unknown()))
-      .handler(async ({ context }) => {
+      .input(ShipmentListQuerySchema)
+      .output(createPaginatedResponseSchema(ShipmentResponseSchema))
+      .handler(async ({ context, input }) => {
+        const { pagination, filter, sort } = input
+
+        const page = pagination?.page ?? 1
+        const pageSize = pagination?.pageSize ?? 20
+        const skip = (page - 1) * pageSize
+
+        const where = buildShipmentWhereClause(filter)
+        const orderBy = buildShipmentOrderByClause(sort)
+
+        // Get total count for pagination
+        const total = await context.prisma.shipments.count({ where })
+
+        // Get paginated results with tracking events
         const shipments = await context.prisma.shipments.findMany({
-          orderBy: { created_at: 'desc' },
-          take: 100,
+          where,
+          orderBy,
+          skip,
+          take: pageSize,
+          include: {
+            tracking_events: {
+              orderBy: { event_time: 'desc' },
+              take: 5,
+            },
+          },
         })
-        return shipments
+
+        // Serialize to camelCase
+        const serialized = serializeShipments(shipments)
+
+        return {
+          items: serialized.map(s => ({
+            ...s,
+            shippedDate: s.shippedDate?.toISOString() ?? null,
+            estimatedDelivery: s.estimatedDelivery?.toISOString() ?? null,
+            deliveredDate: s.deliveredDate?.toISOString() ?? null,
+            ship24LastUpdate: s.ship24LastUpdate?.toISOString() ?? null,
+            lastChecked: s.lastChecked?.toISOString() ?? null,
+            createdAt: s.createdAt.toISOString(),
+            updatedAt: s.updatedAt.toISOString(),
+            trackingEvents: s.trackingEvents?.map(e => ({
+              ...e,
+              eventTime: e.eventTime?.toISOString() ?? null,
+            })),
+          })),
+          pagination: {
+            page,
+            pageSize,
+            total,
+            totalPages: Math.ceil(total / pageSize),
+            hasNext: page * pageSize < total,
+            hasPrev: page > 1,
+          },
+        }
       }),
 
     create: publicProcedure

@@ -33,7 +33,7 @@ export default function BackfillTrackers({ onSuccess }: { onSuccess: () => void 
         const errorMsg = typeof data === 'object' && data !== null && 'error' in data 
           ? String((data as { error: string }).error)
           : 'Failed to register trackers'
-        toast.error('Backfill failed', {
+        toast.error('Update failed', {
           description: errorMsg,
         })
         return
@@ -43,18 +43,18 @@ export default function BackfillTrackers({ onSuccess }: { onSuccess: () => void 
 
       if (result.registered === 0) {
         toast.success('Already up to date', {
-          description: 'All shipments are already registered with Ship24.',
+          description: 'All shipments are already being tracked.',
         })
       } else {
-        toast.success('Trackers registered', {
-          description: `${result.registered} shipment(s) registered with Ship24 for real-time tracking.`,
+        toast.success('Shipments updated', {
+          description: `${result.registered} shipment(s) registered for real-time tracking.`,
         })
       }
 
       setIsOpen(false)
       onSuccess()
     } catch (error: unknown) {
-      toast.error('Backfill failed', {
+      toast.error('Update failed', {
         description: getErrorMessage(error) || 'An unexpected error occurred.',
       })
     } finally {
@@ -67,26 +67,26 @@ export default function BackfillTrackers({ onSuccess }: { onSuccess: () => void 
       <DialogTrigger asChild>
         <Button variant="outline">
           <Upload className="h-4 w-4" />
-          Backfill Trackers
+          Update Shipment Statuses
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Backfill Ship24 Trackers</DialogTitle>
+          <DialogTitle>Update Shipment Statuses</DialogTitle>
           <DialogDescription>
-            Register all untracked shipments with Ship24 for real-time tracking updates.
+            Enable real-time tracking for shipments that aren&apos;t being monitored yet.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            This will find all shipments that don&apos;t have a Ship24 tracker ID and register them.
+            This will find all untracked shipments and register them with Ship24 for automatic status updates.
           </p>
           <Button
             onClick={handleBackfill}
             disabled={isBackfilling}
             className="w-full"
           >
-            {isBackfilling ? 'Registering...' : 'Start Backfill'}
+            {isBackfilling ? 'Updating...' : 'Update Statuses'}
           </Button>
         </div>
       </DialogContent>

@@ -1,6 +1,6 @@
 /**
  * Ship24 API Client
- * Refactored to use base SDK architecture with proper validation
+ * Based on official OpenAPI spec: https://docs.ship24.com/assets/openapi/ship24-tracking-api.yaml
  */
 
 import { BaseSdkClient } from '../base-client'
@@ -27,23 +27,39 @@ export class Ship24Client extends BaseSdkClient {
 
   /**
    * Register a single tracker
+   * POST /trackers
    */
   async registerTracker(
     trackingNumber: string,
-    carrier?: string
+    carrier?: string,
+    poNumber?: string
   ): Promise<Ship24TrackerResponse> {
-    return this.post(
-      '/trackers',
-      {
-        trackingNumber,
-        ...(carrier && { shipmentReference: { carrierCode: carrier } }),
-      },
-      Ship24TrackerResponseSchema
-    )
+    const body: {
+      trackingNumber: string
+      courierCode?: string[]
+      shipmentReference?: string
+    } = {
+      trackingNumber,
+    }
+
+    // courierCode is an array of courier codes
+    if (carrier) {
+      body.courierCode = [carrier]
+    }
+
+    // shipmentReference is for PO number or other reference
+    if (poNumber) {
+      body.shipmentReference = poNumber
+    }
+
+    return this.post('/trackers', body, Ship24TrackerResponseSchema)
   }
 
   /**
    * Register multiple trackers in bulk
+   * POST /trackers/bulk
+   * 
+   * Note: Request body is an ARRAY, not {trackers: [...]}
    */
   async registerTrackersBulk(
     trackers: Array<{
@@ -52,21 +68,34 @@ export class Ship24Client extends BaseSdkClient {
       poNumber?: string
     }>
   ): Promise<Ship24BulkTrackerResponse> {
-    return this.post(
-      '/trackers/register',
-      {
-        trackers: trackers.map(t => ({
-          trackingNumber: t.trackingNumber,
-          ...(t.carrier && { shipmentReference: { carrierCode: t.carrier } }),
-          ...(t.poNumber && { shipmentReference: { ...t.carrier && { carrierCode: t.carrier }, referenceNumber: t.poNumber } }),
-        })),
-      },
-      Ship24BulkTrackerResponseSchema
-    )
+    // Convert to Ship24 format
+    const payload = trackers.map(t => {
+      const item: {
+        trackingNumber: string
+        courierCode?: string[]
+        shipmentReference?: string
+      } = {
+        trackingNumber: t.trackingNumber,
+      }
+
+      if (t.carrier) {
+        item.courierCode = [t.carrier]
+      }
+
+      if (t.poNumber) {
+        item.shipmentReference = t.poNumber
+      }
+
+      return item
+    })
+
+    // Ship24 bulk endpoint expects the array directly, not wrapped
+    return this.post('/trackers/bulk', payload, Ship24BulkTrackerResponseSchema)
   }
 
   /**
    * Get tracker results (cached from Ship24)
+   * GET /trackers/:trackerId/results
    */
   async getTrackerResults(trackerId: string): Promise<Ship24TrackingResponse> {
     return this.get(

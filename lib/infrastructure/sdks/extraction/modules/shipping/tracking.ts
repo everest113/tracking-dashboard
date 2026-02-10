@@ -3,6 +3,23 @@ import { TrackingExtractionResultSchema, type EmailMessage, type TrackingExtract
 import { buildTrackingExtractionInstructions } from './prompts'
 
 /**
+ * Remove carrier prefixes from tracking numbers
+ */
+function stripCarrierPrefix(trackingNumber: string): string {
+  const carrierPrefixes = ['UPS', 'USPS', 'FEDEX', 'DHL', 'ONTRAC', 'LASERSHIP']
+  
+  let cleaned = trackingNumber
+  for (const prefix of carrierPrefixes) {
+    if (cleaned.startsWith(prefix)) {
+      cleaned = cleaned.slice(prefix.length)
+      break
+    }
+  }
+  
+  return cleaned
+}
+
+/**
  * Extract tracking information from email messages
  */
 export async function extractTracking(
@@ -31,12 +48,20 @@ export async function extractTracking(
         }
         return true
       })
-      .map(shipment => ({
-        ...shipment,
-        trackingNumber: shipment.trackingNumber
+      .map(shipment => {
+        // First normalize: uppercase and remove spaces/dashes
+        let normalized = shipment.trackingNumber
           .toUpperCase()
-          .replace(/[\s-]/g, ''),
-      }))
+          .replace(/[\s-]/g, '')
+        
+        // Then strip carrier prefix if present
+        normalized = stripCarrierPrefix(normalized)
+        
+        return {
+          ...shipment,
+          trackingNumber: normalized,
+        }
+      })
 
     return {
       ...result,

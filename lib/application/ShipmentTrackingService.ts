@@ -4,6 +4,7 @@ import { ShipmentStatus as SS } from '../domain/value-objects/ShipmentStatus'
 import { createPrismaShipmentRepository } from '../infrastructure/repositories/PrismaShipmentRepository'
 import { createShip24Client } from '../infrastructure/sdks/ship24/client'
 import { createRegisterTrackerUseCase } from './use-cases/registerTracker'
+import { createRegisterTrackersBulkUseCase } from './use-cases/registerTrackersBulk'
 import { createUpdateShipmentTrackingUseCase } from './use-cases/updateShipmentTracking'
 import { createProcessWebhookUseCase } from './use-cases/processWebhook'
 import type { Ship24Tracking } from '../infrastructure/sdks/ship24/schemas'
@@ -33,6 +34,7 @@ export const createShipmentTrackingService = (): ShipmentTrackingService => {
   
   // Use cases (dependency injection via closures)
   const registerTrackerUC = createRegisterTrackerUseCase(repository, ship24Client)
+  const registerTrackersBulkUC = createRegisterTrackersBulkUseCase(repository, ship24Client)
   const updateTrackingUC = createUpdateShipmentTrackingUseCase(repository, ship24Client)
   const processWebhookUC = createProcessWebhookUseCase(repository)
 
@@ -99,21 +101,58 @@ export const createShipmentTrackingService = (): ShipmentTrackingService => {
     },
 
     /**
-     * Register multiple trackers in bulk
+     * Register multiple trackers in bulk (uses Ship24 bulk API)
      */
     async registerTrackersBulk(
-      shipments: Array<{ trackingNumber: string; carrier: string | null; poNumber?: string }>
+      shipmentsInput: Array<{ trackingNumber: string; carrier: string | null; poNumber?: string }>
     ) {
-      const results = []
+      // Create or find shipments
+      const shipments: S[] = []
+      
+      for (const item of shipmentsInput) {
+        const tnResult = TN.create(item.trackingNumber)
+        if (!tnResult.success) {
+          continue // Skip invalid tracking numbers
+        }
 
-      for (const item of shipments) {
-        const result = await this.registerTracker(item.trackingNumber, item.carrier, item.poNumber)
-        results.push({
-          ...result,
-        })
+        const tn = tnResult.value
+        let shipment = await repository.findByTrackingNumber(tn)
+
+        if (!shipment) {
+          const statusResult = SS.create('pending')
+          if (!statusResult.success) continue
+
+          shipment = S.create({
+            trackingNumber: tn,
+            carrier: item.carrier,
+            poNumber: item.poNumber || null,
+            supplier: null,
+            status: statusResult.value,
+            ship24TrackerId: null,
+            shippedDate: null,
+            estimatedDelivery: null,
+            deliveredDate: null,
+            lastChecked: null,
+            frontConversationId: null,
+          })
+          shipment = await repository.save(shipment)
+        }
+
+        shipments.push(shipment)
       }
 
-      return results
+      // Use bulk registration use case
+      const result = await registerTrackersBulkUC({ shipments })
+      
+      if (!result.success) {
+        return shipmentsInput.map(item => ({
+          trackingNumber: item.trackingNumber,
+          success: false,
+          error: result.error.message,
+        }))
+      }
+
+      return result.value
     },
 
     /**
@@ -152,22 +191,20 @@ export const createShipmentTrackingService = (): ShipmentTrackingService => {
      */
     async backfillTrackers(): Promise<{ total: number; registered: number; skipped: number; errors: string[] }> {
       const unregistered = await repository.findUnregisteredShipments()
-      const results = []
-
-      for (const shipment of unregistered) {
-        const result = await registerTrackerUC({ shipment })
-        
-        const output = result.success ? result.value : {
-          success: false,
-          
-          error: result.error.message,
+      
+      // Use bulk registration for efficiency
+      const result = await registerTrackersBulkUC({ shipments: unregistered })
+      
+      if (!result.success) {
+        return {
+          total: unregistered.length,
+          registered: 0,
+          skipped: unregistered.length,
+          errors: [result.error.message],
         }
-
-        results.push({
-          trackingNumber: TN.toString(shipment.trackingNumber),
-          ...output,
-        })
       }
+
+      const results = result.value
 
       return {
         total: unregistered.length,
