@@ -44,7 +44,7 @@ const ShipmentResponseSchema = z.object({
     message: z.string().nullable(),
     eventTime: z.string().nullable(),
   })).optional(),
-}})
+})
 
 const formatShipmentForApi = (shipment: ReturnType<typeof serializeShipment>) => ({
   ...shipment,
