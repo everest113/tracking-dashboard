@@ -4,13 +4,14 @@ import { shipmentSchema } from '@/lib/validations'
 import { getShipmentTrackingService } from '@/lib/application/ShipmentTrackingService'
 import { Prisma } from '@prisma/client'
 import { getErrorMessage } from '@/lib/utils/fetch-helpers'
+import { ORPCError } from '@orpc/shared/error'
 import {
   ShipmentListQuerySchema,
   createPaginatedResponseSchema,
   buildShipmentWhereClause,
   buildShipmentOrderByClause,
 } from './schemas'
-import { serializeShipments } from '@/lib/infrastructure/repositories/serializers'
+import { serializeShipment, serializeShipments } from '@/lib/infrastructure/repositories/serializers'
 
 /**
  * Shipment response schema (camelCase API format)
@@ -37,6 +38,21 @@ const ShipmentResponseSchema = z.object({
     message: z.string().nullable(),
     eventTime: z.string().nullable(),
   })).optional(),
+}})
+
+const formatShipmentForApi = (shipment: ReturnType<typeof serializeShipment>) => ({
+  ...shipment,
+  shippedDate: shipment.shippedDate?.toISOString() ?? null,
+  estimatedDelivery: shipment.estimatedDelivery?.toISOString() ?? null,
+  deliveredDate: shipment.deliveredDate?.toISOString() ?? null,
+  ship24LastUpdate: shipment.ship24LastUpdate?.toISOString() ?? null,
+  lastChecked: shipment.lastChecked?.toISOString() ?? null,
+  createdAt: shipment.createdAt.toISOString(),
+  updatedAt: shipment.updatedAt.toISOString(),
+  trackingEvents: shipment.trackingEvents?.map((event) => ({
+    ...event,
+    eventTime: event.eventTime?.toISOString() ?? null,
+  })),
 })
 
 export const appRouter = {
@@ -73,22 +89,10 @@ export const appRouter = {
 
         // Serialize to camelCase
         const serialized = serializeShipments(shipments)
+        const formatted = serialized.map(formatShipmentForApi)
 
         return {
-          items: serialized.map(s => ({
-            ...s,
-            shippedDate: s.shippedDate?.toISOString() ?? null,
-            estimatedDelivery: s.estimatedDelivery?.toISOString() ?? null,
-            deliveredDate: s.deliveredDate?.toISOString() ?? null,
-            ship24LastUpdate: s.ship24LastUpdate?.toISOString() ?? null,
-            lastChecked: s.lastChecked?.toISOString() ?? null,
-            createdAt: s.createdAt.toISOString(),
-            updatedAt: s.updatedAt.toISOString(),
-            trackingEvents: s.trackingEvents?.map(e => ({
-              ...e,
-              eventTime: e.eventTime?.toISOString() ?? null,
-            })),
-          })),
+          items: formatted,
           pagination: {
             page,
             pageSize,
@@ -102,14 +106,17 @@ export const appRouter = {
 
     create: publicProcedure
       .input(shipmentSchema)
-      .output(z.unknown())
+      .output(ShipmentResponseSchema)
       .handler(async ({ context, input }) => {
         const existingShipment = await context.prisma.shipments.findUnique({
           where: { tracking_number: input.trackingNumber },
         })
 
         if (existingShipment) {
-          throw new Error('A shipment with this tracking number already exists')
+          throw new ORPCError({
+            code: 'CONFLICT',
+            message: 'A shipment with this tracking number already exists',
+          })
         }
 
         const shipmentData: Prisma.shipmentsCreateInput = {
@@ -141,9 +148,15 @@ export const appRouter = {
 
         const shipment = await context.prisma.shipments.create({
           data: shipmentData,
+          include: {
+            tracking_events: {
+              orderBy: { event_time: 'desc' },
+              take: 5,
+            },
+          },
         })
 
-        return shipment
+        return formatShipmentForApi(serializeShipment(shipment))
       }),
   },
   trackingStats: {

@@ -6,6 +6,7 @@ import LastSyncDisplay from '@/components/LastSyncDisplay'
 import ManualTrackingUpdate from '@/components/ManualTrackingUpdate'
 import BackfillTrackers from '@/components/BackfillTrackers'
 import SyncDialog from '@/components/SyncDialog'
+import { api } from '@/lib/orpc/client'
 
 interface TrackingEvent {
   id: number
@@ -74,46 +75,20 @@ export default function Home() {
     setError(null)
     
     try {
-      // Build query params
-      const params = new URLSearchParams()
-      params.append('page', pagination.page.toString())
-      params.append('pageSize', pagination.pageSize.toString())
+      const data = await api.shipments.list({
+        page: pagination.page,
+        pageSize: pagination.pageSize,
+        trackingNumber: filter.trackingNumber,
+        poNumber: filter.poNumber,
+        supplier: filter.supplier,
+        status: filter.status,
+        carrier: filter.carrier,
+        sortField: sort?.field,
+        sortDirection: sort?.direction,
+      })
       
-      if (filter.trackingNumber) params.append('trackingNumber', filter.trackingNumber)
-      if (filter.poNumber) params.append('poNumber', filter.poNumber)
-      if (filter.supplier) params.append('supplier', filter.supplier)
-      if (filter.status) params.append('status', filter.status)
-      if (filter.carrier) params.append('carrier', filter.carrier)
-      
-      if (sort) {
-        params.append('sortField', sort.field)
-        params.append('sortDirection', sort.direction)
-      }
-
-      const response = await fetch(`/api/shipments?${params.toString()}`)
-      
-      if (!response.ok) {
-        throw new Error('Failed to fetch shipments')
-      }
-      
-      const data = await response.json()
-      
-      if (data.items) {
-        // Paginated response
-        setShipments(data.items)
-        setPagination(data.pagination)
-      } else if (Array.isArray(data)) {
-        // Simple array response (fallback)
-        setShipments(data)
-        setPagination({
-          page: 1,
-          pageSize: data.length,
-          total: data.length,
-          totalPages: 1,
-          hasNext: false,
-          hasPrev: false,
-        })
-      }
+      setShipments(data.items)
+      setPagination(data.pagination)
     } catch (err) {
       console.error('Failed to fetch shipments:', err)
       setError('Failed to fetch shipments')
