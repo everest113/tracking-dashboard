@@ -24,6 +24,9 @@ export async function createContext(req: NextRequest): Promise<Context> {
     userAgent,
   })
 
+  // Console log for dev visibility
+  console.log(`📥 [${method}] ${url} [${requestId.substring(0, 8)}]`)
+
   return {
     req,
     prisma,
