@@ -4,10 +4,20 @@ import { createORPCClient } from '@orpc/client'
 import { ORPCLink } from '@orpc/client/fetch'
 import type { AppRouter } from './router'
 
-const baseURL = typeof window !== 'undefined' ? '/api/orpc' : 'http://localhost:3000/api/orpc'
+// Get the base URL - must be absolute URL for fetch
+function getBaseURL() {
+  if (typeof window !== 'undefined') {
+    // Client-side: use relative path or construct from window.location
+    return `${window.location.origin}/api/orpc`
+  }
+  // Server-side
+  return process.env.NEXT_PUBLIC_APP_URL 
+    ? `${process.env.NEXT_PUBLIC_APP_URL}/api/orpc`
+    : 'http://localhost:3000/api/orpc'
+}
 
 const link = new ORPCLink({
-  url: baseURL,
+  url: getBaseURL(),
 })
 
 export const api = createORPCClient<AppRouter>(link)
