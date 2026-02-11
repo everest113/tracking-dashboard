@@ -7,6 +7,7 @@ import ManualTrackingUpdate from '@/components/ManualTrackingUpdate'
 import BackfillTrackers from '@/components/BackfillTrackers'
 import SyncDialog from '@/components/SyncDialog'
 import { api } from '@/lib/orpc/client'
+import type { ShipmentFilter as SchemaShipmentFilter, ShipmentSort as SchemaShipmentSort } from '@/lib/orpc/schemas'
 
 interface TrackingEvent {
   id: number
@@ -29,22 +30,14 @@ interface Shipment {
   ship24Status: string | null
   ship24LastUpdate: string | null
   lastChecked: string | null
+  lastError: string | null
   createdAt: string
+  updatedAt: string
   trackingEvents?: TrackingEvent[]
 }
 
-interface ShipmentFilter {
-  trackingNumber?: string
-  poNumber?: string
-  supplier?: string
-  status?: string
-  carrier?: string
-}
-
-interface ShipmentSort {
-  field: string
-  direction: 'asc' | 'desc'
-}
+type ShipmentFilter = SchemaShipmentFilter
+type ShipmentSort = SchemaShipmentSort
 
 interface PaginationData {
   page: number
@@ -76,15 +69,21 @@ export default function Home() {
     
     try {
       const data = await api.shipments.list({
-        page: pagination.page,
-        pageSize: pagination.pageSize,
-        trackingNumber: filter.trackingNumber,
-        poNumber: filter.poNumber,
-        supplier: filter.supplier,
-        status: filter.status,
-        carrier: filter.carrier,
-        sortField: sort?.field,
-        sortDirection: sort?.direction,
+        pagination: {
+          page: pagination.page,
+          pageSize: pagination.pageSize,
+        },
+        filter: {
+          trackingNumber: filter.trackingNumber,
+          poNumber: filter.poNumber,
+          supplier: filter.supplier,
+          status: filter.status,
+          carrier: filter.carrier,
+        },
+        sort: sort ? {
+          field: sort.field,
+          direction: sort.direction,
+        } : undefined,
       })
       
       setShipments(data.items)

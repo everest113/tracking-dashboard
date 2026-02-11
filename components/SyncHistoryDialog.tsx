@@ -21,7 +21,7 @@ interface SyncRecord {
   shipmentsSkipped: number
   conversationsWithNoTracking: number
   durationMs: number | null
-  errors: unknown[]
+  errors: string[]
   status: string
   startedAt: Date
   completedAt: Date | null

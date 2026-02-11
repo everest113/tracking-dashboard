@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Package, MapPin, Clock, ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight, CheckCircle2, AlertCircle, TruckIcon, Search, Copy, Check } from 'lucide-react'
+import type { ShipmentFilter, ShipmentSort } from '@/lib/orpc/schemas'
 
 interface TrackingEvent {
   id: number
@@ -62,8 +63,8 @@ interface ShipmentTableProps {
   pagination: PaginationData
   onQueryChange: (query: {
     pagination?: { page: number; pageSize: number }
-    filter?: Record<string, string>
-    sort?: { field: string; direction: 'asc' | 'desc' }
+    filter?: ShipmentFilter
+    sort?: ShipmentSort
   }) => void
   loading?: boolean
 }
@@ -360,7 +361,9 @@ export default function ShipmentTable({ shipments, pagination, onQueryChange, lo
                             {shipment.carrier || 'Unknown'}
                           </span>
                           {shipment.lastError && (
-                            <AlertCircle className="h-3 w-3 text-red-500" title={shipment.lastError} />
+                            <span title={shipment.lastError}>
+                              <AlertCircle className="h-3 w-3 text-red-500" />
+                            </span>
                           )}
                         </div>
                       </div>

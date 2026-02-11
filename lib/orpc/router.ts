@@ -35,6 +35,7 @@ const ShipmentResponseSchema = z.object({
   ship24Status: z.string().nullable(),
   ship24LastUpdate: z.string().nullable(),
   lastChecked: z.string().nullable(),
+  lastError: z.string().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
   trackingEvents: z.array(z.object({
@@ -215,8 +216,32 @@ export const appRouter = {
       .input(z.object({ limit: z.number().default(10) }).default({ limit: 10 }))
       .output(z.object({
         success: z.boolean(),
-        history: z.array(z.unknown()),
-        lastSync: z.unknown().nullable(),
+        history: z.array(z.object({
+          id: z.number(),
+          startedAt: z.date(),
+          completedAt: z.date().nullable(),
+          status: z.string(),
+          conversationsProcessed: z.number(),
+          shipmentsAdded: z.number(),
+          conversationsAlreadyScanned: z.number(),
+          shipmentsSkipped: z.number(),
+          conversationsWithNoTracking: z.number(),
+          durationMs: z.number().nullable(),
+          errors: z.array(z.string()),
+        })),
+        lastSync: z.object({
+          id: z.number(),
+          startedAt: z.date(),
+          completedAt: z.date().nullable(),
+          status: z.string(),
+          conversationsProcessed: z.number(),
+          shipmentsAdded: z.number(),
+          conversationsAlreadyScanned: z.number(),
+          shipmentsSkipped: z.number(),
+          conversationsWithNoTracking: z.number(),
+          durationMs: z.number().nullable(),
+          errors: z.array(z.string()),
+        }).nullable(),
       }))
       .handler(async ({ context, input }) => {
         const limit = input.limit
@@ -240,7 +265,7 @@ export const appRouter = {
           shipmentsSkipped: record.shipments_skipped,
           conversationsWithNoTracking: record.conversations_with_no_tracking,
           durationMs: record.duration_ms,
-          errors: Array.isArray(record.errors) ? record.errors : [],
+          errors: Array.isArray(record.errors) ? record.errors.map(String) : [],
         })
 
         return {
