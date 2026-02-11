@@ -112,28 +112,12 @@ export default function SyncDialog({ onSuccess }: { onSuccess: () => void }) {
     addProgressEvent('processing', `Fetching conversations from ${formattedDate}`)
 
     try {
-      const response = await fetch('/api/front/scan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          after: syncDate,
-          forceRescan: forceRescan && isDevMode
-        }),
+      const data = await api.front.scan({
+        after: syncDate,
+        forceRescan: forceRescan && isDevMode,
       })
 
-      const data: ScanResult = await response.json()
-
-      if (!response.ok) {
-        addProgressEvent('error', `Sync failed: ${(typeof data === 'object' && data !== null && 'error' in data ? String((data as { error: string }).error) : 'Unknown error')}`)
-        setDuration(calculateDuration(startTime))
-        setStatus('error')
-        toast.error('Sync failed', {
-          description: (typeof data === 'object' && data !== null && 'error' in data ? String((data as { error: string }).error) : 'Unknown error') || 'An error occurred',
-        })
-        return
-      }
-
-      setResult(data)
+      setResult(data as unknown as ScanResult)
       
       const { summary } = data
 

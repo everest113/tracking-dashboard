@@ -12,6 +12,9 @@ import {
   buildShipmentOrderByClause,
 } from './schemas'
 import { serializeShipment, serializeShipments } from '@/lib/infrastructure/repositories/serializers'
+import { getFrontClient } from '@/lib/infrastructure/sdks/front/client'
+import type { FrontConversation, FrontMessage } from '@/lib/infrastructure/sdks/front/schemas'
+import { extractTrackingFromEmail } from '@/lib/application/use-cases/extractTrackingFromEmail'
 
 /**
  * Shipment response schema (camelCase API format)
@@ -417,6 +420,374 @@ export const appRouter = {
           const errorMessage = error instanceof Error ? getErrorMessage(error) : 'Failed to backfill trackers'
 
           console.error('=== Backfill Error ===')
+          console.error('Error:', errorMessage)
+
+          throw new ORPCError({
+            code: 'INTERNAL_SERVER_ERROR',
+            message: errorMessage,
+          })
+        }
+      }),
+  },
+  front: {
+    scan: publicProcedure
+      .input(
+        z.object({
+          after: z.string().optional(),
+          batchSize: z.number().default(50),
+          pageSize: z.number().default(100),
+          maxPages: z.number().optional(),
+          forceRescan: z.boolean().default(false),
+        })
+      )
+      .output(
+        z.object({
+          success: z.boolean(),
+          summary: z.object({
+            conversationsProcessed: z.number(),
+            conversationsAlreadyScanned: z.number(),
+            shipmentsAdded: z.number(),
+            shipmentsUpdated: z.number(),
+            shipmentsSkipped: z.number(),
+            conversationsWithNoTracking: z.number(),
+            batchSize: z.number(),
+            totalConversations: z.number(),
+          }),
+          errors: z.array(z.string()),
+          durationMs: z.number(),
+          timestamp: z.string(),
+        })
+      )
+      .handler(async ({ context, input }) => {
+        const startTime = Date.now()
+
+        try {
+          console.log('=== Front Scan Started ===')
+          console.log('📥 Request params:', input)
+
+          const { after, batchSize, pageSize, maxPages, forceRescan } = input
+
+          const frontClient = getFrontClient()
+          const service = getShipmentTrackingService()
+
+          const afterDate = after
+            ? new Date(after)
+            : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+
+          console.log(`Fetching conversations after: ${afterDate.toISOString()}`)
+
+          const inboxId = process.env.FRONT_INBOX_ID
+
+          if (!inboxId) {
+            throw new ORPCError({
+              code: 'INTERNAL_SERVER_ERROR',
+              message: 'FRONT_INBOX_ID environment variable is not set',
+            })
+          }
+
+          console.log(`Using inbox ID: ${inboxId}`)
+
+          const conversations = await frontClient.searchAllInboxConversations(inboxId, {
+            pageSize,
+            after: afterDate,
+            maxPages,
+          })
+
+          console.log(`Found ${conversations.length} total conversations`)
+
+          if (conversations.length === 0) {
+            return {
+              success: true,
+              summary: {
+                conversationsProcessed: 0,
+                conversationsAlreadyScanned: 0,
+                shipmentsAdded: 0,
+                shipmentsUpdated: 0,
+                shipmentsSkipped: 0,
+                conversationsWithNoTracking: 0,
+                batchSize,
+                totalConversations: 0,
+              },
+              errors: [],
+              durationMs: Date.now() - startTime,
+              timestamp: new Date().toISOString(),
+            }
+          }
+
+          // Developer Mode: Allow rescanning already analyzed conversations
+          const isDevMode = process.env.DEV_ALLOW_RESCAN === 'true'
+          const shouldRescan = forceRescan && isDevMode
+
+          if (shouldRescan) {
+            console.log('🔄 DEV MODE: Force rescanning ALL conversations')
+          }
+
+          const conversationIds = conversations.map((c: FrontConversation) => c.id)
+          const alreadyScanned = shouldRescan
+            ? []
+            : await context.prisma.scanned_conversations.findMany({
+                where: {
+                  conversation_id: { in: conversationIds },
+                },
+                select: { conversation_id: true },
+              })
+
+          const scannedIds = new Set(alreadyScanned.map((s) => s.conversation_id))
+          const unscannedConversations = shouldRescan
+            ? conversations
+            : conversations.filter((c: FrontConversation) => !scannedIds.has(c.id))
+
+          console.log(
+            `${unscannedConversations.length} conversations need scanning (${scannedIds.size} already scanned)`
+          )
+
+          if (unscannedConversations.length === 0) {
+            return {
+              success: true,
+              summary: {
+                conversationsProcessed: 0,
+                conversationsAlreadyScanned: scannedIds.size,
+                shipmentsAdded: 0,
+                shipmentsUpdated: 0,
+                shipmentsSkipped: 0,
+                conversationsWithNoTracking: 0,
+                batchSize,
+                totalConversations: conversations.length,
+              },
+              errors: [],
+              durationMs: Date.now() - startTime,
+              timestamp: new Date().toISOString(),
+            }
+          }
+
+          // Process conversations helper
+          const processBatch = async (
+            convos: FrontConversation[],
+            rescan: boolean
+          ): Promise<{
+            added: number
+            updated: number
+            skipped: number
+            noTracking: number
+            errors: string[]
+          }> => {
+            const results = {
+              added: 0,
+              updated: 0,
+              skipped: 0,
+              noTracking: 0,
+              errors: [] as string[],
+            }
+
+            await Promise.allSettled(
+              convos.map(async (conversation) => {
+                try {
+                  const messages = await frontClient.getConversationMessages(conversation.id)
+
+                  if (messages.length === 0) {
+                    await context.prisma.scanned_conversations.upsert({
+                      where: { conversation_id: conversation.id },
+                      update: { scanned_at: new Date() },
+                      create: {
+                        conversation_id: conversation.id,
+                        subject: conversation.subject,
+                        shipments_found: 0,
+                      },
+                    })
+                    results.noTracking++
+                    return
+                  }
+
+                  const messagesToExtract = messages.map((msg: FrontMessage) => ({
+                    subject: msg.subject || conversation.subject,
+                    body: msg.text || msg.body,
+                    senderEmail: msg.author?.email || msg.recipients[0]?.handle || '',
+                    senderName: msg.author?.name || msg.author?.username || '',
+                    date: new Date(msg.created_at * 1000).toISOString(),
+                  }))
+
+                  const extractionResult = await extractTrackingFromEmail(messagesToExtract)
+
+                  if (!extractionResult || extractionResult.shipments.length === 0) {
+                    await context.prisma.scanned_conversations.upsert({
+                      where: { conversation_id: conversation.id },
+                      update: { scanned_at: new Date() },
+                      create: {
+                        conversation_id: conversation.id,
+                        subject: conversation.subject,
+                        shipments_found: 0,
+                      },
+                    })
+                    results.noTracking++
+                    return
+                  }
+
+                  const shipmentsToRegister = []
+
+                  for (const shipment of extractionResult.shipments) {
+                    const existing = await context.prisma.shipments.findUnique({
+                      where: { tracking_number: shipment.trackingNumber },
+                    })
+
+                    if (existing) {
+                      if (rescan) {
+                        const updateData: Prisma.shipmentsUpdateInput = {
+                          updated_at: new Date(),
+                        }
+
+                        if (shipment.carrier) updateData.carrier = shipment.carrier
+                        if (shipment.poNumber) updateData.po_number = shipment.poNumber
+                        if (extractionResult.supplier) updateData.supplier = extractionResult.supplier
+                        if (shipment.shippedDate)
+                          updateData.shipped_date = new Date(shipment.shippedDate)
+                        if (!existing.front_conversation_id)
+                          updateData.front_conversation_id = conversation.id
+
+                        const updatedShipment = await context.prisma.shipments.update({
+                          where: { tracking_number: shipment.trackingNumber },
+                          data: updateData,
+                        })
+
+                        shipmentsToRegister.push(updatedShipment)
+                        results.updated++
+                      } else {
+                        results.skipped++
+
+                        if (!existing.front_conversation_id) {
+                          await context.prisma.shipments.update({
+                            where: { tracking_number: shipment.trackingNumber },
+                            data: {
+                              front_conversation_id: conversation.id,
+                              updated_at: new Date(),
+                            },
+                          })
+                        }
+                      }
+                      continue
+                    }
+
+                    const newShipment = await context.prisma.shipments.create({
+                      data: {
+                        tracking_number: shipment.trackingNumber,
+                        carrier: shipment.carrier ?? null,
+                        po_number: shipment.poNumber || null,
+                        supplier: extractionResult.supplier || null,
+                        shipped_date: shipment.shippedDate
+                          ? new Date(shipment.shippedDate)
+                          : null,
+                        status: 'pending',
+                        front_conversation_id: conversation.id,
+                        updated_at: new Date(),
+                      },
+                    })
+
+                    shipmentsToRegister.push(newShipment)
+                    results.added++
+                  }
+
+                  if (shipmentsToRegister.length > 0) {
+                    try {
+                      const bulkResults = await service.registerTrackersBulk(
+                        shipmentsToRegister.map((s) => ({
+                          trackingNumber: s.tracking_number,
+                          carrier: s.carrier,
+                          poNumber: s.po_number || undefined,
+                        }))
+                      )
+
+                      const failureCount = bulkResults.filter((r) => !r.success).length
+                      if (failureCount > 0) {
+                        results.errors.push(`${failureCount} trackers failed registration`)
+                      }
+                    } catch (err) {
+                      results.errors.push(`Ship24 registration failed: ${getErrorMessage(err)}`)
+                    }
+                  }
+
+                  await context.prisma.scanned_conversations.upsert({
+                    where: { conversation_id: conversation.id },
+                    update: {
+                      scanned_at: new Date(),
+                      shipments_found: results.added + results.updated,
+                    },
+                    create: {
+                      conversation_id: conversation.id,
+                      subject: conversation.subject,
+                      shipments_found: results.added + results.updated,
+                    },
+                  })
+                } catch (error) {
+                  results.errors.push(`${conversation.id}: ${getErrorMessage(error)}`)
+                }
+              })
+            )
+
+            return results
+          }
+
+          const results = {
+            added: 0,
+            updated: 0,
+            skipped: 0,
+            alreadyScanned: scannedIds.size,
+            noTracking: 0,
+            errors: [] as string[],
+          }
+
+          // Process batches
+          const batches: FrontConversation[][] = []
+          for (let i = 0; i < unscannedConversations.length; i += batchSize) {
+            batches.push(unscannedConversations.slice(i, i + batchSize))
+          }
+
+          if (shouldRescan) {
+            for (let i = 0; i < batches.length; i++) {
+              const batchResult = await processBatch(batches[i], forceRescan)
+              results.added += batchResult.added
+              results.updated += batchResult.updated
+              results.skipped += batchResult.skipped
+              results.noTracking += batchResult.noTracking
+              results.errors.push(...batchResult.errors)
+            }
+          } else {
+            const batchResults = await Promise.all(
+              batches.map((batch) => processBatch(batch, forceRescan))
+            )
+
+            for (const batchResult of batchResults) {
+              results.added += batchResult.added
+              results.updated += batchResult.updated
+              results.skipped += batchResult.skipped
+              results.noTracking += batchResult.noTracking
+              results.errors.push(...batchResult.errors)
+            }
+          }
+
+          const duration = Date.now() - startTime
+
+          console.log('=== Scan Complete ===')
+
+          return {
+            success: true,
+            summary: {
+              conversationsProcessed: unscannedConversations.length,
+              conversationsAlreadyScanned: results.alreadyScanned,
+              shipmentsAdded: results.added,
+              shipmentsUpdated: results.updated,
+              shipmentsSkipped: results.skipped,
+              conversationsWithNoTracking: results.noTracking,
+              batchSize,
+              totalConversations: conversations.length,
+            },
+            errors: results.errors,
+            durationMs: duration,
+            timestamp: new Date().toISOString(),
+          }
+        } catch (error: unknown) {
+          const errorMessage =
+            error instanceof Error ? getErrorMessage(error) : 'Failed to scan conversations'
+
+          console.error('=== Scan Error ===')
           console.error('Error:', errorMessage)
 
           throw new ORPCError({
