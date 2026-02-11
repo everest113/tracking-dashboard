@@ -230,6 +230,10 @@ export const appRouter = {
           status: record.status,
           conversationsProcessed: record.conversations_processed,
           shipmentsAdded: record.shipments_added,
+          conversationsAlreadyScanned: record.conversations_already_scanned,
+          shipmentsSkipped: record.shipments_skipped,
+          conversationsWithNoTracking: record.conversations_with_no_tracking,
+          durationMs: record.duration_ms,
           errors: Array.isArray(record.errors) ? record.errors : [],
         })
 

@@ -11,20 +11,20 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { CheckCircle2, XCircle, AlertCircle, Clock } from 'lucide-react'
+import { api } from '@/lib/orpc/client'
 
 interface SyncRecord {
   id: number
-  source: string
-  conversations_processed: number
-  conversations_already_scanned: number
-  shipments_added: number
-  shipments_skipped: number
-  conversations_with_no_tracking: number
-  duration_ms: number | null
-  errors: string[]
+  conversationsProcessed: number
+  conversationsAlreadyScanned: number
+  shipmentsAdded: number
+  shipmentsSkipped: number
+  conversationsWithNoTracking: number
+  durationMs: number | null
+  errors: unknown[]
   status: string
-  started_at: string
-  completed_at: string | null
+  startedAt: Date
+  completedAt: Date | null
 }
 
 interface SyncHistoryDialogProps {
@@ -45,11 +45,9 @@ export default function SyncHistoryDialog({ isOpen, onClose }: SyncHistoryDialog
   const fetchHistory = async () => {
     setLoading(true)
     try {
-      const response = await fetch('/api/sync-history?limit=20')
-      const data = await response.json()
-
+      const data = await api.syncHistory.get({ limit: 20 })
       if (data.success) {
-        setHistory(data.history || [])
+        setHistory(data.history as SyncRecord[])
       }
     } catch (error) {
       console.error('Failed to fetch sync history:', getErrorMessage(error))
@@ -108,16 +106,16 @@ export default function SyncHistoryDialog({ isOpen, onClose }: SyncHistoryDialog
                     {getStatusIcon(record.status, record.errors.length)}
                     <div>
                       <div className="font-medium">
-                        {format(new Date(record.started_at), 'MMM d, yyyy h:mm a')}
+                        {format(new Date(record.startedAt), 'MMM d, yyyy h:mm a')}
                       </div>
                       <div className="text-xs text-muted-foreground">
-                        {formatDistanceToNow(new Date(record.started_at), { addSuffix: true })}
+                        {formatDistanceToNow(new Date(record.startedAt), { addSuffix: true })}
                       </div>
                     </div>
                   </div>
                   <div className="flex items-center gap-1 text-xs text-muted-foreground">
                     <Clock className="h-3 w-3" />
-                    {formatDuration(record.duration_ms)}
+                    {formatDuration(record.durationMs)}
                   </div>
                 </div>
 
@@ -125,26 +123,26 @@ export default function SyncHistoryDialog({ isOpen, onClose }: SyncHistoryDialog
                 <div className="grid grid-cols-3 gap-4 text-sm">
                   <div>
                     <div className="text-muted-foreground text-xs">Processed</div>
-                    <div className="font-semibold">{record.conversations_processed}</div>
+                    <div className="font-semibold">{record.conversationsProcessed}</div>
                   </div>
                   <div>
                     <div className="text-muted-foreground text-xs">Added</div>
                     <div className="font-semibold text-green-600">
-                      {record.shipments_added}
+                      {record.shipmentsAdded}
                     </div>
                   </div>
                   <div>
                     <div className="text-muted-foreground text-xs">Skipped</div>
                     <div className="font-semibold text-gray-500">
-                      {record.shipments_skipped}
+                      {record.shipmentsSkipped}
                     </div>
                   </div>
                 </div>
 
                 {/* Additional Stats */}
                 <div className="flex gap-4 text-xs text-muted-foreground">
-                  <span>Already scanned: {record.conversations_already_scanned}</span>
-                  <span>No tracking: {record.conversations_with_no_tracking}</span>
+                  <span>Already scanned: {record.conversationsAlreadyScanned}</span>
+                  <span>No tracking: {record.conversationsWithNoTracking}</span>
                 </div>
 
                 {/* Errors */}

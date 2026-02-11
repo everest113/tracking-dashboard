@@ -2,6 +2,7 @@
 import { getErrorMessage } from '@/lib/utils/fetch-helpers'
 
 import { useState, useEffect } from 'react'
+import { api } from '@/lib/orpc/client'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -58,11 +59,10 @@ export default function SyncDialog({ onSuccess }: { onSuccess: () => void }) {
   useEffect(() => {
     const fetchLastSync = async () => {
       try {
-        const response = await fetch('/api/sync-history?limit=1')
-        const data = await response.json()
+        const data = await api.syncHistory.get({ limit: 1 })
         
-        if (data.success && data.lastSync && data.lastSync.started_at) {
-          const lastSyncDate = new Date(data.lastSync.started_at)
+        if (data.success && data.lastSync && data.lastSync.startedAt) {
+          const lastSyncDate = new Date(data.lastSync.startedAt)
           
           if (!isNaN(lastSyncDate.getTime())) {
             const defaultDate = lastSyncDate.toISOString().split('T')[0]
