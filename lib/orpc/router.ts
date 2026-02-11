@@ -263,6 +263,169 @@ export const appRouter = {
         }
       }),
   },
+  trackers: {
+    backfill: publicProcedure
+      .output(z.object({
+        success: z.boolean(),
+        registered: z.number(),
+        skipped: z.number(),
+        errors: z.number(),
+        total: z.number(),
+        errorMessages: z.array(z.string()).optional(),
+        durationMs: z.number(),
+        timestamp: z.string(),
+        message: z.string().optional(),
+      }))
+      .handler(async ({ context }) => {
+        const startTime = Date.now()
+
+        try {
+          console.log('=== Ship24 Tracker Backfill Started ===')
+
+          interface UnregisteredShipment {
+            id: number
+            tracking_number: string
+            carrier: string | null
+            po_number: string | null
+            status: string
+          }
+
+          // Find all shipments without a ship24_tracker_id
+          const unregisteredShipments = await context.prisma.shipments.findMany({
+            where: {
+              ship24_tracker_id: null,
+            },
+            select: {
+              id: true,
+              tracking_number: true,
+              carrier: true,
+              po_number: true,
+              status: true,
+            },
+          })
+
+          console.log(`Found ${unregisteredShipments.length} shipments to register`)
+
+          if (unregisteredShipments.length === 0) {
+            return {
+              success: true,
+              message: 'All shipments already registered',
+              registered: 0,
+              skipped: 0,
+              errors: 0,
+              total: 0,
+              durationMs: Date.now() - startTime,
+              timestamp: new Date().toISOString(),
+            }
+          }
+
+          let registered = 0
+          const skipped = 0
+          let errors = 0
+          const errorMessages: string[] = []
+
+          // Process in batches of 50 (Ship24 bulk limit)
+          const BATCH_SIZE = 50
+          const service = getShipmentTrackingService()
+
+          for (let i = 0; i < unregisteredShipments.length; i += BATCH_SIZE) {
+            const batch = unregisteredShipments.slice(i, i + BATCH_SIZE)
+
+            console.log(`Processing batch ${Math.floor(i / BATCH_SIZE) + 1} (${batch.length} shipments)`)
+
+            try {
+              // Prepare tracker data
+              const trackerData = batch.map((s: UnregisteredShipment) => ({
+                trackingNumber: s.tracking_number,
+                carrier: s.carrier,
+                poNumber: s.po_number || undefined,
+              }))
+
+              // Register trackers in bulk
+              const results = await service.registerTrackersBulk(trackerData)
+
+              console.log(`  Received ${results.length} results`)
+
+              // Update database with tracker IDs
+              for (const result of results) {
+                const shipment = batch.find((s: UnregisteredShipment) => s.tracking_number === result.trackingNumber)
+
+                if (shipment) {
+                  if (result.success && result.trackerId) {
+                    try {
+                      await context.prisma.shipments.update({
+                        where: { id: shipment.id },
+                        data: {
+                          ship24_tracker_id: result.trackerId,
+                          updated_at: new Date(),
+                        },
+                      })
+
+                      registered++
+                      console.log(`  ✅ Registered: ${shipment.tracking_number} → ${result.trackerId}`)
+                    } catch (updateErr) {
+                      errors++
+                      const msg =
+                        updateErr instanceof Error
+                          ? `Failed to update ${shipment.tracking_number}: ${updateErr.message}`
+                          : `Failed to update ${shipment.tracking_number}: Unknown error`
+                      console.error(`  ❌ ${msg}`)
+                      errorMessages.push(msg)
+                    }
+                  } else {
+                    errors++
+                    const msg = `Failed to register ${result.trackingNumber}: ${result.error || 'Unknown error'}`
+                    console.error(`  ❌ ${msg}`)
+                    errorMessages.push(msg)
+                  }
+                }
+              }
+
+              // Rate limiting: small delay between batches
+              if (i + BATCH_SIZE < unregisteredShipments.length) {
+                await new Promise((resolve) => setTimeout(resolve, 500))
+              }
+            } catch (batchErr) {
+              errors += batch.length
+              const msg =
+                batchErr instanceof Error
+                  ? `Batch ${Math.floor(i / BATCH_SIZE) + 1} failed: ${batchErr.message}`
+                  : `Batch ${Math.floor(i / BATCH_SIZE) + 1} failed: Unknown error`
+              console.error(`  ❌ ${msg}`)
+              errorMessages.push(msg)
+            }
+          }
+
+          const duration = Date.now() - startTime
+
+          const summary = {
+            success: true,
+            registered,
+            skipped,
+            errors,
+            total: unregisteredShipments.length,
+            errorMessages: errorMessages.slice(0, 10),
+            durationMs: duration,
+            timestamp: new Date().toISOString(),
+          }
+
+          console.log('=== Backfill Complete ===')
+          console.log(JSON.stringify(summary, null, 2))
+
+          return summary
+        } catch (error: unknown) {
+          const errorMessage = error instanceof Error ? getErrorMessage(error) : 'Failed to backfill trackers'
+
+          console.error('=== Backfill Error ===')
+          console.error('Error:', errorMessage)
+
+          throw new ORPCError({
+            code: 'INTERNAL_SERVER_ERROR',
+            message: errorMessage,
+          })
+        }
+      }),
+  },
 } as const
 
 export type AppRouter = typeof appRouter
