@@ -22,6 +22,10 @@ Operational setup for deployments and integrations:
 How the codebase is organized:
 - [DDD Overview](architecture/DDD.md) - Domain-driven design structure
 - [Testing](architecture/TESTING.md) - Testing strategy and best practices
+- [Type Safety](architecture/TYPE_SAFETY.md) - TypeScript best practices
+- [Data Storage](architecture/DATA_STORAGE.md) - Database schema and data flow
+- [Parallel Processing](architecture/PARALLEL_PROCESSING.md) - Concurrency patterns
+- [Performance](architecture/PERFORMANCE.md) - Performance optimizations
 - [Logging](../lib/infrastructure/logging/README.md) - Structured logging
 - [Repositories](../lib/infrastructure/repositories/README.md) - Data access layer
 
