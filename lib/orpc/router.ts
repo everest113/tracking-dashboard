@@ -15,6 +15,9 @@ import { serializeShipment, serializeShipments } from '@/lib/infrastructure/repo
 import { getFrontClient } from '@/lib/infrastructure/sdks/front/client'
 import type { FrontConversation, FrontMessage } from '@/lib/infrastructure/sdks/front/schemas'
 import { extractTrackingFromEmail } from '@/lib/application/use-cases/extractTrackingFromEmail'
+import { createShip24Client } from '@/lib/infrastructure/sdks/ship24/client'
+import { Ship24Mapper } from '@/lib/infrastructure/mappers/Ship24Mapper'
+import type { TrackingUpdateResult } from '@/lib/application/types'
 
 /**
  * Shipment response schema (camelCase API format)
@@ -249,20 +252,148 @@ export const appRouter = {
   },
   manualUpdateTracking: {
     update: publicProcedure
-      .output(z.object({
-        success: z.boolean(),
-        checked: z.number(),
-        updated: z.number(),
-        errors: z.number(),
-        message: z.string().optional(),
-      }))
-      .handler(async () => {
-        return {
-          success: true,
-          checked: 0,
-          updated: 0,
-          errors: 0,
-          message: 'Use /api/manual-update-tracking for full functionality',
+      .output(
+        z.object({
+          success: z.boolean(),
+          checked: z.number(),
+          updated: z.number(),
+          delivered: z.number().optional(),
+          errors: z.number(),
+          durationMs: z.number(),
+          timestamp: z.string(),
+        })
+      )
+      .handler(async ({ context }) => {
+        const startTime = Date.now()
+
+        try {
+          console.log('=== Manual Tracking Update Started ===')
+
+          const limit = 50
+          const shipments = await context.prisma.shipments.findMany({
+            where: {
+              status: {
+                notIn: ['delivered'],
+              },
+              ship24_tracker_id: {
+                not: null,
+              },
+            },
+            orderBy: {
+              last_checked: 'asc',
+            },
+            take: limit,
+          })
+
+          console.log(`Found ${shipments.length} shipments to update`)
+
+          if (shipments.length === 0) {
+            return {
+              success: true,
+              checked: 0,
+              updated: 0,
+              delivered: 0,
+              errors: 0,
+              durationMs: Date.now() - startTime,
+              timestamp: new Date().toISOString(),
+            }
+          }
+
+          const ship24Client = createShip24Client()
+          const results: TrackingUpdateResult[] = []
+          let errors = 0
+
+          for (const shipment of shipments) {
+            try {
+              console.log(`Updating ${shipment.tracking_number}...`)
+
+              const response = await ship24Client.getTrackerResults(shipment.ship24_tracker_id!)
+
+              if (response.data?.trackings?.[0]) {
+                const tracking = response.data.trackings[0]
+                const trackingUpdate = Ship24Mapper.toDomainTrackingUpdate(tracking)
+
+                const newStatus = trackingUpdate.status.type
+                const oldStatus = shipment.status
+
+                await context.prisma.shipments.update({
+                  where: { id: shipment.id },
+                  data: {
+                    status: newStatus,
+                    last_checked: new Date(),
+                    ...(trackingUpdate.estimatedDelivery && {
+                      estimated_delivery: trackingUpdate.estimatedDelivery,
+                    }),
+                    ...(trackingUpdate.deliveredDate && {
+                      delivered_date: trackingUpdate.deliveredDate,
+                    }),
+                    ...(trackingUpdate.shippedDate && {
+                      shipped_date: trackingUpdate.shippedDate,
+                    }),
+                  },
+                })
+
+                const statusChanged = oldStatus !== newStatus
+
+                results.push({
+                  success: true,
+                  trackingNumber: shipment.tracking_number,
+                  oldStatus,
+                  newStatus,
+                  statusChanged,
+                })
+
+                if (statusChanged) {
+                  console.log(`  ✓ ${shipment.tracking_number}: ${oldStatus} → ${newStatus}`)
+                }
+              } else {
+                results.push({
+                  success: false,
+                  trackingNumber: shipment.tracking_number,
+                  oldStatus: shipment.status,
+                  newStatus: shipment.status,
+                  statusChanged: false,
+                  error: 'No tracking data available',
+                })
+              }
+            } catch (error) {
+              console.error(`  ✗ Error updating ${shipment.tracking_number}:`, getErrorMessage(error))
+              errors++
+              results.push({
+                success: false,
+                trackingNumber: shipment.tracking_number,
+                oldStatus: shipment.status,
+                newStatus: shipment.status,
+                statusChanged: false,
+                error: getErrorMessage(error),
+              })
+            }
+          }
+
+          const duration = Date.now() - startTime
+
+          const summary = {
+            success: true,
+            checked: shipments.length,
+            updated: results.filter((r: TrackingUpdateResult) => r.statusChanged).length,
+            delivered: results.filter((r: TrackingUpdateResult) => r.newStatus === 'delivered').length,
+            errors,
+            durationMs: duration,
+            timestamp: new Date().toISOString(),
+          }
+
+          console.log('=== Manual Update Complete ===')
+          console.log(JSON.stringify(summary, null, 2))
+
+          return summary
+        } catch (error) {
+          console.error('=== Manual Update Error ===')
+          console.error('Error:', getErrorMessage(error))
+
+          throw new ORPCError({
+            code: 'INTERNAL_SERVER_ERROR',
+            message: getErrorMessage(error),
+          })
         }
       }),
   },

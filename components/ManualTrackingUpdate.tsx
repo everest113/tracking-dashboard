@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 import { getErrorMessage } from '@/lib/utils/fetch-helpers'
+import { api } from '@/lib/orpc/client'
 
 interface TrackingUpdateResponse {
   success: boolean
@@ -20,21 +21,7 @@ export default function ManualTrackingUpdate({ onSuccess }: { onSuccess: () => v
   const handleUpdate = async () => {
     setLoading(true)
     try {
-      const response = await fetch('/api/manual-update-tracking', {
-        method: 'POST',
-      })
-
-      const data: unknown = await response.json()
-
-      if (!response.ok) {
-        throw new Error(
-          data && typeof data === 'object' && 'error' in data
-            ? String(data.error)
-            : 'Update failed'
-        )
-      }
-
-      const result = data as TrackingUpdateResponse
+      const result = await api.manualUpdateTracking.update()
 
       toast.success(`Updated ${result.checked} shipments`, {
         description: `${result.updated} status changes, ${result.errors} errors`,
