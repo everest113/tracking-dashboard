@@ -4,8 +4,7 @@ import { useState, useEffect } from 'react'
 import ShipmentTable from '@/components/ShipmentTable'
 import StatusCards from '@/components/StatusCards'
 import LastSyncDisplay from '@/components/LastSyncDisplay'
-import ManualTrackingUpdate from '@/components/ManualTrackingUpdate'
-import BackfillTrackers from '@/components/BackfillTrackers'
+import RefreshNow from '@/components/RefreshNow'
 import SyncDialog from '@/components/SyncDialog'
 import { api } from '@/lib/orpc/client'
 import type { ShipmentFilter as SchemaShipmentFilter, ShipmentSort as SchemaShipmentSort, ShipmentSummary } from '@/lib/orpc/schemas'
@@ -170,8 +169,7 @@ export default function Home() {
               <LastSyncDisplay />
               <div className="flex gap-2">
                 <SyncDialog onSuccess={handleRefresh} />
-                <BackfillTrackers onSuccess={handleRefresh} />
-                <ManualTrackingUpdate onSuccess={handleRefresh} />
+                <RefreshNow onSuccess={handleRefresh} />
               </div>
             </div>
           </div>

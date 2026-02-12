@@ -102,14 +102,14 @@ export default function SyncDialog({ onSuccess }: { onSuccess: () => void }) {
     setProgressEvents([])
 
     const formattedDate = new Date(syncDate).toLocaleDateString()
-    addProgressEvent('processing', 'Initializing sync...')
+    addProgressEvent('processing', 'Initializing scan...')
     
     if (forceRescan && isDevMode) {
       addProgressEvent('processing', '🔄 DEV MODE: Force rescanning enabled - will update existing shipments')
     }
     
     addProgressEvent('processing', `Connecting to Front inbox...`)
-    addProgressEvent('processing', `Fetching conversations from ${formattedDate}`)
+    addProgressEvent('processing', `Scanning conversations from ${formattedDate}`)
 
     try {
       const data = await api.front.scan({
@@ -143,7 +143,7 @@ export default function SyncDialog({ onSuccess }: { onSuccess: () => void }) {
         addProgressEvent('error', `⚠ ${data.errors.length} errors occurred`)
       }
 
-      addProgressEvent('complete', '✓ Sync complete!')
+      addProgressEvent('complete', '✓ Scan complete!')
 
       setDuration(calculateDuration(startTime))
       setStatus('success')
@@ -198,9 +198,9 @@ export default function SyncDialog({ onSuccess }: { onSuccess: () => void }) {
       if (!open) resetDialog()
     }}>
       <DialogTrigger asChild>
-        <Button variant="default">
+        <Button variant="outline">
           <RefreshCw className="h-4 w-4" />
-          Sync Front Inbox
+          Scan for New Shipments
           {isDevMode && <span className="ml-1 text-xs opacity-70">[DEV]</span>}
         </Button>
       </DialogTrigger>
@@ -209,24 +209,24 @@ export default function SyncDialog({ onSuccess }: { onSuccess: () => void }) {
           <div className="flex items-center gap-2">
             {getStatusIcon()}
             <DialogTitle>
-              {status === 'idle' && 'Sync Front Inbox'}
-              {status === 'running' && 'Syncing...'}
-              {status === 'success' && 'Sync Complete'}
-              {status === 'error' && 'Sync Failed'}
+              {status === 'idle' && 'Scan for New Shipments'}
+              {status === 'running' && 'Scanning...'}
+              {status === 'success' && 'Scan Complete'}
+              {status === 'error' && 'Scan Failed'}
             </DialogTitle>
           </div>
           <DialogDescription>
-            {status === 'idle' && 'Extract tracking numbers from Front conversations'}
+            {status === 'idle' && 'Scan Front inbox conversations to discover new tracking numbers'}
             {status === 'running' && 'Processing conversations and extracting tracking information...'}
             {status === 'success' && `Completed in ${(duration || "Calculating...")}`}
-            {status === 'error' && 'An error occurred during sync'}
+            {status === 'error' && 'An error occurred during scan'}
           </DialogDescription>
         </DialogHeader>
 
         {status === 'idle' && (
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
-              <Label htmlFor="syncDate">Sync conversations from</Label>
+              <Label htmlFor="syncDate">Scan conversations from</Label>
               <Input
                 id="syncDate"
                 type="date"
@@ -344,20 +344,20 @@ export default function SyncDialog({ onSuccess }: { onSuccess: () => void }) {
                 Cancel
               </Button>
               <Button onClick={handleSync}>
-                Start Sync
+                Start Scan
               </Button>
             </>
           )}
           {status === 'running' && (
             <Button disabled>
               <Loader2 className="animate-spin" />
-              Syncing...
+              Scanning...
             </Button>
           )}
           {(status === 'success' || status === 'error') && (
             <>
               <Button variant="outline" onClick={resetDialog}>
-                Sync Again
+                Scan Again
               </Button>
               <Button onClick={() => setIsOpen(false)}>
                 Close
