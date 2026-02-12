@@ -63,7 +63,7 @@ const formatShipmentForApi = (shipment: ReturnType<typeof serializeShipment>) =>
   })),
 })
 
-const shipmentsRouter = os.router({
+const shipmentsRouter = {
   list: publicProcedure
       .input(ShipmentListQuerySchema)
       .output(createPaginatedResponseSchema(ShipmentResponseSchema))
@@ -165,9 +165,9 @@ const shipmentsRouter = os.router({
 
         return formatShipmentForApi(serializeShipment(shipment))
       }),
-})
+}
 
-const trackingStatsRouter = os.router({
+const trackingStatsRouter = {
   get: publicProcedure
       .output(z.object({
         total: z.number(),
@@ -211,9 +211,9 @@ const trackingStatsRouter = os.router({
           timestamp: new Date().toISOString()
         }
       }),
-})
+}
 
-const syncHistoryRouter = os.router({
+const syncHistoryRouter = {
   get: publicProcedure
       .input(z.object({ limit: z.number().default(10) }).default({ limit: 10 }))
       .output(z.object({
@@ -276,9 +276,9 @@ const syncHistoryRouter = os.router({
           lastSync: lastSyncRecord ? mapRecord(lastSyncRecord) : null,
         }
       }),
-})
+}
 
-const manualUpdateTrackingRouter = os.router({
+const manualUpdateTrackingRouter = {
   update: publicProcedure
       .output(
         z.object({
@@ -424,9 +424,9 @@ const manualUpdateTrackingRouter = os.router({
           })
         }
       }),
-})
+}
 
-const trackersRouter = os.router({
+const trackersRouter = {
   backfill: publicProcedure
       .output(z.object({
         success: z.boolean(),
@@ -588,9 +588,9 @@ const trackersRouter = os.router({
           })
         }
       }),
-})
+}
 
-const frontRouter = os.router({
+const frontRouter = {
   scan: publicProcedure
       .input(
         z.object({
@@ -957,17 +957,16 @@ const frontRouter = os.router({
           })
         }
       }),
-})
+}
 
-// Flatten the router for testing
-export const appRouter = os.router({
-  'shipments.list': shipmentsRouter.list,
-  'shipments.create': shipmentsRouter.create,
-  'trackingStats.get': trackingStatsRouter.get,
-  'syncHistory.get': syncHistoryRouter.get,
-  'manualUpdateTracking.update': manualUpdateTrackingRouter.update,
-  'trackers.backfill': trackersRouter.backfill,
-  'front.scan': frontRouter.scan,
-})
+// Plain nested object structure (recommended by oRPC docs)
+export const appRouter = {
+  shipments: shipmentsRouter,
+  trackingStats: trackingStatsRouter,
+  syncHistory: syncHistoryRouter,
+  manualUpdateTracking: manualUpdateTrackingRouter,
+  trackers: trackersRouter,
+  front: frontRouter,
+}
 
 export type AppRouter = typeof appRouter
