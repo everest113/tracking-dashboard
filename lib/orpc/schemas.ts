@@ -27,8 +27,9 @@ export const ShipmentFilterSchema = z.object({
   poNumber: z.string().optional(),
   supplier: z.string().optional(),
   // Category filters
-  status: z.enum(['pending', 'in_transit', 'out_for_delivery', 'delivered', 'exception', 'failed_attempt']).optional(),
+  status: z.enum(['pending', 'info_received', 'in_transit', 'out_for_delivery', 'delivered', 'exception', 'failed_attempt', 'available_for_pickup']).optional(),
   carrier: z.string().optional(),
+  hasError: z.boolean().optional(),
 })
 
 /**
@@ -48,6 +49,22 @@ export const ShipmentListQuerySchema = z.object({
 })
 
 /**
+ * Status counts schema
+ */
+export const StatusCountsSchema = z.object({
+  all: z.number(),
+  pending: z.number(),
+  infoReceived: z.number(),
+  inTransit: z.number(),
+  outForDelivery: z.number(),
+  failedAttempt: z.number(),
+  availableForPickup: z.number(),
+  delivered: z.number(),
+  exception: z.number(),
+  trackingErrors: z.number(),
+})
+
+/**
  * Standard paginated response schema
  */
 export const createPaginatedResponseSchema = <T extends z.ZodTypeAny>(itemSchema: T) =>
@@ -61,6 +78,7 @@ export const createPaginatedResponseSchema = <T extends z.ZodTypeAny>(itemSchema
       hasNext: z.boolean(),
       hasPrev: z.boolean(),
     }),
+    statusCounts: StatusCountsSchema,
   })
 
 /**
@@ -124,6 +142,11 @@ export function buildShipmentWhereClause(filter?: ShipmentFilter) {
 
   if (filter.carrier) {
     where.carrier = { contains: filter.carrier, mode: 'insensitive' }
+  }
+
+  // Filter by tracking errors
+  if (filter.hasError) {
+    where.last_error = { not: null }
   }
 
   return where

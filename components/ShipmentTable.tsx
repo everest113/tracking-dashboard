@@ -13,13 +13,6 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { Package, MapPin, Clock, ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight, CheckCircle2, AlertCircle, TruckIcon, Search, Copy, Check } from 'lucide-react'
 import type { ShipmentFilter, ShipmentSort } from '@/lib/orpc/schemas'
 
@@ -67,13 +60,13 @@ interface ShipmentTableProps {
     sort?: ShipmentSort
   }) => void
   loading?: boolean
+  activeStatus?: string
 }
 
 type SortField = 'shippedDate' | 'estimatedDelivery' | 'deliveredDate' | 'createdAt'
 
-export default function ShipmentTable({ shipments, pagination, onQueryChange, loading }: ShipmentTableProps) {
+export default function ShipmentTable({ shipments, pagination, onQueryChange, loading, activeStatus = 'all' }: ShipmentTableProps) {
   const [searchQuery, setSearchQuery] = useState('')
-  const [statusFilter, setStatusFilter] = useState<string>('all')
   const [sortField, setSortField] = useState<SortField | null>(null)
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc')
   const [copiedTracking, setCopiedTracking] = useState<string | null>(null)
@@ -85,14 +78,20 @@ export default function ShipmentTable({ shipments, pagination, onQueryChange, lo
     }, 300)
 
     return () => clearTimeout(timer)
-  }, [searchQuery, statusFilter])
+  }, [searchQuery, activeStatus])
 
   const applyFilters = () => {
-    const filter: Record<string, string> = {}
+    const filter: Record<string, any> = {}
     
     // Single search across tracking, PO, and supplier
     if (searchQuery) filter.search = searchQuery
-    if (statusFilter !== 'all') filter.status = statusFilter
+    
+    // Handle special tracking errors tab
+    if (activeStatus === 'trackingErrors') {
+      filter.hasError = true
+    } else if (activeStatus !== 'all') {
+      filter.status = activeStatus
+    }
 
     const sort = sortField ? {
       field: sortField,
@@ -135,10 +134,17 @@ export default function ShipmentTable({ shipments, pagination, onQueryChange, lo
     })
   }
 
-  const buildCurrentFilter = (): Record<string, string> | undefined => {
-    const filter: Record<string, string> = {}
+  const buildCurrentFilter = (): Record<string, any> | undefined => {
+    const filter: Record<string, any> = {}
     if (searchQuery) filter.search = searchQuery
-    if (statusFilter !== 'all') filter.status = statusFilter
+    
+    // Handle special tracking errors tab
+    if (activeStatus === 'trackingErrors') {
+      filter.hasError = true
+    } else if (activeStatus !== 'all') {
+      filter.status = activeStatus
+    }
+    
     return Object.keys(filter).length > 0 ? filter : undefined
   }
 
@@ -154,10 +160,19 @@ export default function ShipmentTable({ shipments, pagination, onQueryChange, lo
 
   const clearFilters = () => {
     setSearchQuery('')
-    setStatusFilter('all')
     setSortField(null)
+    
+    // Preserve the active tab's filter
+    let preservedFilter: Record<string, any> | undefined
+    if (activeStatus === 'trackingErrors') {
+      preservedFilter = { hasError: true }
+    } else if (activeStatus !== 'all') {
+      preservedFilter = { status: activeStatus }
+    }
+    
     onQueryChange({
       pagination: { page: 1, pageSize: pagination.pageSize },
+      filter: preservedFilter,
     })
   }
 
@@ -169,7 +184,7 @@ export default function ShipmentTable({ shipments, pagination, onQueryChange, lo
     })
   }
 
-  const hasActiveFilters = searchQuery || statusFilter !== 'all' || sortField
+  const hasActiveFilters = searchQuery || sortField
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -260,19 +275,6 @@ export default function ShipmentTable({ shipments, pagination, onQueryChange, lo
             disabled={loading}
           />
         </div>
-        <Select value={statusFilter} onValueChange={setStatusFilter} disabled={loading}>
-          <SelectTrigger className="w-[160px]">
-            <SelectValue placeholder="Status" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Statuses</SelectItem>
-            <SelectItem value="pending">Pending</SelectItem>
-            <SelectItem value="in_transit">In Transit</SelectItem>
-            <SelectItem value="out_for_delivery">Out for Delivery</SelectItem>
-            <SelectItem value="delivered">Delivered</SelectItem>
-            <SelectItem value="exception">Exception</SelectItem>
-          </SelectContent>
-        </Select>
         {hasActiveFilters && (
           <Button variant="ghost" size="sm" onClick={clearFilters} disabled={loading}>
             Clear filters

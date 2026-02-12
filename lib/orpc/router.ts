@@ -77,8 +77,38 @@ const shipmentsRouter = {
         const where = buildShipmentWhereClause(filter)
         const orderBy = buildShipmentOrderByClause(sort)
 
-        // Get total count for pagination
-        const total = await context.prisma.shipments.count({ where })
+        // Get counts for all statuses (unfiltered by status, but respecting search)
+        const searchFilter = filter?.search ? {
+          OR: [
+            { tracking_number: { contains: filter.search, mode: 'insensitive' as const } },
+            { po_number: { contains: filter.search, mode: 'insensitive' as const } },
+            { supplier: { contains: filter.search, mode: 'insensitive' as const } },
+          ],
+        } : {}
+
+        const [
+          total,
+          pending,
+          infoReceived,
+          inTransit,
+          outForDelivery,
+          failedAttempt,
+          availableForPickup,
+          delivered,
+          exception,
+          trackingErrors,
+        ] = await Promise.all([
+          context.prisma.shipments.count({ where: searchFilter }),
+          context.prisma.shipments.count({ where: { ...searchFilter, status: 'pending' } }),
+          context.prisma.shipments.count({ where: { ...searchFilter, status: 'info_received' } }),
+          context.prisma.shipments.count({ where: { ...searchFilter, status: 'in_transit' } }),
+          context.prisma.shipments.count({ where: { ...searchFilter, status: 'out_for_delivery' } }),
+          context.prisma.shipments.count({ where: { ...searchFilter, status: 'failed_attempt' } }),
+          context.prisma.shipments.count({ where: { ...searchFilter, status: 'available_for_pickup' } }),
+          context.prisma.shipments.count({ where: { ...searchFilter, status: 'delivered' } }),
+          context.prisma.shipments.count({ where: { ...searchFilter, status: 'exception' } }),
+          context.prisma.shipments.count({ where: { ...searchFilter, last_error: { not: null } } }),
+        ])
 
         // Get paginated results with tracking events
         const shipments = await context.prisma.shipments.findMany({
@@ -98,15 +128,29 @@ const shipmentsRouter = {
         const serialized = serializeShipments(shipments)
         const formatted = serialized.map(formatShipmentForApi)
 
+        const filteredTotal = await context.prisma.shipments.count({ where })
+
         const result = {
           items: formatted,
           pagination: {
             page,
             pageSize,
-            total,
-            totalPages: Math.ceil(total / pageSize),
-            hasNext: page * pageSize < total,
+            total: filteredTotal,
+            totalPages: Math.ceil(filteredTotal / pageSize),
+            hasNext: page * pageSize < filteredTotal,
             hasPrev: page > 1,
+          },
+          statusCounts: {
+            all: total,
+            pending,
+            infoReceived,
+            inTransit,
+            outForDelivery,
+            failedAttempt,
+            availableForPickup,
+            delivered,
+            exception,
+            trackingErrors,
           },
         }
 
@@ -115,6 +159,7 @@ const shipmentsRouter = {
           itemsCount: result.items.length,
           firstItem: result.items[0] ? Object.keys(result.items[0]) : [],
           pagination: result.pagination,
+          statusCounts: result.statusCounts,
         })
 
         return result
