@@ -5,6 +5,7 @@ import { getErrorMessage } from '@/lib/types/api-responses'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 import { Loader2 } from 'lucide-react'
+import { api } from '@/lib/orpc/client'
 
 type ScanResult = {
   success: boolean
@@ -24,21 +25,7 @@ export default function ScanFrontButton({ onSuccess }: { onSuccess: () => void }
     setIsScanning(true)
 
     try {
-      const response = await fetch('/api/front/scan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ limit: 50 }),
-      })
-
-      const data: ScanResult = await response.json()
-
-      if (!response.ok) {
-        toast.error('Failed to scan Front inbox', {
-          description: typeof data === 'object' && data !== null && 'error' in data ? String((data as { error: string }).error) : 'Unknown error',
-        })
-        return
-      }
-
+      const data = await api.front.scan({ batchSize: 50 })
       const { summary } = data
 
       // Show summary toast

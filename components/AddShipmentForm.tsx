@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from 'sonner'
 import { Plus } from 'lucide-react'
+import { api } from '@/lib/orpc/client'
 
 interface AddShipmentFormProps {
   onSuccess: () => void
@@ -31,22 +32,7 @@ export default function AddShipmentForm({ onSuccess }: AddShipmentFormProps) {
 
     try {
       const validated = shipmentSchema.parse(formData)
-
-      const response = await fetch('/api/shipments', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(validated),
-      })
-
-      const _data: unknown = await response.json()
-
-      if (!response.ok) {
-        throw new Error(
-          _data && typeof _data === 'object' && 'error' in _data
-            ? String(_data.error)
-            : 'Failed to add shipment'
-        )
-      }
+      await api.shipments.create(validated)
 
       toast.success('Shipment added successfully')
       setFormData({

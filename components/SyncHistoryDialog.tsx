@@ -11,7 +11,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { CheckCircle2, XCircle, AlertCircle, Clock } from 'lucide-react'
-// Using regular fetch API
+import { api } from '@/lib/orpc/client'
 
 interface SyncRecord {
   id: number
@@ -21,7 +21,7 @@ interface SyncRecord {
   shipmentsSkipped: number
   conversationsWithNoTracking: number
   durationMs: number | null
-  errors: unknown[]
+  errors: string[]
   status: string
   startedAt: Date
   completedAt: Date | null
@@ -45,9 +45,7 @@ export default function SyncHistoryDialog({ isOpen, onClose }: SyncHistoryDialog
   const fetchHistory = async () => {
     setLoading(true)
     try {
-      const response = await fetch('/api/sync-history?limit=20')
-      if (!response.ok) throw new Error('Failed to fetch')
-      const data = await response.json()
+      const data = await api.syncHistory.get({ limit: 20 })
       if (data.success) {
         setHistory(data.history as SyncRecord[])
       }

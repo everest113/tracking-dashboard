@@ -15,24 +15,16 @@ export const FrontConversationSchema = z.object({
     id: z.string(),
     email: z.string(),
     username: z.string(),
-  }).optional(),
+  }).nullable(),  // Conversations can have no assignee
   recipient: z.object({
     handle: z.string(),
     role: z.string(),
-  }),
+  }).nullable(),  // Recipient can be null in some cases
   tags: z.array(z.object({
     id: z.string(),
     name: z.string(),
   })).optional(),
-  links: z.object({
-    related: z.object({
-      events: z.string(),
-      followers: z.string(),
-      messages: z.string(),
-      comments: z.string(),
-      inboxes: z.string(),
-    }),
-  }),
+  links: z.array(z.unknown()).optional(),  // Array of links (usually empty)
   _links: z.object({
     related: z.object({
       messages: z.string(),
@@ -56,10 +48,10 @@ export const FrontMessageSchema = z.object({
     email: z.string().optional(),
     name: z.string().optional(),
     username: z.string().optional(),
-  }).optional(),
+  }).nullable(),  // System/automated messages can have null author
   recipients: z.array(z.object({
     handle: z.string(),
-    name: z.string().optional(),
+    name: z.string().nullish(),  // Recipient name can be null
     role: z.string().optional(),
   })),
   is_inbound: z.boolean().optional(),
@@ -79,12 +71,13 @@ export const FrontMessageSchema = z.object({
 
 /**
  * Front List Response schema
+ * Note: Front API returns null for pagination.next/prev when no more pages exist
  */
 export const FrontListResponseSchema = <T extends z.ZodType>(itemSchema: T) =>
   z.object({
     _pagination: z.object({
-      next: z.string().optional(),
-      prev: z.string().optional(),
+      next: z.string().nullish(),  // Allow string, null, or undefined
+      prev: z.string().nullish(),  // Allow string, null, or undefined
     }),
     _links: z.object({
       self: z.string(),
@@ -99,8 +92,8 @@ export type FrontConversation = z.infer<typeof FrontConversationSchema>
 export type FrontMessage = z.infer<typeof FrontMessageSchema>
 export type FrontListResponse<T> = {
   _pagination: {
-    next?: string
-    prev?: string
+    next?: string | null
+    prev?: string | null
   }
   _links: {
     self: string

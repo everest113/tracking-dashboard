@@ -2,45 +2,154 @@
 
 import { useState, useEffect } from 'react'
 import ShipmentTable from '@/components/ShipmentTable'
+import StatusCards from '@/components/StatusCards'
 import LastSyncDisplay from '@/components/LastSyncDisplay'
-import ManualTrackingUpdate from '@/components/ManualTrackingUpdate'
-import BackfillTrackers from '@/components/BackfillTrackers'
+import RefreshNow from '@/components/RefreshNow'
+import StaleDataBanner from '@/components/StaleDataBanner'
+import { api } from '@/lib/orpc/client'
+import type { ShipmentFilter as SchemaShipmentFilter, ShipmentSort as SchemaShipmentSort, ShipmentSummary } from '@/lib/orpc/schemas'
 
+interface TrackingEvent {
+  id: number
+  status: string | null
+  location: string | null
+  message: string | null
+  eventTime: string | null
+}
 
 interface Shipment {
   id: number
-  tracking_number: string
+  trackingNumber: string
   carrier: string | null
   status: string
-  po_number: string | null
+  poNumber: string | null
   supplier: string | null
-  last_checked: string | null
-  created_at: string
+  shippedDate: string | null
+  estimatedDelivery: string | null
+  deliveredDate: string | null
+  ship24Status: string | null
+  ship24LastUpdate: string | null
+  lastChecked: string | null
+  lastError: string | null
+  createdAt: string
+  updatedAt: string
+  trackingEvents?: TrackingEvent[]
+}
+
+type ShipmentFilter = SchemaShipmentFilter
+type ShipmentSort = SchemaShipmentSort
+
+interface PaginationData {
+  page: number
+  pageSize: number
+  total: number
+  totalPages: number
+  hasNext: boolean
+  hasPrev: boolean
 }
 
 export default function Home() {
-  const [refreshKey, setRefreshKey] = useState(0)
   const [shipments, setShipments] = useState<Shipment[]>([])
+  const [summary, setSummary] = useState<ShipmentSummary>({
+    total: 0,
+    pending: 0,
+    inTransit: 0,
+    delivered: 0,
+    overdue: 0,
+    exceptions: 0,
+    neverChecked: 0,
+  })
+  const [pagination, setPagination] = useState<PaginationData>({
+    page: 1,
+    pageSize: 20,
+    total: 0,
+    totalPages: 0,
+    hasNext: false,
+    hasPrev: false,
+  })
+  const [filter, setFilter] = useState<ShipmentFilter>({})
+  const [sort, setSort] = useState<ShipmentSort | undefined>()
   const [loading, setLoading] = useState(true)
+  const [summaryLoading, setSummaryLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const fetchSummary = async () => {
+    setSummaryLoading(true)
+    
+    try {
+      const data = await api.shipments.summary()
+      setSummary(data)
+    } catch (err) {
+      console.error('Failed to fetch summary:', err)
+      // Don't show error for summary, just log it
+    } finally {
+      setSummaryLoading(false)
+    }
+  }
+
+  const fetchShipments = async () => {
+    setLoading(true)
+    setError(null)
+    
+    try {
+      const data = await api.shipments.list({
+        pagination: {
+          page: pagination.page,
+          pageSize: pagination.pageSize,
+        },
+        filter: {
+          trackingNumber: filter.trackingNumber,
+          poNumber: filter.poNumber,
+          supplier: filter.supplier,
+          status: filter.status,
+          carrier: filter.carrier,
+        },
+        sort: sort ? {
+          field: sort.field,
+          direction: sort.direction,
+        } : undefined,
+      })
+      
+      setShipments(data.items)
+      setPagination(data.pagination)
+    } catch (err) {
+      console.error('Failed to fetch shipments:', err)
+      setError('Failed to fetch shipments')
+      setShipments([])
+    } finally {
+      setLoading(false)
+    }
+  }
 
   useEffect(() => {
-    const fetchShipments = async () => {
-      try {
-        const response = await fetch('/api/shipments')
-        const data = await response.json()
-        setShipments(data)
-      } catch (error) {
-        console.error('Failed to fetch shipments:', error)
-      } finally {
-        setLoading(false)
-      }
-    }
-    
+    fetchSummary()
+  }, [])
+
+  useEffect(() => {
     fetchShipments()
-  }, [refreshKey])
-  
+  }, [pagination.page, filter, sort])
+
+  const handleQueryChange = (newQuery: {
+    pagination?: { page: number; pageSize: number }
+    filter?: ShipmentFilter
+    sort?: ShipmentSort
+  }) => {
+    if (newQuery.pagination) {
+      setPagination(prev => ({ ...prev, ...newQuery.pagination }))
+    }
+    if (newQuery.filter !== undefined) {
+      setFilter(newQuery.filter)
+      // Reset to page 1 when filter changes
+      setPagination(prev => ({ ...prev, page: 1 }))
+    }
+    if (newQuery.sort !== undefined) {
+      setSort(newQuery.sort)
+    }
+  }
+
   const handleRefresh = () => {
-    setRefreshKey(prev => prev + 1)
+    fetchSummary()
+    fetchShipments()
   }
 
   return (
@@ -58,15 +167,33 @@ export default function Home() {
             </div>
             <div className="flex flex-col items-end gap-3">
               <LastSyncDisplay />
-              <div className="flex gap-2">
-                <BackfillTrackers onSuccess={handleRefresh} />
-                <ManualTrackingUpdate onSuccess={handleRefresh} />
-              </div>
+              <RefreshNow onSuccess={handleRefresh} />
             </div>
           </div>
         </div>
 
-        {loading ? <p>Loading...</p> : <ShipmentTable shipments={shipments} />}
+        {/* Stale Data Warning */}
+        <StaleDataBanner onRefresh={handleRefresh} />
+
+        {/* Status Cards */}
+        <div className="mb-8">
+          <StatusCards summary={summary} loading={summaryLoading} />
+        </div>
+
+        {loading && !shipments.length ? (
+          <p>Loading...</p>
+        ) : error ? (
+          <div className="rounded-lg border border-red-200 bg-red-50 p-4">
+            <p className="text-sm text-red-800">{error}</p>
+          </div>
+        ) : (
+          <ShipmentTable 
+            shipments={shipments} 
+            pagination={pagination}
+            onQueryChange={handleQueryChange}
+            loading={loading}
+          />
+        )}
       </div>
     </main>
   )

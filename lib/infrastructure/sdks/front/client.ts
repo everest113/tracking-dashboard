@@ -4,6 +4,7 @@
  */
 
 import { BaseSdkClient } from '../base-client'
+import { z } from 'zod'
 import {
   FrontConversationSchema,
   FrontMessageSchema,
@@ -24,37 +25,91 @@ export class FrontClient extends BaseSdkClient {
   }
 
   /**
-   * Get conversations from an inbox
+   * List all inboxes
    */
-  async getInboxConversations(
+  async listInboxes(): Promise<Array<{ id: string; name: string }>> {
+    const InboxSchema = z.object({
+      id: z.string(),
+      name: z.string(),
+    })
+    
+    const response = await this.get<FrontListResponse<z.infer<typeof InboxSchema>>>(
+      '/inboxes',
+      FrontListResponseSchema(InboxSchema)
+    )
+    return response._results
+  }
+
+  /**
+   * Find inbox by name
+   */
+  async findInboxByName(name: string): Promise<string | null> {
+    const inboxes = await this.listInboxes()
+    const inbox = inboxes.find(i => i.name.toLowerCase() === name.toLowerCase())
+    return inbox?.id || null
+  }
+
+  /**
+   * Search ALL conversations in an inbox with date filtering (paginated)
+   * Uses the search endpoint with proper date filtering support
+   */
+  async searchAllInboxConversations(
     inboxId: string,
     options: {
-      limit?: number
-      after?: number | Date
+      after?: Date
+      pageSize?: number
+      maxPages?: number
     } = {}
   ): Promise<FrontConversation[]> {
-    const params = new URLSearchParams()
+    const pageSize = options.pageSize || 100
+    const maxPages = options.maxPages || 1000
     
-    if (options.limit) {
-      params.append('limit', options.limit.toString())
-    }
+    // Build search query using Front's search syntax
+    // Format: inbox:ID after:TIMESTAMP
+    const parts: string[] = [`inbox:${inboxId}`]
     
     if (options.after) {
-      const timestamp = typeof options.after === 'number' 
-        ? options.after 
-        : Math.floor(options.after.getTime() / 1000)
-      params.append('q[after]', timestamp.toString())
+      const timestamp = Math.floor(options.after.getTime() / 1000)
+      parts.push(`after:${timestamp}`)
     }
+    
+    const query = parts.join(' ')
+    console.log(`Search query: "${query}"`)
+    
+    let allConversations: FrontConversation[] = []
+    let currentPage = 0
+    let nextPageToken: string | null | undefined = undefined
 
-    const queryString = params.toString()
-    const endpoint = `/inboxes/${inboxId}/conversations${queryString ? `?${queryString}` : ''}`
+    do {
+      console.log(`Searching page ${currentPage + 1} (${allConversations.length} conversations so far)...`)
+      
+      const endpoint: string = nextPageToken
+        ? new URL(nextPageToken).pathname + new URL(nextPageToken).search
+        : `/conversations/search/${encodeURIComponent(query)}?limit=${pageSize}`
+      
+      const response: FrontListResponse<FrontConversation> = await this.get<FrontListResponse<FrontConversation>>(
+        endpoint,
+        FrontListResponseSchema(FrontConversationSchema)
+      )
 
-    const response = await this.get<FrontListResponse<FrontConversation>>(
-      endpoint,
-      FrontListResponseSchema(FrontConversationSchema)
-    )
+      allConversations = allConversations.concat(response._results)
+      nextPageToken = response._pagination.next
 
-    return response._results
+      currentPage++
+
+      if (currentPage >= maxPages) {
+        console.warn(`Reached maximum page limit (${maxPages}). Stopping pagination.`)
+        break
+      }
+
+      if (nextPageToken) {
+        await new Promise(resolve => setTimeout(resolve, 100))
+      }
+
+    } while (nextPageToken)
+
+    console.log(`Found ${allConversations.length} total conversations across ${currentPage} pages`)
+    return allConversations
   }
 
   /**
@@ -74,10 +129,10 @@ export class FrontClient extends BaseSdkClient {
  * Factory function to create Front client
  */
 export function getFrontClient(): FrontClient {
-  const apiKey = process.env.FRONT_API_KEY
+  const apiKey = process.env.FRONT_API_TOKEN
   
   if (!apiKey) {
-    throw new Error('FRONT_API_KEY environment variable is not set')
+    throw new Error('FRONT_API_TOKEN environment variable is not set')
   }
 
   return new FrontClient(apiKey)

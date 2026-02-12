@@ -8,11 +8,12 @@ datasource db {
 }
 
 model scanned_conversations {
-  id              Int      @id @default(autoincrement())
-  conversation_id String   @unique @db.VarChar(255)
+  id              Int       @id @default(autoincrement())
+  conversation_id String    @unique @db.VarChar(255)
   subject         String?
-  shipments_found Int      @default(0)
-  scanned_at      DateTime @default(now())
+  shipments_found Int       @default(0)
+  scanned_at      DateTime  @default(now())
+  last_message_at DateTime? // Timestamp of the most recent message in the conversation
 
   @@index([conversation_id], map: "idx_conversation_id")
 }
@@ -25,15 +26,18 @@ model shipments {
   status                String            @default("pending") @db.VarChar(50)
   origin                String?
   destination           String?
-  shipped_date          DateTime?
-  estimated_delivery    DateTime?
-  delivered_date        DateTime?
+  shipped_date          DateTime?         // Date shipped (from extraction or Ship24)
+  estimated_delivery    DateTime?         // Expected delivery from Ship24
+  delivered_date        DateTime?         // Actual delivery date from Ship24
   last_checked          DateTime?
   created_at            DateTime          @default(now())
   updated_at            DateTime
   supplier              String?           @db.VarChar(255)
   front_conversation_id String?           @db.VarChar(255)
   ship24_tracker_id     String?           @unique @db.VarChar(255)
+  ship24_status         String?           @db.VarChar(100)  // Detailed Ship24 status
+  ship24_last_update    DateTime?         // Last update from Ship24
+  last_error            String?           // Last error (for debugging)
   tracking_events       tracking_events[]
 
   @@index([front_conversation_id], map: "idx_front_conversation")
@@ -44,6 +48,7 @@ model shipments {
 
 model sync_history {
   id                             Int       @id @default(autoincrement())
+  source                         String    @default("manual") @db.VarChar(50)  // "manual" or "automatic"
   conversations_processed        Int       @default(0)
   conversations_already_scanned  Int       @default(0)
   shipments_added                Int       @default(0)
@@ -58,6 +63,7 @@ model sync_history {
   completed_at                   DateTime?
 
   @@index([started_at], map: "idx_started_at")
+  @@index([source], map: "idx_source")
 }
 
 model tracking_events {

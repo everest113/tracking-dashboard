@@ -8,8 +8,8 @@ import type { z } from 'zod'
  */
 const DEFAULT_SYSTEM_PROMPT = `You are a precise data extraction assistant. 
 Extract information exactly as specified in the schema.
-Return only valid, high-confidence data.
-If a field cannot be extracted with confidence, omit it.`
+ALL fields are required - use empty string "" for missing text fields.
+Return only valid, high-confidence data.`
 
 /**
  * Generic extraction client powered by Vercel AI SDK

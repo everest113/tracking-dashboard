@@ -33,22 +33,42 @@ export class Ship24Mapper {
     const tracker = tracking.tracker
     const shipment = tracking.shipment || {}
     const events = tracking.events || []
+    const statistics = (tracking as any).statistics || {}
 
     // Get status
     const latestStatus = shipment.statusMilestone || shipment.status || 'unknown'
     const status = this.mapStatus(latestStatus)
 
-    // Get dates
-    const shippedDate = shipment.shipDate ? new Date(shipment.shipDate) : null
-    const estimatedDelivery = shipment.delivery?.estimatedDeliveryDate 
-      ? new Date(shipment.delivery.estimatedDeliveryDate) 
-      : null
-    const deliveredDate = shipment.delivery?.actualDeliveryDate 
-      ? new Date(shipment.delivery.actualDeliveryDate) 
-      : null
+    // Get dates - Ship24 can provide dates in multiple places
+    // 1. Try shipment.shipDate (not commonly populated)
+    // 2. Try statistics.timestamps.infoReceivedDatetime as fallback
+    let shippedDate: Date | null = null
+    if (shipment.shipDate) {
+      shippedDate = new Date(shipment.shipDate)
+    } else if (statistics.timestamps?.infoReceivedDatetime) {
+      shippedDate = new Date(statistics.timestamps.infoReceivedDatetime)
+    }
 
-    // Get carrier
-    const carrier = tracker.courierCode?.[0] || null
+    // Estimated delivery - try multiple sources
+    let estimatedDelivery: Date | null = null
+    if (shipment.delivery?.estimatedDeliveryDate) {
+      estimatedDelivery = new Date(shipment.delivery.estimatedDeliveryDate)
+    } else if (shipment.delivery?.courierEstimatedDeliveryDate) {
+      estimatedDelivery = new Date(shipment.delivery.courierEstimatedDeliveryDate)
+    }
+
+    // Delivered date - Ship24 stores this in statistics.timestamps
+    let deliveredDate: Date | null = null
+    if (shipment.delivery?.actualDeliveryDate) {
+      deliveredDate = new Date(shipment.delivery.actualDeliveryDate)
+    } else if (statistics.timestamps?.deliveredDatetime) {
+      deliveredDate = new Date(statistics.timestamps.deliveredDatetime)
+    }
+
+    // Get carrier - try multiple sources
+    const carrier = tracker.courierCode?.[0] || 
+                   (events[0]?.carrierCode) || 
+                   null
 
     // Map events
     const mappedEvents = events.map(event => this.mapEvent(event))
@@ -103,21 +123,27 @@ export class Ship24Mapper {
     const description = event.statusDetails || event.status || 'Status update'
     const status = event.status || 'unknown'
     
-    const location = this.formatLocation(event)
+    const location = event.location
+    let locationStr: string | null = null
+    
+    if (typeof location === 'string') {
+      locationStr = location
+    } else if (location && typeof location === 'object') {
+      locationStr = this.formatLocationObject(location)
+    }
 
     return {
       occurredAt,
       description,
       status,
-      location,
+      location: locationStr,
     }
   }
 
   /**
-   * Format location from Ship24 event
+   * Format location object from Ship24 event
    */
-  private static formatLocation(event: Ship24Event): string | null {
-    const location = event.location
+  private static formatLocationObject(location: any): string | null {
     if (!location || !location.city) {
       return null
     }
@@ -133,16 +159,18 @@ export class Ship24Mapper {
 
   /**
    * Normalize carrier code for Ship24 API
+   * Based on Ship24 OpenAPI spec examples
    */
   static normalizeCarrierCode(carrier: string | null): string[] | undefined {
     if (!carrier) return undefined
     
     const normalized = carrier.toLowerCase().replace(/[^a-z0-9]/g, '')
     
+    // Ship24 uses specific courier codes (from OpenAPI spec)
     const carrierMap: Record<string, string> = {
       'ups': 'ups',
       'fedex': 'fedex',
-      'usps': 'usps',
+      'usps': 'us-post',  // Ship24 uses "us-post" not "usps"
       'dhl': 'dhl',
       'ontrac': 'ontrac',
       'lasership': 'lasership',

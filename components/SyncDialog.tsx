@@ -2,6 +2,7 @@
 import { getErrorMessage } from '@/lib/utils/fetch-helpers'
 
 import { useState, useEffect } from 'react'
+import { api } from '@/lib/orpc/client'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -16,6 +17,7 @@ import { toast } from 'sonner'
 import { Loader2, RefreshCw, CheckCircle2, XCircle, AlertCircle } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Checkbox } from '@/components/ui/checkbox'
 import ProgressStream, { ProgressEvent } from './ProgressStream'
 
 type ScanResult = {
@@ -24,6 +26,7 @@ type ScanResult = {
     conversationsProcessed: number
     conversationsAlreadyScanned: number
     shipmentsAdded: number
+    shipmentsUpdated?: number
     shipmentsSkipped: number
     conversationsWithNoTracking: number
     batchSize: number
@@ -38,7 +41,11 @@ export default function SyncDialog({ onSuccess }: { onSuccess: () => void }) {
   const [status, setStatus] = useState<SyncStatus>('idle')
   const [result, setResult] = useState<ScanResult | null>(null)
   
-  // Initialize with 3 days ago as fallback
+  // Enable force rescan option (re-analyze already-scanned conversations)
+  // Set NEXT_PUBLIC_ENABLE_FORCE_RESCAN=true in .env.local to enable
+  const forceRescanEnabled = process.env.NEXT_PUBLIC_ENABLE_FORCE_RESCAN === 'true'
+  const [forceRescan, setForceRescan] = useState(false)
+  
   const threeDaysAgo = new Date()
   threeDaysAgo.setDate(threeDaysAgo.getDate() - 3)
   const fallbackDate = threeDaysAgo.toISOString().split('T')[0]
@@ -47,23 +54,28 @@ export default function SyncDialog({ onSuccess }: { onSuccess: () => void }) {
   const [duration, setDuration] = useState<string | null>(null)
   const [progressEvents, setProgressEvents] = useState<ProgressEvent[]>([])
 
-  // Fetch last sync date on component mount
+  useEffect(() => {
+    // Debug: log force rescan setting (controlled by NEXT_PUBLIC_ENABLE_FORCE_RESCAN)
+    if (forceRescanEnabled) {
+      console.log('🔧 SyncDialog: Force rescan enabled')
+    }
+  }, [])
+
   useEffect(() => {
     const fetchLastSync = async () => {
       try {
-        const response = await fetch('/api/sync-history?limit=1')
-        const data = await response.json()
+        const data = await api.syncHistory.get({ limit: 1 })
         
-        if (data.success && data.lastSync) {
-          // Set default to the time of the last sync (not after, but from)
-          // This ensures we catch anything that happened during or after the last sync
+        if (data.success && data.lastSync && data.lastSync.startedAt) {
           const lastSyncDate = new Date(data.lastSync.startedAt)
-          const defaultDate = lastSyncDate.toISOString().split('T')[0]
-          setSyncDate(defaultDate)
+          
+          if (!isNaN(lastSyncDate.getTime())) {
+            const defaultDate = lastSyncDate.toISOString().split('T')[0]
+            setSyncDate(defaultDate)
+          }
         }
       } catch (error) {
         console.error('Failed to fetch last sync date:', error)
-        // Keep the fallback date (3 days ago) if fetch fails
       }
     }
 
@@ -95,43 +107,36 @@ export default function SyncDialog({ onSuccess }: { onSuccess: () => void }) {
     setProgressEvents([])
 
     const formattedDate = new Date(syncDate).toLocaleDateString()
-    addProgressEvent('processing', 'Initializing sync...')
+    addProgressEvent('processing', 'Initializing scan...')
+    
+    if (forceRescan && forceRescanEnabled) {
+      addProgressEvent('processing', '🔄 Force rescanning enabled - will update existing shipments')
+    }
+    
     addProgressEvent('processing', `Connecting to Front inbox...`)
-    addProgressEvent('processing', `Fetching conversations from ${formattedDate}`)
+    addProgressEvent('processing', `Scanning conversations from ${formattedDate}`)
 
     try {
-      // Call API with date parameter
-      const response = await fetch('/api/front/scan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ after: syncDate }),
+      const data = await api.front.scan({
+        after: syncDate,
+        forceRescan: forceRescan && forceRescanEnabled,
       })
 
-      const data: ScanResult = await response.json()
-
-      if (!response.ok) {
-        addProgressEvent('error', `Sync failed: ${(typeof data === 'object' && data !== null && 'error' in data ? String((data as { error: string }).error) : 'Unknown error')}`)
-        setDuration(calculateDuration(startTime))
-        setStatus('error')
-        toast.error('Sync failed', {
-          description: (typeof data === 'object' && data !== null && 'error' in data ? String((data as { error: string }).error) : 'Unknown error') || 'An error occurred',
-        })
-        return
-      }
-
-      setResult(data)
+      setResult(data as unknown as ScanResult)
       
       const { summary } = data
 
-      // Add final progress events based on actual results
       if (summary.conversationsProcessed > 0) {
         addProgressEvent('complete', `✓ Processed ${summary.conversationsProcessed} conversations`)
       }
       if (summary.conversationsAlreadyScanned > 0) {
-        addProgressEvent('skipped', `↻ ${summary.conversationsAlreadyScanned} already scanned (saved AI credits!)`)
+        addProgressEvent('skipped', `↻ ${summary.conversationsAlreadyScanned} already scanned${forceRescan ? ' (but rescanned anyway)' : ' (saved AI credits!)'}`)
       }
       if (summary.shipmentsAdded > 0) {
         addProgressEvent('found', `📦 ${summary.shipmentsAdded} new shipments added!`)
+      }
+      if (summary.shipmentsUpdated && summary.shipmentsUpdated > 0) {
+        addProgressEvent('found', `🔄 ${summary.shipmentsUpdated} existing shipments updated!`)
       }
       if (summary.shipmentsSkipped > 0) {
         addProgressEvent('skipped', `⊗ ${summary.shipmentsSkipped} duplicates skipped`)
@@ -143,18 +148,21 @@ export default function SyncDialog({ onSuccess }: { onSuccess: () => void }) {
         addProgressEvent('error', `⚠ ${data.errors.length} errors occurred`)
       }
 
-      addProgressEvent('complete', '✓ Sync complete!')
+      addProgressEvent('complete', '✓ Scan complete!')
 
       setDuration(calculateDuration(startTime))
       setStatus('success')
 
-      if (summary.shipmentsAdded > 0) {
-        toast.success(`Found ${summary.shipmentsAdded} new shipment(s)`, {
-          description: `Processed ${summary.conversationsProcessed} conversations`,
+      const totalChanges = summary.shipmentsAdded + (summary.shipmentsUpdated || 0)
+      if (totalChanges > 0) {
+        toast.success(`Updated ${totalChanges} shipment(s)`, {
+          description: summary.shipmentsUpdated 
+            ? `${summary.shipmentsAdded} new, ${summary.shipmentsUpdated} updated`
+            : `Processed ${summary.conversationsProcessed} conversations`,
         })
         onSuccess()
       } else {
-        toast.info('No new shipments found', {
+        toast.info('No changes', {
           description: `Scanned ${summary.conversationsProcessed} conversations`,
         })
       }
@@ -189,17 +197,15 @@ export default function SyncDialog({ onSuccess }: { onSuccess: () => void }) {
     }
   }
 
-  
-
   return (
     <Dialog open={isOpen} onOpenChange={(open) => {
       setIsOpen(open)
       if (!open) resetDialog()
     }}>
       <DialogTrigger asChild>
-        <Button variant="default">
+        <Button variant="outline">
           <RefreshCw className="h-4 w-4" />
-          Sync Front Inbox
+          Scan for New Shipments
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-[600px]">
@@ -207,24 +213,24 @@ export default function SyncDialog({ onSuccess }: { onSuccess: () => void }) {
           <div className="flex items-center gap-2">
             {getStatusIcon()}
             <DialogTitle>
-              {status === 'idle' && 'Sync Front Inbox'}
-              {status === 'running' && 'Syncing...'}
-              {status === 'success' && 'Sync Complete'}
-              {status === 'error' && 'Sync Failed'}
+              {status === 'idle' && 'Scan for New Shipments'}
+              {status === 'running' && 'Scanning...'}
+              {status === 'success' && 'Scan Complete'}
+              {status === 'error' && 'Scan Failed'}
             </DialogTitle>
           </div>
           <DialogDescription>
-            {status === 'idle' && 'Extract tracking numbers from Front conversations'}
+            {status === 'idle' && 'Scan Front inbox conversations to discover new tracking numbers'}
             {status === 'running' && 'Processing conversations and extracting tracking information...'}
             {status === 'success' && `Completed in ${(duration || "Calculating...")}`}
-            {status === 'error' && 'An error occurred during sync'}
+            {status === 'error' && 'An error occurred during scan'}
           </DialogDescription>
         </DialogHeader>
 
         {status === 'idle' && (
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
-              <Label htmlFor="syncDate">Sync conversations from</Label>
+              <Label htmlFor="syncDate">Scan conversations from</Label>
               <Input
                 id="syncDate"
                 type="date"
@@ -236,6 +242,32 @@ export default function SyncDialog({ onSuccess }: { onSuccess: () => void }) {
                 All conversations created on or after this date will be scanned
               </p>
             </div>
+
+            {forceRescanEnabled && (
+              <div className="rounded-lg border border-orange-200 bg-orange-50 p-4">
+                <div className="flex items-start space-x-3">
+                  <Checkbox
+                    id="forceRescan"
+                    checked={forceRescan}
+                    onCheckedChange={(checked) => setForceRescan(checked as boolean)}
+                  />
+                  <div className="grid gap-1.5 leading-none">
+                    <label
+                      htmlFor="forceRescan"
+                      className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                    >
+                      🔄 Force rescan
+                    </label>
+                    <p className="text-xs text-muted-foreground">
+                      Re-analyze conversations and <strong>update existing shipments</strong> with fresh data from emails.
+                      <span className="block mt-1 text-orange-600 font-medium">
+                        ⚠️ This will use AI credits for already-scanned conversations
+                      </span>
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -260,6 +292,12 @@ export default function SyncDialog({ onSuccess }: { onSuccess: () => void }) {
                 <p className="text-muted-foreground">New Shipments</p>
                 <p className="text-2xl font-bold text-green-600">{result.summary.shipmentsAdded}</p>
               </div>
+              {result.summary.shipmentsUpdated !== undefined && result.summary.shipmentsUpdated > 0 && (
+                <div>
+                  <p className="text-muted-foreground">Shipments Updated</p>
+                  <p className="text-2xl font-bold text-blue-600">{result.summary.shipmentsUpdated}</p>
+                </div>
+              )}
               <div>
                 <p className="text-muted-foreground">Already Scanned</p>
                 <p className="text-lg">{result.summary.conversationsAlreadyScanned}</p>
@@ -310,20 +348,20 @@ export default function SyncDialog({ onSuccess }: { onSuccess: () => void }) {
                 Cancel
               </Button>
               <Button onClick={handleSync}>
-                Start Sync
+                Start Scan
               </Button>
             </>
           )}
           {status === 'running' && (
             <Button disabled>
               <Loader2 className="animate-spin" />
-              Syncing...
+              Scanning...
             </Button>
           )}
           {(status === 'success' || status === 'error') && (
             <>
               <Button variant="outline" onClick={resetDialog}>
-                Sync Again
+                Scan Again
               </Button>
               <Button onClick={() => setIsOpen(false)}>
                 Close

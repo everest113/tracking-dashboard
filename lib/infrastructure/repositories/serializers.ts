@@ -19,7 +19,10 @@ export type ShipmentResponse = {
   deliveredDate: Date | null
   lastChecked: Date | null
   ship24TrackerId: string | null
+  ship24Status: string | null
+  ship24LastUpdate: Date | null
   frontConversationId: string | null
+  lastError: string | null
   createdAt: Date
   updatedAt: Date
   trackingEvents?: TrackingEventResponse[]
@@ -52,7 +55,10 @@ export function serializeShipment(
     deliveredDate: shipment.delivered_date,
     lastChecked: shipment.last_checked,
     ship24TrackerId: shipment.ship24_tracker_id,
+    ship24Status: shipment.ship24_status,
+    ship24LastUpdate: shipment.ship24_last_update,
     frontConversationId: shipment.front_conversation_id,
+    lastError: shipment.last_error,
     createdAt: shipment.created_at,
     updatedAt: shipment.updated_at,
     trackingEvents: shipment.tracking_events?.map(serializeTrackingEvent),

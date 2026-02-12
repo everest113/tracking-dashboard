@@ -2,18 +2,21 @@ import { z } from 'zod'
 
 /**
  * Shipping extraction schemas
+ * 
+ * ALL fields are required for OpenAI structured outputs compatibility
+ * Use empty strings for missing data
  */
 
 export const ExtractedShipmentSchema = z.object({
   trackingNumber: z.string().min(1, 'Tracking number required'),
-  carrier: z.enum(['ups', 'usps', 'fedex', 'dhl', 'other']),
-  poNumber: z.string().optional(),
-  shippedDate: z.string().optional(), // ISO date string (YYYY-MM-DD)
-  confidence: z.number().min(0).max(1),
+  carrier: z.enum(['ups', 'usps', 'fedex', 'dhl', 'other']),  // AI must always provide
+  poNumber: z.string(),  // Use empty string "" if not found
+  shippedDate: z.string(),  // Use empty string "" if not found  
+  confidence: z.number().min(0).max(1),  // AI must provide 0-1
 })
 
 export const TrackingExtractionResultSchema = z.object({
-  supplier: z.string().optional(),
+  supplier: z.string(),  // Use empty string "" if not found
   shipments: z.array(ExtractedShipmentSchema),
 })
 
