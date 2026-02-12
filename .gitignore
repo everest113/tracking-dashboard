@@ -9,11 +9,12 @@
 
 # dependencies
 /node_modules
-/.pnp
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/versions
+
+# Yarn Berry PnP (not used - we use npm)
+.pnp.cjs
+.pnp.loader.mjs
+.yarn/
+yarn.lock
 
 # testing
 /coverage
@@ -46,16 +47,9 @@ next-env.d.ts
 
 /app/generated/prisma
 
-# Yarn
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/sdks
-!.yarn/versions
 .env*.local
 
 # Testing
 .env.test
 coverage/
-yarn.lock
+pnpm-lock.yaml
