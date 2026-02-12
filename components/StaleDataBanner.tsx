@@ -22,19 +22,25 @@ export default function StaleDataBanner({ onRefresh }: StaleDataBannerProps) {
 
   const checkStaleData = async () => {
     try {
-      // Fetch the most recent ship24LastUpdate from all shipments
+      // Fetch recent shipments and find the one with most recent update
       const data = await api.shipments.list({
-        pagination: { page: 1, pageSize: 1 },
-        sort: { field: 'updatedAt', direction: 'desc' },
+        pagination: { page: 1, pageSize: 50 },
       })
 
       if (data.items.length > 0) {
-        const mostRecentShipment = data.items[0]
-        const lastUpdateTime = mostRecentShipment.ship24LastUpdate 
-          ? new Date(mostRecentShipment.ship24LastUpdate)
-          : mostRecentShipment.updatedAt 
-          ? new Date(mostRecentShipment.updatedAt)
-          : null
+        // Find the shipment with the most recent ship24LastUpdate
+        let mostRecentUpdate: Date | null = null
+        
+        for (const shipment of data.items) {
+          if (shipment.ship24LastUpdate) {
+            const updateTime = new Date(shipment.ship24LastUpdate)
+            if (!mostRecentUpdate || updateTime > mostRecentUpdate) {
+              mostRecentUpdate = updateTime
+            }
+          }
+        }
+        
+        const lastUpdateTime = mostRecentUpdate
 
         if (lastUpdateTime) {
           setLastUpdate(lastUpdateTime)
