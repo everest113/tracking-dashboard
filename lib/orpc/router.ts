@@ -772,42 +772,42 @@ const frontRouter = {
           }
 
           const conversationIds = conversations.map((c: FrontConversation) => c.id)
+          // Fetch scan history with last message timestamps
           const alreadyScanned = shouldRescan
             ? []
             : await context.prisma.scanned_conversations.findMany({
                 where: {
                   conversation_id: { in: conversationIds },
                 },
-                select: { conversation_id: true },
+                select: { 
+                  conversation_id: true,
+                  last_message_at: true,
+                },
               })
 
-          const scannedIds = new Set(alreadyScanned.map((s) => s.conversation_id))
-          const unscannedConversations = shouldRescan
-            ? conversations
-            : conversations.filter((c: FrontConversation) => !scannedIds.has(c.id))
-
-          console.log(
-            `${unscannedConversations.length} conversations need scanning (${scannedIds.size} already scanned)`
+          // Build map of conversation_id -> last_message_at
+          const scanHistory = new Map(
+            alreadyScanned.map((s) => [s.conversation_id, s.last_message_at])
           )
 
-          if (unscannedConversations.length === 0) {
-            return {
-              success: true,
-              summary: {
-                conversationsProcessed: 0,
-                conversationsAlreadyScanned: scannedIds.size,
-                shipmentsAdded: 0,
-                shipmentsUpdated: 0,
-                shipmentsSkipped: 0,
-                conversationsWithNoTracking: 0,
-                batchSize,
-                totalConversations: conversations.length,
-              },
-              errors: [],
-              durationMs: Date.now() - startTime,
-              timestamp: new Date().toISOString(),
-            }
-          }
+          // Determine which conversations need scanning
+          // A conversation needs scanning if:
+          // 1. Never scanned before (not in scanHistory), OR
+          // 2. Force rescan enabled (shouldRescan), OR
+          // 3. Has new messages since last scan (we'll check this per-conversation when fetching messages)
+          const conversationsToCheck = shouldRescan
+            ? conversations
+            : conversations.filter((c: FrontConversation) => !scanHistory.has(c.id))
+
+          console.log(
+            `${conversationsToCheck.length} conversations never scanned, ${scanHistory.size} previously scanned (will check for updates)`
+          )
+
+          // Now process both never-scanned and potentially-updated conversations
+          // We'll check for updates while processing each conversation
+          const conversationsToProcess = shouldRescan
+            ? conversations  // Force rescan all
+            : [...conversationsToCheck] // Start with never-scanned ones
 
           // Process conversations helper
           const processBatch = async (
@@ -819,6 +819,7 @@ const frontRouter = {
             skipped: number
             noTracking: number
             errors: string[]
+            skippedUpToDate: number
           }> => {
             const results = {
               added: 0,
@@ -826,6 +827,7 @@ const frontRouter = {
               skipped: 0,
               noTracking: 0,
               errors: [] as string[],
+              skippedUpToDate: 0,
             }
 
             await Promise.allSettled(
@@ -836,14 +838,30 @@ const frontRouter = {
                   if (messages.length === 0) {
                     await context.prisma.scanned_conversations.upsert({
                       where: { conversation_id: conversation.id },
-                      update: { scanned_at: new Date() },
+                      update: { 
+                        scanned_at: new Date(),
+                        last_message_at: null,
+                      },
                       create: {
                         conversation_id: conversation.id,
                         subject: conversation.subject,
                         shipments_found: 0,
+                        last_message_at: null,
                       },
                     })
                     results.noTracking++
+                    return
+                  }
+
+                  // Get the latest message timestamp
+                  const latestMessageTimestamp = Math.max(...messages.map((m: FrontMessage) => m.created_at))
+                  const latestMessageDate = new Date(latestMessageTimestamp * 1000)
+
+                  // Check if conversation has new messages since last scan
+                  const lastScannedMessageAt = scanHistory.get(conversation.id)
+                  if (!rescan && lastScannedMessageAt && latestMessageDate <= lastScannedMessageAt) {
+                    // Conversation is up to date, skip AI extraction
+                    results.skippedUpToDate++
                     return
                   }
 
@@ -860,11 +878,15 @@ const frontRouter = {
                   if (!extractionResult || extractionResult.shipments.length === 0) {
                     await context.prisma.scanned_conversations.upsert({
                       where: { conversation_id: conversation.id },
-                      update: { scanned_at: new Date() },
+                      update: { 
+                        scanned_at: new Date(),
+                        last_message_at: latestMessageDate,
+                      },
                       create: {
                         conversation_id: conversation.id,
                         subject: conversation.subject,
                         shipments_found: 0,
+                        last_message_at: latestMessageDate,
                       },
                     })
                     results.noTracking++
@@ -957,12 +979,14 @@ const frontRouter = {
                     where: { conversation_id: conversation.id },
                     update: {
                       scanned_at: new Date(),
+                      last_message_at: latestMessageDate,
                       shipments_found: results.added + results.updated,
                     },
                     create: {
                       conversation_id: conversation.id,
                       subject: conversation.subject,
                       shipments_found: results.added + results.updated,
+                      last_message_at: latestMessageDate,
                     },
                   })
                 } catch (error) {
@@ -978,15 +1002,21 @@ const frontRouter = {
             added: 0,
             updated: 0,
             skipped: 0,
-            alreadyScanned: scannedIds.size,
+            skippedUpToDate: 0,
+            alreadyScanned: scanHistory.size - conversationsToCheck.length, // Scanned but not in check list
             noTracking: 0,
             errors: [] as string[],
           }
 
+          // Also process previously scanned conversations to check for updates
+          const allConversationsToProcess = shouldRescan
+            ? conversations
+            : [...conversationsToCheck, ...conversations.filter((c: FrontConversation) => scanHistory.has(c.id))]
+
           // Process batches
           const batches: FrontConversation[][] = []
-          for (let i = 0; i < unscannedConversations.length; i += batchSize) {
-            batches.push(unscannedConversations.slice(i, i + batchSize))
+          for (let i = 0; i < allConversationsToProcess.length; i += batchSize) {
+            batches.push(allConversationsToProcess.slice(i, i + batchSize))
           }
 
           if (shouldRescan) {
@@ -995,6 +1025,7 @@ const frontRouter = {
               results.added += batchResult.added
               results.updated += batchResult.updated
               results.skipped += batchResult.skipped
+              results.skippedUpToDate += batchResult.skippedUpToDate
               results.noTracking += batchResult.noTracking
               results.errors.push(...batchResult.errors)
             }
@@ -1007,6 +1038,7 @@ const frontRouter = {
               results.added += batchResult.added
               results.updated += batchResult.updated
               results.skipped += batchResult.skipped
+              results.skippedUpToDate += batchResult.skippedUpToDate
               results.noTracking += batchResult.noTracking
               results.errors.push(...batchResult.errors)
             }
@@ -1014,13 +1046,17 @@ const frontRouter = {
 
           const duration = Date.now() - startTime
 
+          const conversationsProcessed = results.added + results.updated + results.noTracking
+          const conversationsSkipped = results.skippedUpToDate + results.alreadyScanned
+
           console.log('=== Scan Complete ===')
+          console.log(`Processed: ${conversationsProcessed}, Skipped (up-to-date): ${results.skippedUpToDate}, Already scanned: ${results.alreadyScanned}`)
 
           return {
             success: true,
             summary: {
-              conversationsProcessed: unscannedConversations.length,
-              conversationsAlreadyScanned: results.alreadyScanned,
+              conversationsProcessed,
+              conversationsAlreadyScanned: conversationsSkipped,
               shipmentsAdded: results.added,
               shipmentsUpdated: results.updated,
               shipmentsSkipped: results.skipped,

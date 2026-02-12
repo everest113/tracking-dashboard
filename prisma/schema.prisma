@@ -8,11 +8,12 @@ datasource db {
 }
 
 model scanned_conversations {
-  id              Int      @id @default(autoincrement())
-  conversation_id String   @unique @db.VarChar(255)
+  id              Int       @id @default(autoincrement())
+  conversation_id String    @unique @db.VarChar(255)
   subject         String?
-  shipments_found Int      @default(0)
-  scanned_at      DateTime @default(now())
+  shipments_found Int       @default(0)
+  scanned_at      DateTime  @default(now())
+  last_message_at DateTime? // Timestamp of the most recent message in the conversation
 
   @@index([conversation_id], map: "idx_conversation_id")
 }
