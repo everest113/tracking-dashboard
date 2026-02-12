@@ -28,16 +28,19 @@ export default function RefreshNow({ onSuccess }: RefreshNowProps) {
   const [customDate, setCustomDate] = useState<string | null>(null)
   const [forceRescan, setForceRescan] = useState(false)
   const [progress, setProgress] = useState<string[]>([])
+  const [hasStarted, setHasStarted] = useState(false)
 
   const isDevMode = process.env.NODE_ENV === 'development'
 
   useEffect(() => {
-    if (showDialog) {
+    if (showDialog && !hasStarted) {
       // Reset state when dialog opens
       setProgress([])
       setShowAdvanced(false)
+      setCustomDate(null)
+      setForceRescan(false)
     }
-  }, [showDialog])
+  }, [showDialog, hasStarted])
 
   const addProgress = (message: string) => {
     setProgress(prev => [...prev, message])
@@ -68,7 +71,7 @@ export default function RefreshNow({ onSuccess }: RefreshNowProps) {
 
   const handleRefresh = async () => {
     setLoading(true)
-    setShowDialog(true)
+    setHasStarted(true)
     setProgress([])
 
     try {
@@ -140,104 +143,145 @@ export default function RefreshNow({ onSuccess }: RefreshNowProps) {
     }
   }
 
+  const handleOpenDialog = () => {
+    setShowDialog(true)
+    setHasStarted(false)
+  }
+
+  const handleCloseDialog = () => {
+    setShowDialog(false)
+    setHasStarted(false)
+    setProgress([])
+  }
+
   return (
     <>
-      <Button onClick={handleRefresh} disabled={loading} variant="default">
-        <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-        {loading ? 'Refreshing...' : 'Refresh Now'}
+      <Button onClick={handleOpenDialog} disabled={loading} variant="default">
+        <RefreshCw className="h-4 w-4" />
+        Refresh Now
       </Button>
 
-      <Dialog open={showDialog} onOpenChange={setShowDialog}>
+      <Dialog open={showDialog} onOpenChange={handleCloseDialog}>
         <DialogContent className="sm:max-w-[600px]">
           <DialogHeader>
             <DialogTitle>
-              {loading ? 'Refreshing Dashboard...' : 'Refresh Complete'}
+              {!hasStarted && 'Refresh Dashboard'}
+              {hasStarted && loading && 'Refreshing Dashboard...'}
+              {hasStarted && !loading && 'Refresh Complete'}
             </DialogTitle>
             <DialogDescription>
-              {loading ? 'Scanning for new shipments and updating statuses' : 'Dashboard has been updated'}
+              {!hasStarted && 'Scan for new shipments and update tracking statuses'}
+              {hasStarted && loading && 'Scanning for new shipments and updating statuses'}
+              {hasStarted && !loading && 'Dashboard has been updated'}
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-4">
-            {/* Progress log */}
-            <div className="rounded-md bg-muted p-4 max-h-[300px] overflow-y-auto">
-              {progress.length === 0 ? (
-                <p className="text-sm text-muted-foreground">Initializing...</p>
-              ) : (
-                <div className="space-y-1">
-                  {progress.map((msg, i) => (
-                    <p key={i} className="text-sm font-mono">{msg}</p>
-                  ))}
+            {/* Show configuration BEFORE starting */}
+            {!hasStarted && (
+              <div className="space-y-4">
+                <div className="rounded-md bg-muted p-4">
+                  <p className="text-sm text-muted-foreground">
+                    This will scan Front inbox for new tracking numbers, enroll shipments in tracking, and fetch the latest statuses.
+                  </p>
                 </div>
-              )}
-            </div>
 
-            {/* Advanced configuration */}
-            {!loading && (
-              <div className="space-y-3">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setShowAdvanced(!showAdvanced)}
-                  className="w-full justify-between"
-                >
-                  <span className="text-sm font-medium">Advanced Settings</span>
-                  {showAdvanced ? (
-                    <ChevronUp className="h-4 w-4" />
-                  ) : (
-                    <ChevronDown className="h-4 w-4" />
-                  )}
-                </Button>
-
-                {showAdvanced && (
-                  <div className="space-y-4 rounded-md border p-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="customDate">Custom start date</Label>
-                      <Input
-                        id="customDate"
-                        type="date"
-                        value={customDate || ''}
-                        onChange={(e) => setCustomDate(e.target.value || null)}
-                        max={new Date().toISOString().split('T')[0]}
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        Leave empty to use last sync date (or 14 days ago if never synced)
-                      </p>
-                    </div>
-
-                    {isDevMode && (
-                      <div className="flex items-start space-x-3 rounded-md border border-orange-200 bg-orange-50 p-3">
-                        <Checkbox
-                          id="forceRescan"
-                          checked={forceRescan}
-                          onCheckedChange={(checked) => setForceRescan(checked as boolean)}
-                        />
-                        <div className="space-y-1">
-                          <label
-                            htmlFor="forceRescan"
-                            className="text-sm font-medium leading-none"
-                          >
-                            Force rescan (Dev Mode)
-                          </label>
-                          <p className="text-xs text-muted-foreground">
-                            Re-analyze already-scanned conversations. Uses AI credits.
-                          </p>
-                        </div>
-                      </div>
+                {/* Advanced configuration */}
+                <div className="space-y-3">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowAdvanced(!showAdvanced)}
+                    className="w-full justify-between"
+                  >
+                    <span className="text-sm font-medium">Advanced Settings</span>
+                    {showAdvanced ? (
+                      <ChevronUp className="h-4 w-4" />
+                    ) : (
+                      <ChevronDown className="h-4 w-4" />
                     )}
+                  </Button>
+
+                  {showAdvanced && (
+                    <div className="space-y-4 rounded-md border p-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="customDate">Custom start date</Label>
+                        <Input
+                          id="customDate"
+                          type="date"
+                          value={customDate || ''}
+                          onChange={(e) => setCustomDate(e.target.value || null)}
+                          max={new Date().toISOString().split('T')[0]}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Leave empty to use last sync date (or 14 days ago if never synced)
+                        </p>
+                      </div>
+
+                      {isDevMode && (
+                        <div className="flex items-start space-x-3 rounded-md border border-orange-200 bg-orange-50 p-3">
+                          <Checkbox
+                            id="forceRescan"
+                            checked={forceRescan}
+                            onCheckedChange={(checked) => setForceRescan(checked as boolean)}
+                          />
+                          <div className="space-y-1">
+                            <label
+                              htmlFor="forceRescan"
+                              className="text-sm font-medium leading-none"
+                            >
+                              Force rescan (Dev Mode)
+                            </label>
+                            <p className="text-xs text-muted-foreground">
+                              Re-analyze already-scanned conversations. Uses AI credits.
+                            </p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Show progress AFTER starting */}
+            {hasStarted && (
+              <div className="rounded-md bg-muted p-4 max-h-[300px] overflow-y-auto">
+                {progress.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">Initializing...</p>
+                ) : (
+                  <div className="space-y-1">
+                    {progress.map((msg, i) => (
+                      <p key={i} className="text-sm font-mono">{msg}</p>
+                    ))}
                   </div>
                 )}
               </div>
             )}
           </div>
 
-          {!loading && (
+          {/* Footer buttons */}
+          {!hasStarted && (
             <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setShowDialog(false)}>
-                Close
+              <Button variant="outline" onClick={handleCloseDialog}>
+                Cancel
               </Button>
-              <Button onClick={handleRefresh}>
+              <Button onClick={handleRefresh} disabled={loading}>
+                Start Refresh
+              </Button>
+            </div>
+          )}
+
+          {hasStarted && !loading && (
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => {
+                setHasStarted(false)
+                setProgress([])
+              }}>
                 Refresh Again
+              </Button>
+              <Button onClick={handleCloseDialog}>
+                Close
               </Button>
             </div>
           )}
