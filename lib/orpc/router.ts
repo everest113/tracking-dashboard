@@ -7,6 +7,7 @@ import { Prisma } from '@prisma/client'
 import { getErrorMessage } from '@/lib/utils/fetch-helpers'
 import {
   ShipmentListQuerySchema,
+  ShipmentSummarySchema,
   createPaginatedResponseSchema,
   buildShipmentWhereClause,
   buildShipmentOrderByClause,
@@ -172,6 +173,85 @@ const shipmentsRouter = {
         })
 
         return formatShipmentForApi(serializeShipment(shipment))
+      }),
+
+  summary: publicProcedure
+      .output(ShipmentSummarySchema)
+      .handler(async ({ context }) => {
+        const now = new Date()
+        
+        // Run all counts in parallel for performance
+        const [
+          total,
+          pending,
+          inTransit,
+          delivered,
+          exceptions,
+          neverChecked,
+          overdueShipments,
+        ] = await Promise.all([
+          // Total shipments
+          context.prisma.shipments.count(),
+          
+          // Pending (not yet shipped or in transit)
+          context.prisma.shipments.count({
+            where: { status: 'pending' },
+          }),
+          
+          // In transit (includes out_for_delivery)
+          context.prisma.shipments.count({
+            where: {
+              status: {
+                in: ['in_transit', 'out_for_delivery'],
+              },
+            },
+          }),
+          
+          // Delivered
+          context.prisma.shipments.count({
+            where: { status: 'delivered' },
+          }),
+          
+          // Exceptions (failed attempts, exceptions, or errors)
+          context.prisma.shipments.count({
+            where: {
+              OR: [
+                { status: 'exception' },
+                { status: 'failed_attempt' },
+                { last_error: { not: null } },
+              ],
+            },
+          }),
+          
+          // Never checked (no last_checked timestamp)
+          context.prisma.shipments.count({
+            where: {
+              last_checked: null,
+            },
+          }),
+          
+          // Overdue (not delivered, has estimated delivery, and past that date)
+          context.prisma.shipments.findMany({
+            where: {
+              status: { not: 'delivered' },
+              estimated_delivery: {
+                not: null,
+                lt: now,
+              },
+            },
+            select: { id: true },
+          }),
+        ])
+
+        return {
+          total,
+          pending,
+          inTransit,
+          delivered,
+          overdue: overdueShipments.length,
+          exceptions,
+          neverChecked,
+        }
       }),
 }
 

@@ -64,6 +64,19 @@ export const createPaginatedResponseSchema = <T extends z.ZodTypeAny>(itemSchema
   })
 
 /**
+ * Shipment summary/stats schema
+ */
+export const ShipmentSummarySchema = z.object({
+  total: z.number(),
+  pending: z.number(),
+  inTransit: z.number(),
+  delivered: z.number(),
+  overdue: z.number(),
+  exceptions: z.number(),
+  neverChecked: z.number(),
+})
+
+/**
  * Type exports
  */
 export type PaginationInput = z.infer<typeof PaginationInputSchema>
@@ -71,6 +84,7 @@ export type SortInput = z.infer<typeof SortInputSchema>
 export type ShipmentFilter = z.infer<typeof ShipmentFilterSchema>
 export type ShipmentSort = z.infer<typeof ShipmentSortSchema>
 export type ShipmentListQuery = z.infer<typeof ShipmentListQuerySchema>
+export type ShipmentSummary = z.infer<typeof ShipmentSummarySchema>
 
 /**
  * Helper to build Prisma where clause from filters

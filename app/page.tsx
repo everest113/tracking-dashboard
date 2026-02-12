@@ -2,12 +2,13 @@
 
 import { useState, useEffect } from 'react'
 import ShipmentTable from '@/components/ShipmentTable'
+import StatusCards from '@/components/StatusCards'
 import LastSyncDisplay from '@/components/LastSyncDisplay'
 import ManualTrackingUpdate from '@/components/ManualTrackingUpdate'
 import BackfillTrackers from '@/components/BackfillTrackers'
 import SyncDialog from '@/components/SyncDialog'
 import { api } from '@/lib/orpc/client'
-import type { ShipmentFilter as SchemaShipmentFilter, ShipmentSort as SchemaShipmentSort } from '@/lib/orpc/schemas'
+import type { ShipmentFilter as SchemaShipmentFilter, ShipmentSort as SchemaShipmentSort, ShipmentSummary } from '@/lib/orpc/schemas'
 
 interface TrackingEvent {
   id: number
@@ -50,6 +51,15 @@ interface PaginationData {
 
 export default function Home() {
   const [shipments, setShipments] = useState<Shipment[]>([])
+  const [summary, setSummary] = useState<ShipmentSummary>({
+    total: 0,
+    pending: 0,
+    inTransit: 0,
+    delivered: 0,
+    overdue: 0,
+    exceptions: 0,
+    neverChecked: 0,
+  })
   const [pagination, setPagination] = useState<PaginationData>({
     page: 1,
     pageSize: 20,
@@ -61,7 +71,22 @@ export default function Home() {
   const [filter, setFilter] = useState<ShipmentFilter>({})
   const [sort, setSort] = useState<ShipmentSort | undefined>()
   const [loading, setLoading] = useState(true)
+  const [summaryLoading, setSummaryLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  const fetchSummary = async () => {
+    setSummaryLoading(true)
+    
+    try {
+      const data = await api.shipments.summary()
+      setSummary(data)
+    } catch (err) {
+      console.error('Failed to fetch summary:', err)
+      // Don't show error for summary, just log it
+    } finally {
+      setSummaryLoading(false)
+    }
+  }
 
   const fetchShipments = async () => {
     setLoading(true)
@@ -98,6 +123,10 @@ export default function Home() {
   }
 
   useEffect(() => {
+    fetchSummary()
+  }, [])
+
+  useEffect(() => {
     fetchShipments()
   }, [pagination.page, filter, sort])
 
@@ -120,6 +149,7 @@ export default function Home() {
   }
 
   const handleRefresh = () => {
+    fetchSummary()
     fetchShipments()
   }
 
@@ -145,6 +175,11 @@ export default function Home() {
               </div>
             </div>
           </div>
+        </div>
+
+        {/* Status Cards */}
+        <div className="mb-8">
+          <StatusCards summary={summary} loading={summaryLoading} />
         </div>
 
         {loading && !shipments.length ? (
