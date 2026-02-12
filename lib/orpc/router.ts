@@ -271,6 +271,45 @@ const shipmentsRouter = {
           neverChecked,
         }
       }),
+
+  delete: publicProcedure
+      .input(z.object({
+        shipmentId: z.number(),
+      }))
+      .output(z.object({
+        success: z.boolean(),
+        trackingNumber: z.string(),
+      }))
+      .handler(async ({ context, input }) => {
+        const { shipmentId } = input
+        
+        const shipment = await context.prisma.shipments.findUnique({
+          where: { id: shipmentId },
+        })
+        
+        if (!shipment) {
+          throw new ORPCError('NOT_FOUND', {
+            message: `Shipment with ID ${shipmentId} not found`,
+          })
+        }
+        
+        // Delete associated tracking events first
+        await context.prisma.tracking_events.deleteMany({
+          where: { shipment_id: shipmentId },
+        })
+        
+        // Delete the shipment
+        await context.prisma.shipments.delete({
+          where: { id: shipmentId },
+        })
+        
+        console.log(`🗑️ Deleted shipment: ${shipment.tracking_number}`)
+        
+        return {
+          success: true,
+          trackingNumber: shipment.tracking_number,
+        }
+      }),
 }
 const trackingStatsRouter = {
   get: publicProcedure

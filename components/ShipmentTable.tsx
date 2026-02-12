@@ -13,8 +13,15 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { Package, MapPin, Clock, ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight, CheckCircle2, AlertCircle, TruckIcon, Search, Copy, Check, RefreshCw, Loader2 } from 'lucide-react'
+import { Package, MapPin, Clock, ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight, CheckCircle2, AlertCircle, TruckIcon, Search, Copy, Check, RefreshCw, Loader2, MoreHorizontal, Trash2 } from 'lucide-react'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { api } from '@/lib/orpc/client'
 import type { ShipmentFilter, ShipmentSort } from '@/lib/orpc/schemas'
 
@@ -74,6 +81,7 @@ export default function ShipmentTable({ shipments, pagination, onQueryChange, lo
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc')
   const [copiedTracking, setCopiedTracking] = useState<string | null>(null)
   const [refreshingShipmentId, setRefreshingShipmentId] = useState<number | null>(null)
+  const [deletingShipmentId, setDeletingShipmentId] = useState<number | null>(null)
 
   // Track the previous activeStatus to avoid re-applying filters when only the tab changes
   const prevActiveStatusRef = useRef(activeStatus)
@@ -214,6 +222,23 @@ export default function ShipmentTable({ shipments, pagination, onQueryChange, lo
     }
   }
 
+  const handleDeleteShipment = async (shipmentId: number) => {
+    if (!confirm('Are you sure you want to delete this shipment? This action cannot be undone.')) {
+      return
+    }
+    
+    setDeletingShipmentId(shipmentId)
+    try {
+      await api.shipments.delete({ shipmentId })
+      // Trigger parent to refetch the data
+      onShipmentRefreshed?.()
+    } catch (error) {
+      console.error('Failed to delete shipment:', error)
+    } finally {
+      setDeletingShipmentId(null)
+    }
+  }
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'delivered':
@@ -345,18 +370,19 @@ export default function ShipmentTable({ shipments, pagination, onQueryChange, lo
                 </Button>
               </TableHead>
               <TableHead>Latest Update</TableHead>
+              <TableHead className="w-[50px]"></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading && shipments.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground">
+                <TableCell colSpan={8} className="text-center text-muted-foreground">
                   Loading...
                 </TableCell>
               </TableRow>
             ) : shipments.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground">
+                <TableCell colSpan={8} className="text-center text-muted-foreground">
                   {hasActiveFilters ? 'No shipments match your search' : 'No shipments found'}
                 </TableCell>
               </TableRow>
@@ -539,6 +565,49 @@ export default function ShipmentTable({ shipments, pagination, onQueryChange, lo
                       ) : (
                         <span className="text-muted-foreground">Never</span>
                       )}
+                    </TableCell>
+
+                    {/* Actions Column */}
+                    <TableCell>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0"
+                            disabled={refreshingShipmentId === shipment.id || deletingShipmentId === shipment.id}
+                          >
+                            {(refreshingShipmentId === shipment.id || deletingShipmentId === shipment.id) ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <MoreHorizontal className="h-4 w-4" />
+                            )}
+                            <span className="sr-only">Open menu</span>
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          {shipment.lastError && (
+                            <>
+                              <DropdownMenuItem
+                                onClick={() => handleRefreshShipment(shipment.id)}
+                                disabled={refreshingShipmentId === shipment.id}
+                              >
+                                <RefreshCw className="h-4 w-4 mr-2" />
+                                Retry Tracking
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                            </>
+                          )}
+                          <DropdownMenuItem
+                            onClick={() => handleDeleteShipment(shipment.id)}
+                            disabled={deletingShipmentId === shipment.id}
+                            className="text-red-600 focus:text-red-600"
+                          >
+                            <Trash2 className="h-4 w-4 mr-2" />
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </TableCell>
                   </TableRow>
                 )
