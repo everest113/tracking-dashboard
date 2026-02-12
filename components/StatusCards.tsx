@@ -26,34 +26,7 @@ interface StatusCard {
 
 export default function StatusCards({ summary, loading }: StatusCardsProps) {
   const cards: StatusCard[] = [
-    {
-      label: 'TOTAL SHIPMENTS',
-      value: summary.total,
-      icon: Package,
-      color: 'text-gray-700',
-      bgColor: 'bg-white border-gray-200',
-    },
-    {
-      label: 'PENDING',
-      value: summary.pending,
-      icon: Clock,
-      color: 'text-gray-600',
-      bgColor: 'bg-gray-50 border-gray-200',
-    },
-    {
-      label: 'IN TRANSIT',
-      value: summary.inTransit,
-      icon: TruckIcon,
-      color: 'text-blue-600',
-      bgColor: 'bg-blue-50 border-blue-200',
-    },
-    {
-      label: 'DELIVERED',
-      value: summary.delivered,
-      icon: CheckCircle2,
-      color: 'text-green-600',
-      bgColor: 'bg-green-50 border-green-200',
-    },
+    // 🚨 ACTION REQUIRED - Priority metrics that need immediate attention
     {
       label: 'OVERDUE',
       value: summary.overdue,
@@ -74,6 +47,36 @@ export default function StatusCards({ summary, loading }: StatusCardsProps) {
       icon: EyeOff,
       color: 'text-red-600',
       bgColor: 'bg-red-50 border-red-200',
+    },
+    // ⚠️ EARLY WARNING - Shipments to monitor
+    {
+      label: 'PENDING',
+      value: summary.pending,
+      icon: Clock,
+      color: 'text-gray-600',
+      bgColor: 'bg-gray-50 border-gray-200',
+    },
+    {
+      label: 'IN TRANSIT',
+      value: summary.inTransit,
+      icon: TruckIcon,
+      color: 'text-blue-600',
+      bgColor: 'bg-blue-50 border-blue-200',
+    },
+    // ✅ COMPLETED - No action needed (deprioritized)
+    {
+      label: 'DELIVERED',
+      value: summary.delivered,
+      icon: CheckCircle2,
+      color: 'text-green-600',
+      bgColor: 'bg-green-50 border-green-200',
+    },
+    {
+      label: 'TOTAL SHIPMENTS',
+      value: summary.total,
+      icon: Package,
+      color: 'text-gray-700',
+      bgColor: 'bg-white border-gray-200',
     },
   ]
 
