@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useCallback } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { format, formatDistanceToNow, addDays } from 'date-fns'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -23,7 +24,6 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { api } from '@/lib/orpc/client'
-import type { ShipmentFilter, ShipmentSort } from '@/lib/orpc/schemas'
 
 interface TrackingEvent {
   id: number
@@ -63,16 +63,7 @@ interface PaginationData {
 interface ShipmentTableProps {
   shipments: Shipment[]
   pagination: PaginationData
-  onQueryChange: (query: {
-    pagination?: { page: number; pageSize: number }
-    filter?: ShipmentFilter
-    sort?: ShipmentSort
-  }) => void
-  loading?: boolean
   activeStatus?: string
-  onShipmentRefreshed?: () => void
-  initialSearch?: string
-  initialSort?: ShipmentSort | null
 }
 
 type SortField = 'shippedDate' | 'estimatedDelivery' | 'deliveredDate' | 'createdAt'
@@ -80,162 +71,73 @@ type SortField = 'shippedDate' | 'estimatedDelivery' | 'deliveredDate' | 'create
 export default function ShipmentTable({ 
   shipments, 
   pagination, 
-  onQueryChange, 
-  loading, 
-  activeStatus = 'all', 
-  onShipmentRefreshed,
-  initialSearch = '',
-  initialSort = null,
+  activeStatus = 'all',
 }: ShipmentTableProps) {
-  const [searchQuery, setSearchQuery] = useState(initialSearch)
-  const [sortField, setSortField] = useState<SortField | null>(initialSort?.field as SortField | null ?? null)
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>(initialSort?.direction ?? 'desc')
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  
+  // Local state for controlled inputs
+  const [searchInput, setSearchInput] = useState(searchParams.get('search') || '')
   const [copiedTracking, setCopiedTracking] = useState<string | null>(null)
   const [refreshingShipmentId, setRefreshingShipmentId] = useState<number | null>(null)
   const [deletingShipmentId, setDeletingShipmentId] = useState<number | null>(null)
 
-  // Sync internal state when URL-controlled props change
-  useEffect(() => {
-    setSearchQuery(initialSearch)
-  }, [initialSearch])
+  // Get current sort from URL
+  const sortField = searchParams.get('sortField') as SortField | null
+  const sortDir = (searchParams.get('sortDir') as 'asc' | 'desc') || 'desc'
 
-  useEffect(() => {
-    setSortField(initialSort?.field as SortField | null ?? null)
-    setSortDirection(initialSort?.direction ?? 'desc')
-  }, [initialSort?.field, initialSort?.direction])
-
-  // Track the previous activeStatus to avoid re-applying filters when only the tab changes
-  const prevActiveStatusRef = useRef(activeStatus)
-  
-  const applyFilters = useCallback(() => {
-    // Skip if only activeStatus changed - parent handles tab changes via handleStatusChange
-    if (prevActiveStatusRef.current !== activeStatus) {
-      prevActiveStatusRef.current = activeStatus
-      return
-    }
+  // URL update helper
+  const updateUrl = useCallback((updates: Record<string, string | null>) => {
+    const params = new URLSearchParams(searchParams.toString())
     
-    const filter: ShipmentFilter = {}
-    
-    // Single search across tracking, PO, and supplier
-    if (searchQuery) filter.search = searchQuery
-    
-    // Include current status filter
-    if (activeStatus === 'trackingErrors') {
-      filter.hasError = true
-    } else if (activeStatus !== 'all') {
-      filter.status = activeStatus as ShipmentFilter['status']
-    }
-
-    const sort = sortField ? {
-      field: sortField,
-      direction: sortDirection,
-    } : undefined
-
-    onQueryChange({
-      pagination: { page: 1, pageSize: pagination.pageSize },
-      filter: Object.keys(filter).length > 0 ? filter : undefined,
-      sort,
+    Object.entries(updates).forEach(([key, value]) => {
+      if (value === null || value === '') {
+        params.delete(key)
+      } else {
+        params.set(key, value)
+      }
     })
-  }, [searchQuery, activeStatus, sortField, sortDirection, pagination.pageSize, onQueryChange])
+    
+    const query = params.toString()
+    router.push(query ? `/?${query}` : '/')
+  }, [router, searchParams])
 
-  // Debounce filter changes
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      applyFilters()
-    }, 300)
+  // Handlers
+  const handleSearch = useCallback((e: React.FormEvent) => {
+    e.preventDefault()
+    updateUrl({ search: searchInput || null, page: null })
+  }, [searchInput, updateUrl])
 
-    return () => clearTimeout(timer)
-  }, [applyFilters])
-
-  const handleSort = (field: SortField) => {
-    let newDirection: 'asc' | 'desc' = 'asc'
+  const handleSort = useCallback((field: SortField) => {
+    let newDir: 'asc' | 'desc' = 'asc'
     
     if (sortField === field) {
-      // Toggle direction or clear
-      if (sortDirection === 'asc') {
-        newDirection = 'desc'
+      if (sortDir === 'asc') {
+        newDir = 'desc'
       } else {
-        // Clear sort
-        setSortField(null)
-        onQueryChange({
-          pagination: { page: pagination.page, pageSize: pagination.pageSize },
-          filter: buildCurrentFilter(),
-          sort: undefined,
-        })
+        // Third click clears sort
+        updateUrl({ sortField: null, sortDir: null })
         return
       }
     }
-
-    setSortField(field)
-    setSortDirection(newDirection)
     
-    onQueryChange({
-      pagination: { page: pagination.page, pageSize: pagination.pageSize },
-      filter: buildCurrentFilter(),
-      sort: { field, direction: newDirection },
-    })
-  }
+    updateUrl({ sortField: field, sortDir: newDir })
+  }, [sortField, sortDir, updateUrl])
 
-  const buildCurrentFilter = (): ShipmentFilter | undefined => {
-    const filter: ShipmentFilter = {}
-    if (searchQuery) filter.search = searchQuery
-    
-    // Handle special tracking errors tab
-    if (activeStatus === 'trackingErrors') {
-      filter.hasError = true
-    } else if (activeStatus !== 'all') {
-      filter.status = activeStatus as ShipmentFilter['status']
-    }
-    
-    return Object.keys(filter).length > 0 ? filter : undefined
-  }
+  const handlePageChange = useCallback((newPage: number) => {
+    updateUrl({ page: newPage === 1 ? null : String(newPage) })
+  }, [updateUrl])
 
-  const getSortIcon = (field: SortField) => {
-    if (sortField !== field) {
-      return <ArrowUpDown className="h-4 w-4 text-muted-foreground" />
-    }
-    if (sortDirection === 'asc') {
-      return <ArrowUp className="h-4 w-4" />
-    }
-    return <ArrowDown className="h-4 w-4" />
-  }
-
-  const clearFilters = () => {
-    setSearchQuery('')
-    setSortField(null)
-    
-    // Preserve the active tab's filter
-    let preservedFilter: ShipmentFilter | undefined
-    if (activeStatus === 'trackingErrors') {
-      preservedFilter = { hasError: true }
-    } else if (activeStatus !== 'all') {
-      preservedFilter = { status: activeStatus as ShipmentFilter['status'] }
-    }
-    
-    onQueryChange({
-      pagination: { page: 1, pageSize: pagination.pageSize },
-      filter: preservedFilter,
-    })
-  }
-
-  const handlePageChange = (newPage: number) => {
-    onQueryChange({
-      pagination: { page: newPage, pageSize: pagination.pageSize },
-      filter: buildCurrentFilter(),
-      sort: sortField ? { field: sortField, direction: sortDirection } : undefined,
-    })
-  }
-
-  const hasActiveFilters = searchQuery || sortField
+  const clearFilters = useCallback(() => {
+    setSearchInput('')
+    updateUrl({ search: null, sortField: null, sortDir: null, page: null })
+  }, [updateUrl])
 
   const handleRefreshShipment = async (shipmentId: number) => {
     setRefreshingShipmentId(shipmentId)
     try {
-      const result = await api.manualUpdateTracking.refreshOne({ shipmentId })
-      if (result.success) {
-        // Trigger parent to refetch the data
-        onShipmentRefreshed?.()
-      }
+      await api.manualUpdateTracking.refreshOne({ shipmentId })
+      router.refresh()
     } catch (error) {
       console.error('Failed to refresh shipment:', error)
     } finally {
@@ -251,8 +153,7 @@ export default function ShipmentTable({
     setDeletingShipmentId(shipmentId)
     try {
       await api.shipments.delete({ shipmentId })
-      // Trigger parent to refetch the data
-      onShipmentRefreshed?.()
+      router.refresh()
     } catch (error) {
       console.error('Failed to delete shipment:', error)
     } finally {
@@ -260,20 +161,25 @@ export default function ShipmentTable({
     }
   }
 
+  const handleCopyTracking = useCallback(async (trackingNumber: string) => {
+    try {
+      await navigator.clipboard.writeText(trackingNumber)
+      setCopiedTracking(trackingNumber)
+      setTimeout(() => setCopiedTracking(null), 2000)
+    } catch (error) {
+      console.error('Failed to copy:', error)
+    }
+  }, [])
+
+  // Helpers
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'delivered':
-        return 'bg-green-500'
-      case 'in_transit':
-        return 'bg-blue-500'
-      case 'out_for_delivery':
-        return 'bg-purple-500'
-      case 'exception':
-        return 'bg-red-500'
-      case 'pending':
-        return 'bg-gray-500'
-      default:
-        return 'bg-gray-400'
+      case 'delivered': return 'bg-green-500'
+      case 'in_transit': return 'bg-blue-500'
+      case 'out_for_delivery': return 'bg-purple-500'
+      case 'exception': return 'bg-red-500'
+      case 'pending': return 'bg-gray-500'
+      default: return 'bg-yellow-500'
     }
   }
 
@@ -295,68 +201,61 @@ export default function ShipmentTable({
     }
   }
 
-  // Calculate expected delivery estimate (shipped + 5 business days)
-  const getExpectedDelivery = (shipment: Shipment) => {
-    // If we have carrier estimate, use it
-    if (shipment.estimatedDelivery) {
-      return {
-        date: formatDate(shipment.estimatedDelivery),
-        source: 'carrier' as const
-      }
-    }
-    
-    // Otherwise estimate based on shipped date (if available)
-    if (shipment.shippedDate && shipment.status !== 'delivered') {
-      const shipped = new Date(shipment.shippedDate)
-      const estimated = addDays(shipped, 5) // 5 business days estimate
-      return {
-        date: formatDate(estimated.toISOString()),
-        source: 'estimated' as const
-      }
-    }
-    
-    return null
-  }
-
   const getLatestEvent = (events?: TrackingEvent[]) => {
     if (!events || events.length === 0) return null
     return events[0]
   }
 
-  const handleCopyTracking = async (trackingNumber: string) => {
-    try {
-      await navigator.clipboard.writeText(trackingNumber)
-      setCopiedTracking(trackingNumber)
-      setTimeout(() => {
-        setCopiedTracking((prev) => (prev === trackingNumber ? null : prev))
-      }, 2000)
-    } catch (error) {
-      console.error('Failed to copy tracking number', error)
+  const getExpectedDelivery = (shipment: Shipment) => {
+    if (shipment.estimatedDelivery) {
+      return {
+        date: formatDate(shipment.estimatedDelivery),
+        source: 'carrier' as const,
+      }
     }
+    if (shipment.shippedDate) {
+      const estimated = addDays(new Date(shipment.shippedDate), 5)
+      return {
+        date: format(estimated, 'MMM d, yyyy'),
+        source: 'estimated' as const,
+      }
+    }
+    return null
   }
+
+  const getSortIcon = (field: SortField) => {
+    if (sortField !== field) {
+      return <ArrowUpDown className="h-4 w-4 text-muted-foreground" />
+    }
+    return sortDir === 'asc' 
+      ? <ArrowUp className="h-4 w-4" />
+      : <ArrowDown className="h-4 w-4" />
+  }
+
+  const hasActiveFilters = searchInput || sortField
 
   return (
     <div className="space-y-4">
-      {/* Filters */}
-      <div className="flex flex-wrap gap-3">
-        <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+      {/* Search & Clear */}
+      <div className="flex items-center gap-4">
+        <form onSubmit={handleSearch} className="relative flex-1 max-w-sm">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Search tracking #, PO #, or supplier..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search tracking, PO, or supplier..."
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
             className="pl-9"
-            disabled={loading}
           />
-        </div>
+        </form>
         {hasActiveFilters && (
-          <Button variant="ghost" size="sm" onClick={clearFilters} disabled={loading}>
+          <Button variant="ghost" size="sm" onClick={clearFilters}>
             Clear filters
           </Button>
         )}
       </div>
 
-      <div className="rounded-md border">
+      {/* Table */}
+      <div className="border rounded-lg overflow-hidden">
         <Table>
           <TableHeader>
             <TableRow>
@@ -364,28 +263,19 @@ export default function ShipmentTable({
               <TableHead>PO / Supplier</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-8 px-2 hover:bg-transparent"
-                  onClick={() => handleSort('shippedDate')}
-                  disabled={loading}
-                >
+                <Button variant="ghost" size="sm" className="h-8 px-2" onClick={() => handleSort('shippedDate')}>
                   Shipped
                   {getSortIcon('shippedDate')}
                 </Button>
               </TableHead>
               <TableHead>
-                Expected
+                <Button variant="ghost" size="sm" className="h-8 px-2" onClick={() => handleSort('estimatedDelivery')}>
+                  Expected
+                  {getSortIcon('estimatedDelivery')}
+                </Button>
               </TableHead>
               <TableHead>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-8 px-2 hover:bg-transparent"
-                  onClick={() => handleSort('deliveredDate')}
-                  disabled={loading}
-                >
+                <Button variant="ghost" size="sm" className="h-8 px-2" onClick={() => handleSort('deliveredDate')}>
                   Delivered
                   {getSortIcon('deliveredDate')}
                 </Button>
@@ -395,16 +285,10 @@ export default function ShipmentTable({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {loading && shipments.length === 0 ? (
+            {shipments.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={8} className="text-center text-muted-foreground">
-                  Loading...
-                </TableCell>
-              </TableRow>
-            ) : shipments.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={8} className="text-center text-muted-foreground">
-                  {hasActiveFilters ? 'No shipments match your search' : 'No shipments found'}
+                  No shipments found
                 </TableCell>
               </TableRow>
             ) : (
@@ -415,7 +299,8 @@ export default function ShipmentTable({
                 const deliveredDate = formatDateTime(shipment.deliveredDate)
 
                 return (
-                  <TableRow key={shipment.id} className={loading ? 'opacity-50' : ''}>
+                  <TableRow key={shipment.id}>
+                    {/* Tracking Number */}
                     <TableCell>
                       <div className="flex flex-col gap-1">
                         <div className="flex items-center gap-2">
@@ -433,50 +318,43 @@ export default function ShipmentTable({
                             )}
                           </button>
                         </div>
-                        <div className="flex items-center gap-1">
-                          <span className="text-xs text-muted-foreground uppercase">
-                            {shipment.carrier || 'Unknown'}
-                          </span>
-                        </div>
+                        <span className="text-xs text-muted-foreground uppercase">
+                          {shipment.carrier || 'Unknown'}
+                        </span>
                       </div>
                     </TableCell>
 
+                    {/* PO / Supplier */}
                     <TableCell>
                       <div className="flex flex-col gap-1">
-                        {shipment.supplier && (
-                          <span className="text-sm">{shipment.supplier}</span>
-                        )}
-                        {shipment.poNumber && (
-                          <span className="text-xs text-muted-foreground">PO: {shipment.poNumber}</span>
-                        )}
+                        {shipment.supplier && <span className="text-sm">{shipment.supplier}</span>}
+                        {shipment.poNumber && <span className="text-xs text-muted-foreground">PO: {shipment.poNumber}</span>}
                         {!shipment.supplier && !shipment.poNumber && <span className="text-muted-foreground">-</span>}
                       </div>
                     </TableCell>
 
+                    {/* Status */}
                     <TableCell>
                       <div className="flex flex-col gap-1">
                         <Badge className={getStatusColor(shipment.status)}>
                           {shipment.status.replace('_', ' ')}
                         </Badge>
                         {shipment.ship24Status && shipment.ship24Status !== shipment.status && (
-                          <span className="text-xs text-muted-foreground">
-                            {shipment.ship24Status}
-                          </span>
+                          <span className="text-xs text-muted-foreground">{shipment.ship24Status}</span>
                         )}
                       </div>
                     </TableCell>
 
+                    {/* Shipped */}
                     <TableCell>
                       {shippedDate ? (
-                        <div className="flex items-center gap-1.5 text-sm">
-                          <Package className="h-3.5 w-3.5 text-blue-500" />
-                          <span>{shippedDate}</span>
-                        </div>
+                        <span className="text-sm">{shippedDate}</span>
                       ) : (
                         <span className="text-muted-foreground">-</span>
                       )}
                     </TableCell>
 
+                    {/* Expected */}
                     <TableCell>
                       {expectedInfo ? (
                         <div className="flex flex-col gap-0.5">
@@ -497,6 +375,7 @@ export default function ShipmentTable({
                       )}
                     </TableCell>
 
+                    {/* Delivered */}
                     <TableCell>
                       {deliveredDate ? (
                         <div className="flex items-center gap-1.5 text-sm font-medium text-green-600">
@@ -508,6 +387,7 @@ export default function ShipmentTable({
                       )}
                     </TableCell>
 
+                    {/* Latest Update */}
                     <TableCell>
                       {shipment.lastError ? (
                         <div className="flex flex-col gap-1 max-w-[250px]">
@@ -588,7 +468,7 @@ export default function ShipmentTable({
                       )}
                     </TableCell>
 
-                    {/* Actions Column */}
+                    {/* Actions */}
                     <TableCell>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
@@ -639,37 +519,36 @@ export default function ShipmentTable({
       </div>
 
       {/* Pagination */}
-      <div className="flex items-center justify-between">
-        <div className="text-sm text-muted-foreground">
-          Showing {shipments.length > 0 ? (pagination.page - 1) * pagination.pageSize + 1 : 0} to {Math.min(pagination.page * pagination.pageSize, pagination.total)} of {pagination.total} shipments
-        </div>
-        
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => handlePageChange(pagination.page - 1)}
-            disabled={!pagination.hasPrev || loading}
-          >
-            <ChevronLeft className="h-4 w-4" />
-            Previous
-          </Button>
-          
-          <div className="text-sm text-muted-foreground">
-            Page {pagination.page} of {pagination.totalPages}
+      {pagination.totalPages > 1 && (
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-muted-foreground">
+            Showing {((pagination.page - 1) * pagination.pageSize) + 1} to{' '}
+            {Math.min(pagination.page * pagination.pageSize, pagination.total)} of{' '}
+            {pagination.total} shipments
+          </p>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handlePageChange(pagination.page - 1)}
+              disabled={!pagination.hasPrev}
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <span className="text-sm">
+              Page {pagination.page} of {pagination.totalPages}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handlePageChange(pagination.page + 1)}
+              disabled={!pagination.hasNext}
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
           </div>
-          
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => handlePageChange(pagination.page + 1)}
-            disabled={!pagination.hasNext || loading}
-          >
-            Next
-            <ChevronRight className="h-4 w-4" />
-          </Button>
         </div>
-      </div>
+      )}
     </div>
   )
 }

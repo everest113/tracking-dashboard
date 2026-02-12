@@ -1,5 +1,8 @@
 'use client'
 
+import { useRouter, useSearchParams } from 'next/navigation'
+import { useCallback } from 'react'
+
 interface StatusTabsProps {
   counts: {
     all: number
@@ -14,7 +17,6 @@ interface StatusTabsProps {
     trackingErrors: number
   }
   activeTab: string
-  onTabChange: (tab: string) => void
 }
 
 const tabs = [
@@ -30,7 +32,27 @@ const tabs = [
   { key: 'trackingErrors', label: 'Tracking Errors', countKey: 'trackingErrors' as const },
 ]
 
-export default function StatusTabs({ counts, activeTab, onTabChange }: StatusTabsProps) {
+export default function StatusTabs({ counts, activeTab }: StatusTabsProps) {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+
+  const handleTabChange = useCallback((tab: string) => {
+    const params = new URLSearchParams(searchParams.toString())
+    
+    // Set tab (or remove if 'all')
+    if (tab === 'all') {
+      params.delete('tab')
+    } else {
+      params.set('tab', tab)
+    }
+    
+    // Reset page to 1 on tab change
+    params.delete('page')
+    
+    const query = params.toString()
+    router.push(query ? `/?${query}` : '/')
+  }, [router, searchParams])
+
   return (
     <div className="border-b border-gray-200 mb-6">
       <nav className="flex flex-wrap gap-x-6 gap-y-2" aria-label="Status filter tabs">
@@ -41,7 +63,7 @@ export default function StatusTabs({ counts, activeTab, onTabChange }: StatusTab
           return (
             <button
               key={tab.key}
-              onClick={() => onTabChange(tab.key)}
+              onClick={() => handleTabChange(tab.key)}
               className={`
                 pb-3 px-1 border-b-2 font-medium text-sm whitespace-nowrap transition-colors
                 ${
