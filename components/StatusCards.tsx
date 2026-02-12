@@ -1,6 +1,6 @@
 'use client'
 
-import { Package, Clock, TruckIcon, CheckCircle2, AlertTriangle, AlertCircle, EyeOff } from 'lucide-react'
+import { Clock, TruckIcon, AlertTriangle, AlertCircle, EyeOff } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 
 interface StatusCardsProps {
@@ -63,25 +63,10 @@ export default function StatusCards({ summary, loading }: StatusCardsProps) {
       color: 'text-blue-600',
       bgColor: 'bg-blue-50 border-blue-200',
     },
-    // ✅ COMPLETED - No action needed (deprioritized)
-    {
-      label: 'DELIVERED',
-      value: summary.delivered,
-      icon: CheckCircle2,
-      color: 'text-green-600',
-      bgColor: 'bg-green-50 border-green-200',
-    },
-    {
-      label: 'TOTAL SHIPMENTS',
-      value: summary.total,
-      icon: Package,
-      color: 'text-gray-700',
-      bgColor: 'bg-white border-gray-200',
-    },
   ]
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-4">
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
       {cards.map((card) => {
         const Icon = card.icon
         return (
