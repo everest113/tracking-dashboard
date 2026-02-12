@@ -3,9 +3,15 @@ import { onError } from '@orpc/server'
 import { appRouter } from '@/lib/orpc/router'
 import { createContext } from '@/lib/orpc/context'
 
+// Next.js: Force dynamic rendering (no static generation for API routes)
+export const dynamic = 'force-dynamic'
+
+const isDev = process.env.NODE_ENV === 'development'
+
 const handler = new RPCHandler(appRouter, {
   interceptors: [
     onError((error) => {
+      // Always log errors
       console.error('🔴 oRPC Error:', error)
       
       // Log Zod validation errors if present
@@ -18,9 +24,11 @@ const handler = new RPCHandler(appRouter, {
 
 async function handleRequest(request: Request) {
   const url = new URL(request.url)
-  console.log('🌐 Request:', request.method, url.pathname)
-  console.log('   Prefix: /api/orpc')
-  console.log('   Path after prefix:', url.pathname.replace('/api/orpc', ''))
+  
+  // Only log requests in development
+  if (isDev) {
+    console.log('🌐 Request:', request.method, url.pathname)
+  }
   
   try {
     const result = await handler.handle(request, {
@@ -28,16 +36,15 @@ async function handleRequest(request: Request) {
       context: await createContext(request),
     })
 
-    console.log('   Handler result:', { 
-      hasResponse: !!result.response, 
-      status: result.response?.status 
-    })
-
     if (result.response) {
-      console.log('✅ Response:', result.response.status)
+      if (isDev) {
+        console.log('✅ Response:', result.response.status)
+      }
       return result.response
     } else {
-      console.log('❌ No matching procedure for path:', url.pathname)
+      if (isDev) {
+        console.log('❌ No matching procedure for path:', url.pathname)
+      }
       return new Response('Not found', { status: 404 })
     }
   } catch (error) {

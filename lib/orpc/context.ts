@@ -2,10 +2,13 @@ import { prisma } from '@/lib/prisma'
 import { createRequestLogger } from '@/lib/infrastructure/logging/server-logger'
 import type { ILogger } from '@/lib/infrastructure/logging/types'
 
+const isDev = process.env.NODE_ENV === 'development'
+
 export interface Context extends Record<string, unknown> {
   req: Request
   prisma: typeof prisma
   logger: ILogger
+  requestId: string
 }
 
 export async function createContext(req: Request): Promise<Context> {
@@ -23,12 +26,15 @@ export async function createContext(req: Request): Promise<Context> {
     userAgent,
   })
 
-  // Console log for dev visibility
-  console.log(`📥 [${method}] ${url} [${requestId.substring(0, 8)}]`)
+  // Only log in development
+  if (isDev) {
+    console.log(`📥 [${method}] ${url} [${requestId.substring(0, 8)}]`)
+  }
 
   return {
     req,
     prisma,
     logger,
+    requestId,
   }
 }
