@@ -371,11 +371,6 @@ export default function ShipmentTable({ shipments, pagination, onQueryChange, lo
                           <span className="text-xs text-muted-foreground uppercase">
                             {shipment.carrier || 'Unknown'}
                           </span>
-                          {shipment.lastError && (
-                            <span title={shipment.lastError}>
-                              <AlertCircle className="h-3 w-3 text-red-500" />
-                            </span>
-                          )}
                         </div>
                       </div>
                     </TableCell>
@@ -448,7 +443,24 @@ export default function ShipmentTable({ shipments, pagination, onQueryChange, lo
                     </TableCell>
 
                     <TableCell>
-                      {latestEvent ? (
+                      {shipment.lastError ? (
+                        <div className="flex flex-col gap-1 max-w-[250px]">
+                          <div className="flex items-center gap-1.5 text-sm text-red-600">
+                            <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />
+                            <span className="font-medium">Tracking Error</span>
+                          </div>
+                          <span className="text-xs text-muted-foreground truncate" title={shipment.lastError}>
+                            {shipment.lastError.length > 50 
+                              ? shipment.lastError.substring(0, 50) + '...' 
+                              : shipment.lastError}
+                          </span>
+                          {shipment.lastChecked && (
+                            <span className="text-xs text-muted-foreground">
+                              {formatDistanceToNow(new Date(shipment.lastChecked), { addSuffix: true })}
+                            </span>
+                          )}
+                        </div>
+                      ) : latestEvent ? (
                         <div className="flex flex-col gap-1 max-w-[250px]">
                           {latestEvent.location && (
                             <div className="flex items-center gap-1 text-sm">
