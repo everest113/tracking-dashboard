@@ -17,7 +17,8 @@ import {
 export class FrontClient extends BaseSdkClient {
   constructor(apiKey: string) {
     super({
-      baseUrl: 'https://api2.frontapp.com',
+      // Use custom Front domain if provided, otherwise default to api2.frontapp.com
+      baseUrl: process.env.FRONT_API_URL || 'https://stitchi.api.frontapp.com',
       headers: {
         'Authorization': `Bearer ${apiKey}`,
       },
@@ -74,17 +75,29 @@ export class FrontClient extends BaseSdkClient {
     try {
       const testEndpoint = `/conversations/search/${encodeURIComponent(testQuery)}?limit=5`
       console.log(`   Test endpoint: ${testEndpoint}`)
+      
+      // Make raw request to see actual response
+      const baseUrl = process.env.FRONT_API_URL || 'https://stitchi.api.frontapp.com'
+      const rawResponse = await fetch(`${baseUrl}${testEndpoint}`, {
+        headers: {
+          'Authorization': `Bearer ${process.env.FRONT_API_TOKEN}`,
+        },
+      })
+      const rawData = await rawResponse.json()
+      console.log(`   Raw API response:`, JSON.stringify(rawData, null, 2).substring(0, 500))
+      console.log(`   Raw results count: ${rawData._results?.length || 0}`)
+      
       const testResponse: FrontListResponse<FrontConversation> = await this.get<FrontListResponse<FrontConversation>>(
         testEndpoint,
         FrontListResponseSchema(FrontConversationSchema)
       )
-      console.log(`   ✅ Test query returned ${testResponse._results.length} conversations`)
+      console.log(`   ✅ After schema validation: ${testResponse._results.length} conversations`)
       if (testResponse._results.length > 0) {
         const latest = testResponse._results[0]
         console.log(`   Latest conversation: ${latest.id} - "${latest.subject}" (created: ${latest.created_at})`)
       }
     } catch (error) {
-      console.error(`   ❌ Test query failed:`, error)
+      console.error(`   ❌ Test query failed:`, error instanceof Error ? error.message : error)
     }
     
     const parts: string[] = [`inbox:${inboxId}`]
