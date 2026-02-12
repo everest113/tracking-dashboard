@@ -1,7 +1,7 @@
 import { os } from '@orpc/server'
 import type { Context } from './context'
 
-// Base procedure with context (using $context for v1)
+// Base procedure with context
 const baseProcedure = os.$context<Context>()
 
 // Public procedure with logging middleware

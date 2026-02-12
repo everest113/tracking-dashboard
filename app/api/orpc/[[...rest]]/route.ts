@@ -1,5 +1,5 @@
 import { RPCHandler } from '@orpc/server/fetch'
-import { onError } from '@orpc/server'
+import { onError } from '@orpc/shared'
 import { appRouter } from '@/lib/orpc/router'
 import { createContext } from '@/lib/orpc/context'
 
@@ -11,13 +11,13 @@ const DEBUG_ORPC = process.env.DEBUG_ORPC === 'true'
 
 const handler = new RPCHandler(appRouter, {
   interceptors: [
-    onError((error) => {
+    onError((error: unknown) => {
       // Always log errors (these are important regardless of debug mode)
       console.error('🔴 oRPC Error:', error)
       
       // Log Zod validation errors if present
-      if (error.cause && 'issues' in error.cause) {
-        console.error('📋 Validation issues:', JSON.stringify(error.cause.issues, null, 2))
+      if (error instanceof Error && error.cause && typeof error.cause === 'object' && 'issues' in error.cause) {
+        console.error('📋 Validation issues:', JSON.stringify((error.cause as { issues: unknown[] }).issues, null, 2))
       }
     }),
   ],

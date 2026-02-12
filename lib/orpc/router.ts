@@ -19,7 +19,6 @@ import { extractTrackingFromEmail } from '@/lib/application/use-cases/extractTra
 import { createShip24Client } from '@/lib/infrastructure/sdks/ship24/client'
 import { Ship24Mapper } from '@/lib/infrastructure/mappers/Ship24Mapper'
 import type { TrackingUpdateResult } from '@/lib/application/types'
-
 /**
  * Shipment response schema (camelCase API format)
  */
@@ -47,7 +46,6 @@ const ShipmentResponseSchema = z.object({
     eventTime: z.string().nullish(),
   })).optional(),
 })
-
 const formatShipmentForApi = (shipment: ReturnType<typeof serializeShipment>) => ({
   ...shipment,
   shippedDate: shipment.shippedDate?.toISOString() ?? null,
@@ -62,24 +60,48 @@ const formatShipmentForApi = (shipment: ReturnType<typeof serializeShipment>) =>
     eventTime: event.eventTime?.toISOString() ?? null,
   })),
 })
-
 const shipmentsRouter = {
   list: publicProcedure
       .input(ShipmentListQuerySchema)
       .output(createPaginatedResponseSchema(ShipmentResponseSchema))
       .handler(async ({ context, input }) => {
         const { pagination, filter, sort } = input
-
         const page = pagination?.page ?? 1
         const pageSize = pagination?.pageSize ?? 20
         const skip = (page - 1) * pageSize
-
         const where = buildShipmentWhereClause(filter)
         const orderBy = buildShipmentOrderByClause(sort)
-
-        // Get total count for pagination
-        const total = await context.prisma.shipments.count({ where })
-
+        // Get counts for all statuses (unfiltered by status, but respecting search)
+        const searchFilter = filter?.search ? {
+          OR: [
+            { tracking_number: { contains: filter.search, mode: 'insensitive' as const } },
+            { po_number: { contains: filter.search, mode: 'insensitive' as const } },
+            { supplier: { contains: filter.search, mode: 'insensitive' as const } },
+          ],
+        } : {}
+        const [
+          total,
+          pending,
+          infoReceived,
+          inTransit,
+          outForDelivery,
+          failedAttempt,
+          availableForPickup,
+          delivered,
+          exception,
+          trackingErrors,
+        ] = await Promise.all([
+          context.prisma.shipments.count({ where: searchFilter }),
+          context.prisma.shipments.count({ where: { ...searchFilter, status: 'pending' } }),
+          context.prisma.shipments.count({ where: { ...searchFilter, status: 'info_received' } }),
+          context.prisma.shipments.count({ where: { ...searchFilter, status: 'in_transit' } }),
+          context.prisma.shipments.count({ where: { ...searchFilter, status: 'out_for_delivery' } }),
+          context.prisma.shipments.count({ where: { ...searchFilter, status: 'failed_attempt' } }),
+          context.prisma.shipments.count({ where: { ...searchFilter, status: 'available_for_pickup' } }),
+          context.prisma.shipments.count({ where: { ...searchFilter, status: 'delivered' } }),
+          context.prisma.shipments.count({ where: { ...searchFilter, status: 'exception' } }),
+          context.prisma.shipments.count({ where: { ...searchFilter, last_error: { not: null } } }),
+        ])
         // Get paginated results with tracking events
         const shipments = await context.prisma.shipments.findMany({
           where,
@@ -93,33 +115,42 @@ const shipmentsRouter = {
             },
           },
         })
-
         // Serialize to camelCase
         const serialized = serializeShipments(shipments)
         const formatted = serialized.map(formatShipmentForApi)
-
+        const filteredTotal = await context.prisma.shipments.count({ where })
         const result = {
           items: formatted,
           pagination: {
             page,
             pageSize,
-            total,
-            totalPages: Math.ceil(total / pageSize),
-            hasNext: page * pageSize < total,
+            total: filteredTotal,
+            totalPages: Math.ceil(filteredTotal / pageSize),
+            hasNext: page * pageSize < filteredTotal,
             hasPrev: page > 1,
           },
+          statusCounts: {
+            all: total,
+            pending,
+            infoReceived,
+            inTransit,
+            outForDelivery,
+            failedAttempt,
+            availableForPickup,
+            delivered,
+            exception,
+            trackingErrors,
+          },
         }
-
         // Debug logging
         console.log('📦 shipments.list result structure:', {
           itemsCount: result.items.length,
           firstItem: result.items[0] ? Object.keys(result.items[0]) : [],
           pagination: result.pagination,
+          statusCounts: result.statusCounts,
         })
-
         return result
       }),
-
   create: publicProcedure
       .input(shipmentSchema)
       .output(ShipmentResponseSchema)
@@ -127,26 +158,21 @@ const shipmentsRouter = {
         const existingShipment = await context.prisma.shipments.findUnique({
           where: { tracking_number: input.trackingNumber },
         })
-
         if (existingShipment) {
-          throw new ORPCError({
-            code: 'CONFLICT',
+          throw new ORPCError('CONFLICT', {
             message: 'A shipment with this tracking number already exists',
           })
         }
-
         const shipmentData: Prisma.shipmentsCreateInput = {
           tracking_number: input.trackingNumber,
           carrier: input.carrier,
           status: 'pending',
           updated_at: new Date(),
         }
-
         if (input.poNumber) shipmentData.po_number = input.poNumber
         if (input.supplier) shipmentData.supplier = input.supplier
         if (input.shippedDate) shipmentData.shipped_date = new Date(input.shippedDate)
         if (input.estimatedDelivery) shipmentData.estimated_delivery = new Date(input.estimatedDelivery)
-
         const service = getShipmentTrackingService()
         try {
           const result = await service.registerTracker(
@@ -154,14 +180,12 @@ const shipmentsRouter = {
             input.carrier,
             input.poNumber || undefined
           )
-          
           if (result.success && result.trackerId) {
             shipmentData.ship24_tracker_id = result.trackerId
           }
         } catch (trackerError: unknown) {
           console.warn(`⚠️  Failed to register tracker for ${input.trackingNumber}:`, getErrorMessage(trackerError))
         }
-
         const shipment = await context.prisma.shipments.create({
           data: shipmentData,
           include: {
@@ -171,15 +195,12 @@ const shipmentsRouter = {
             },
           },
         })
-
         return formatShipmentForApi(serializeShipment(shipment))
       }),
-
   summary: publicProcedure
       .output(ShipmentSummarySchema)
       .handler(async ({ context }) => {
         const now = new Date()
-        
         // Run all counts in parallel for performance
         const [
           total,
@@ -187,17 +208,16 @@ const shipmentsRouter = {
           inTransit,
           delivered,
           exceptions,
+          trackingErrors,
           neverChecked,
           overdueShipments,
         ] = await Promise.all([
           // Total shipments
           context.prisma.shipments.count(),
-          
           // Pending (not yet shipped or in transit)
           context.prisma.shipments.count({
             where: { status: 'pending' },
           }),
-          
           // In transit (includes out_for_delivery)
           context.prisma.shipments.count({
             where: {
@@ -206,30 +226,28 @@ const shipmentsRouter = {
               },
             },
           }),
-          
           // Delivered
           context.prisma.shipments.count({
             where: { status: 'delivered' },
           }),
-          
-          // Exceptions (failed attempts, exceptions, or errors)
+          // Delivery exceptions only (carrier-reported issues)
           context.prisma.shipments.count({
             where: {
-              OR: [
-                { status: 'exception' },
-                { status: 'failed_attempt' },
-                { last_error: { not: null } },
-              ],
+              status: { in: ['exception', 'failed_attempt'] },
             },
           }),
-          
+          // Tracking/sync errors (can't fetch tracking data)
+          context.prisma.shipments.count({
+            where: {
+              last_error: { not: null },
+            },
+          }),
           // Never checked (no last_checked timestamp)
           context.prisma.shipments.count({
             where: {
               last_checked: null,
             },
           }),
-          
           // Overdue (not delivered, has estimated delivery, and past that date)
           context.prisma.shipments.findMany({
             where: {
@@ -242,7 +260,6 @@ const shipmentsRouter = {
             select: { id: true },
           }),
         ])
-
         return {
           total,
           pending,
@@ -250,11 +267,11 @@ const shipmentsRouter = {
           delivered,
           overdue: overdueShipments.length,
           exceptions,
+          trackingErrors,
           neverChecked,
         }
       }),
 }
-
 const trackingStatsRouter = {
   get: publicProcedure
       .output(z.object({
@@ -289,7 +306,6 @@ const trackingStatsRouter = {
               }
             })
           ])
-
         return {
           total: totalShipments,
           active: totalShipments - deliveredCount,
@@ -300,7 +316,6 @@ const trackingStatsRouter = {
         }
       }),
 }
-
 const syncHistoryRouter = {
   get: publicProcedure
       .input(z.object({ limit: z.number().default(10) }).default({ limit: 10 }))
@@ -343,7 +358,6 @@ const syncHistoryRouter = {
           where: { status: { in: ['success', 'partial'] } },
           orderBy: { completed_at: 'desc' },
         })
-
         const mapRecord = (record: { id: number; started_at: Date; completed_at: Date | null; conversations_processed: number; shipments_added: number; conversations_already_scanned: number; shipments_skipped: number; conversations_with_no_tracking: number; errors: unknown; status: string; duration_ms: number | null }) => ({
           id: record.id,
           startedAt: record.started_at,
@@ -357,7 +371,6 @@ const syncHistoryRouter = {
           durationMs: record.duration_ms,
           errors: Array.isArray(record.errors) ? record.errors.map(String) : [],
         })
-
         return {
           success: true,
           history: historyRecords.map(mapRecord),
@@ -365,7 +378,6 @@ const syncHistoryRouter = {
         }
       }),
 }
-
 const manualUpdateTrackingRouter = {
   update: publicProcedure
       .output(
@@ -381,10 +393,8 @@ const manualUpdateTrackingRouter = {
       )
       .handler(async ({ context }) => {
         const startTime = Date.now()
-
         try {
           console.log('=== Manual Tracking Update Started ===')
-
           const limit = 50
           const shipments = await context.prisma.shipments.findMany({
             where: {
@@ -400,9 +410,7 @@ const manualUpdateTrackingRouter = {
             },
             take: limit,
           })
-
           console.log(`Found ${shipments.length} shipments to update`)
-
           if (shipments.length === 0) {
             return {
               success: true,
@@ -414,24 +422,18 @@ const manualUpdateTrackingRouter = {
               timestamp: new Date().toISOString(),
             }
           }
-
           const ship24Client = createShip24Client()
           const results: TrackingUpdateResult[] = []
           let errors = 0
-
           for (const shipment of shipments) {
             try {
               console.log(`Updating ${shipment.tracking_number}...`)
-
               const response = await ship24Client.getTrackerResults(shipment.ship24_tracker_id!)
-
               if (response.data?.trackings?.[0]) {
                 const tracking = response.data.trackings[0]
                 const trackingUpdate = Ship24Mapper.toDomainTrackingUpdate(tracking)
-
                 const newStatus = trackingUpdate.status.type
                 const oldStatus = shipment.status
-
                 await context.prisma.shipments.update({
                   where: { id: shipment.id },
                   data: {
@@ -448,9 +450,7 @@ const manualUpdateTrackingRouter = {
                     }),
                   },
                 })
-
                 const statusChanged = oldStatus !== newStatus
-
                 results.push({
                   success: true,
                   trackingNumber: shipment.tracking_number,
@@ -458,7 +458,6 @@ const manualUpdateTrackingRouter = {
                   newStatus,
                   statusChanged,
                 })
-
                 if (statusChanged) {
                   console.log(`  ✓ ${shipment.tracking_number}: ${oldStatus} → ${newStatus}`)
                 }
@@ -485,9 +484,7 @@ const manualUpdateTrackingRouter = {
               })
             }
           }
-
           const duration = Date.now() - startTime
-
           const summary = {
             success: true,
             checked: shipments.length,
@@ -497,23 +494,18 @@ const manualUpdateTrackingRouter = {
             durationMs: duration,
             timestamp: new Date().toISOString(),
           }
-
           console.log('=== Manual Update Complete ===')
           console.log(JSON.stringify(summary, null, 2))
-
           return summary
         } catch (error) {
           console.error('=== Manual Update Error ===')
           console.error('Error:', getErrorMessage(error))
-
-          throw new ORPCError({
-            code: 'INTERNAL_SERVER_ERROR',
+          throw new ORPCError('INTERNAL_SERVER_ERROR', {
             message: getErrorMessage(error),
           })
         }
       }),
 }
-
 const trackersRouter = {
   backfill: publicProcedure
       .output(z.object({
@@ -529,10 +521,8 @@ const trackersRouter = {
       }))
       .handler(async ({ context }) => {
         const startTime = Date.now()
-
         try {
           console.log('=== Ship24 Tracker Backfill Started ===')
-
           interface UnregisteredShipment {
             id: number
             tracking_number: string
@@ -540,7 +530,6 @@ const trackersRouter = {
             po_number: string | null
             status: string
           }
-
           // Find all shipments without a ship24_tracker_id
           const unregisteredShipments = await context.prisma.shipments.findMany({
             where: {
@@ -554,9 +543,7 @@ const trackersRouter = {
               status: true,
             },
           })
-
           console.log(`Found ${unregisteredShipments.length} shipments to register`)
-
           if (unregisteredShipments.length === 0) {
             return {
               success: true,
@@ -569,30 +556,23 @@ const trackersRouter = {
               timestamp: new Date().toISOString(),
             }
           }
-
           let registered = 0
           const skipped = 0
           let errors = 0
           const errorMessages: string[] = []
-
           // Validation helper: filter out invalid tracking numbers
           const isValidTrackingNumber = (trackingNumber: string): boolean => {
             // Must be 5-50 characters
             if (trackingNumber.length < 5 || trackingNumber.length > 50) return false
-            
             // Can only contain letters, numbers, and hyphens
             if (!/^[a-zA-Z0-9-]+$/.test(trackingNumber)) return false
-            
             // No all-zeros or excessive consecutive zeros
             if (/^0+$/.test(trackingNumber)) return false // All zeros
             if (/0{10,}/.test(trackingNumber)) return false // 10+ consecutive zeros
-            
             // No all-same character
             if (/^(.)\1+$/.test(trackingNumber)) return false
-            
             return true
           }
-
           // Filter out invalid tracking numbers
           const validShipments = unregisteredShipments.filter((s: UnregisteredShipment) => {
             const valid = isValidTrackingNumber(s.tracking_number)
@@ -602,9 +582,7 @@ const trackersRouter = {
             }
             return valid
           })
-
           console.log(`${validShipments.length} valid tracking numbers, ${unregisteredShipments.length - validShipments.length} invalid (skipped)`)
-
           if (validShipments.length === 0) {
             return {
               success: true,
@@ -618,16 +596,12 @@ const trackersRouter = {
               timestamp: new Date().toISOString(),
             }
           }
-
           // Process in batches of 50 (Ship24 bulk limit)
           const BATCH_SIZE = 50
           const service = getShipmentTrackingService()
-
           for (let i = 0; i < validShipments.length; i += BATCH_SIZE) {
             const batch = validShipments.slice(i, i + BATCH_SIZE)
-
             console.log(`Processing batch ${Math.floor(i / BATCH_SIZE) + 1} (${batch.length} shipments)`)
-
             try {
               // Prepare tracker data
               const trackerData = batch.map((s: UnregisteredShipment) => ({
@@ -635,16 +609,12 @@ const trackersRouter = {
                 carrier: s.carrier,
                 poNumber: s.po_number || undefined,
               }))
-
               // Register trackers in bulk
               const results = await service.registerTrackersBulk(trackerData)
-
               console.log(`  Received ${results.length} results`)
-
               // Update database with tracker IDs
               for (const result of results) {
                 const shipment = batch.find((s: UnregisteredShipment) => s.tracking_number === result.trackingNumber)
-
                 if (shipment) {
                   if (result.success && result.trackerId) {
                     try {
@@ -655,7 +625,6 @@ const trackersRouter = {
                           updated_at: new Date(),
                         },
                       })
-
                       registered++
                       console.log(`  ✅ Registered: ${shipment.tracking_number} → ${result.trackerId}`)
                     } catch (updateErr) {
@@ -675,7 +644,6 @@ const trackersRouter = {
                   }
                 }
               }
-
               // Rate limiting: small delay between batches
               if (i + BATCH_SIZE < validShipments.length) {
                 await new Promise((resolve) => setTimeout(resolve, 500))
@@ -690,11 +658,8 @@ const trackersRouter = {
               errorMessages.push(msg)
             }
           }
-
           const duration = Date.now() - startTime
-
           const invalidCount = unregisteredShipments.length - validShipments.length
-          
           const summary = {
             success: true,
             registered,
@@ -705,25 +670,19 @@ const trackersRouter = {
             durationMs: duration,
             timestamp: new Date().toISOString(),
           }
-
           console.log('=== Backfill Complete ===')
           console.log(JSON.stringify(summary, null, 2))
-
           return summary
         } catch (error: unknown) {
           const errorMessage = error instanceof Error ? getErrorMessage(error) : 'Failed to backfill trackers'
-
           console.error('=== Backfill Error ===')
           console.error('Error:', errorMessage)
-
-          throw new ORPCError({
-            code: 'INTERNAL_SERVER_ERROR',
+          throw new ORPCError('INTERNAL_SERVER_ERROR', {
             message: errorMessage,
           })
         }
       }),
 }
-
 const frontRouter = {
   scan: publicProcedure
       .input(
@@ -755,7 +714,6 @@ const frontRouter = {
       )
       .handler(async ({ context, input }) => {
         const startTime = Date.now()
-        
         // Create sync history record
         const syncRecord = await context.prisma.sync_history.create({
           data: {
@@ -765,41 +723,29 @@ const frontRouter = {
             started_at: new Date(),
           },
         })
-
         try {
           console.log('=== Front Scan Started ===')
           console.log('📥 Request params:', input)
-
           const { after, batchSize, pageSize, maxPages, forceRescan } = input
-
           const frontClient = getFrontClient()
           const service = getShipmentTrackingService()
-
           const afterDate = after
             ? new Date(after)
             : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-
           console.log(`Fetching conversations after: ${afterDate.toISOString()}`)
-
           const inboxId = process.env.FRONT_INBOX_ID
-
           if (!inboxId) {
-            throw new ORPCError({
-              code: 'INTERNAL_SERVER_ERROR',
+            throw new ORPCError('INTERNAL_SERVER_ERROR', {
               message: 'FRONT_INBOX_ID environment variable is not set',
             })
           }
-
           console.log(`Using inbox ID: ${inboxId}`)
-
           const conversations = await frontClient.searchAllInboxConversations(inboxId, {
             pageSize,
             after: afterDate,
             maxPages,
           })
-
           console.log(`Found ${conversations.length} total conversations`)
-
           if (conversations.length === 0) {
             // Update sync history with empty result
             await context.prisma.sync_history.update({
@@ -815,7 +761,6 @@ const frontRouter = {
                 duration_ms: Date.now() - startTime,
               },
             })
-            
             return {
               success: true,
               summary: {
@@ -833,15 +778,12 @@ const frontRouter = {
               timestamp: new Date().toISOString(),
             }
           }
-
           // Developer Mode: Allow rescanning already analyzed conversations
           const isDevMode = process.env.DEV_ALLOW_RESCAN === 'true'
           const shouldRescan = forceRescan && isDevMode
-
           if (shouldRescan) {
             console.log('🔄 DEV MODE: Force rescanning ALL conversations')
           }
-
           const conversationIds = conversations.map((c: FrontConversation) => c.id)
           // Fetch scan history with last message timestamps
           const alreadyScanned = shouldRescan
@@ -855,12 +797,10 @@ const frontRouter = {
                   last_message_at: true,
                 },
               })
-
           // Build map of conversation_id -> last_message_at
           const scanHistory = new Map(
             alreadyScanned.map((s) => [s.conversation_id, s.last_message_at])
           )
-
           // Determine which conversations need scanning
           // A conversation needs scanning if:
           // 1. Never scanned before (not in scanHistory), OR
@@ -869,17 +809,14 @@ const frontRouter = {
           const conversationsToCheck = shouldRescan
             ? conversations
             : conversations.filter((c: FrontConversation) => !scanHistory.has(c.id))
-
           console.log(
             `${conversationsToCheck.length} conversations never scanned, ${scanHistory.size} previously scanned (will check for updates)`
           )
-
           // Now process both never-scanned and potentially-updated conversations
           // We'll check for updates while processing each conversation
           const conversationsToProcess = shouldRescan
             ? conversations  // Force rescan all
             : [...conversationsToCheck] // Start with never-scanned ones
-
           // Process conversations helper
           const processBatch = async (
             convos: FrontConversation[],
@@ -900,12 +837,10 @@ const frontRouter = {
               errors: [] as string[],
               skippedUpToDate: 0,
             }
-
             await Promise.allSettled(
               convos.map(async (conversation) => {
                 try {
                   const messages = await frontClient.getConversationMessages(conversation.id)
-
                   if (messages.length === 0) {
                     await context.prisma.scanned_conversations.upsert({
                       where: { conversation_id: conversation.id },
@@ -923,11 +858,9 @@ const frontRouter = {
                     results.noTracking++
                     return
                   }
-
                   // Get the latest message timestamp
                   const latestMessageTimestamp = Math.max(...messages.map((m: FrontMessage) => m.created_at))
                   const latestMessageDate = new Date(latestMessageTimestamp * 1000)
-
                   // Check if conversation has new messages since last scan
                   const lastScannedMessageAt = scanHistory.get(conversation.id)
                   if (!rescan && lastScannedMessageAt && latestMessageDate <= lastScannedMessageAt) {
@@ -935,7 +868,6 @@ const frontRouter = {
                     results.skippedUpToDate++
                     return
                   }
-
                   const messagesToExtract = messages.map((msg: FrontMessage) => ({
                     subject: msg.subject || conversation.subject,
                     body: msg.text || msg.body,
@@ -943,9 +875,7 @@ const frontRouter = {
                     senderName: msg.author?.name || msg.author?.username || '',
                     date: new Date(msg.created_at * 1000).toISOString(),
                   }))
-
                   const extractionResult = await extractTrackingFromEmail(messagesToExtract)
-
                   if (!extractionResult || extractionResult.shipments.length === 0) {
                     await context.prisma.scanned_conversations.upsert({
                       where: { conversation_id: conversation.id },
@@ -963,20 +893,16 @@ const frontRouter = {
                     results.noTracking++
                     return
                   }
-
                   const shipmentsToRegister = []
-
                   for (const shipment of extractionResult.shipments) {
                     const existing = await context.prisma.shipments.findUnique({
                       where: { tracking_number: shipment.trackingNumber },
                     })
-
                     if (existing) {
                       if (rescan) {
                         const updateData: Prisma.shipmentsUpdateInput = {
                           updated_at: new Date(),
                         }
-
                         if (shipment.carrier) updateData.carrier = shipment.carrier
                         if (shipment.poNumber) updateData.po_number = shipment.poNumber
                         if (extractionResult.supplier) updateData.supplier = extractionResult.supplier
@@ -984,17 +910,14 @@ const frontRouter = {
                           updateData.shipped_date = new Date(shipment.shippedDate)
                         if (!existing.front_conversation_id)
                           updateData.front_conversation_id = conversation.id
-
                         const updatedShipment = await context.prisma.shipments.update({
                           where: { tracking_number: shipment.trackingNumber },
                           data: updateData,
                         })
-
                         shipmentsToRegister.push(updatedShipment)
                         results.updated++
                       } else {
                         results.skipped++
-
                         if (!existing.front_conversation_id) {
                           await context.prisma.shipments.update({
                             where: { tracking_number: shipment.trackingNumber },
@@ -1007,7 +930,6 @@ const frontRouter = {
                       }
                       continue
                     }
-
                     const newShipment = await context.prisma.shipments.create({
                       data: {
                         tracking_number: shipment.trackingNumber,
@@ -1022,11 +944,9 @@ const frontRouter = {
                         updated_at: new Date(),
                       },
                     })
-
                     shipmentsToRegister.push(newShipment)
                     results.added++
                   }
-
                   if (shipmentsToRegister.length > 0) {
                     try {
                       const bulkResults = await service.registerTrackersBulk(
@@ -1036,7 +956,6 @@ const frontRouter = {
                           poNumber: s.po_number || undefined,
                         }))
                       )
-
                       const failureCount = bulkResults.filter((r) => !r.success).length
                       if (failureCount > 0) {
                         results.errors.push(`${failureCount} trackers failed registration`)
@@ -1045,7 +964,6 @@ const frontRouter = {
                       results.errors.push(`Ship24 registration failed: ${getErrorMessage(err)}`)
                     }
                   }
-
                   await context.prisma.scanned_conversations.upsert({
                     where: { conversation_id: conversation.id },
                     update: {
@@ -1065,10 +983,8 @@ const frontRouter = {
                 }
               })
             )
-
             return results
           }
-
           const results = {
             added: 0,
             updated: 0,
@@ -1078,18 +994,15 @@ const frontRouter = {
             noTracking: 0,
             errors: [] as string[],
           }
-
           // Also process previously scanned conversations to check for updates
           const allConversationsToProcess = shouldRescan
             ? conversations
             : [...conversationsToCheck, ...conversations.filter((c: FrontConversation) => scanHistory.has(c.id))]
-
           // Process batches
           const batches: FrontConversation[][] = []
           for (let i = 0; i < allConversationsToProcess.length; i += batchSize) {
             batches.push(allConversationsToProcess.slice(i, i + batchSize))
           }
-
           if (shouldRescan) {
             for (let i = 0; i < batches.length; i++) {
               const batchResult = await processBatch(batches[i], forceRescan)
@@ -1104,7 +1017,6 @@ const frontRouter = {
             const batchResults = await Promise.all(
               batches.map((batch) => processBatch(batch, forceRescan))
             )
-
             for (const batchResult of batchResults) {
               results.added += batchResult.added
               results.updated += batchResult.updated
@@ -1114,15 +1026,11 @@ const frontRouter = {
               results.errors.push(...batchResult.errors)
             }
           }
-
           const duration = Date.now() - startTime
-
           const conversationsProcessed = results.added + results.updated + results.noTracking
           const conversationsSkipped = results.skippedUpToDate + results.alreadyScanned
-
           console.log('=== Scan Complete ===')
           console.log(`Processed: ${conversationsProcessed}, Skipped (up-to-date): ${results.skippedUpToDate}, Already scanned: ${results.alreadyScanned}`)
-
           // Update sync history with results
           await context.prisma.sync_history.update({
             where: { id: syncRecord.id },
@@ -1138,7 +1046,6 @@ const frontRouter = {
               errors: results.errors,
             },
           })
-
           return {
             success: true,
             summary: {
@@ -1158,10 +1065,8 @@ const frontRouter = {
         } catch (error: unknown) {
           const errorMessage =
             error instanceof Error ? getErrorMessage(error) : 'Failed to scan conversations'
-
           console.error('=== Scan Error ===')
           console.error('Error:', errorMessage)
-
           // Update sync history with error status
           await context.prisma.sync_history.update({
             where: { id: syncRecord.id },
@@ -1172,15 +1077,12 @@ const frontRouter = {
               errors: [errorMessage],
             },
           })
-
-          throw new ORPCError({
-            code: 'INTERNAL_SERVER_ERROR',
+          throw new ORPCError('INTERNAL_SERVER_ERROR', {
             message: errorMessage,
           })
         }
       }),
 }
-
 // Plain nested object structure (recommended by oRPC docs)
 export const appRouter = {
   shipments: shipmentsRouter,
@@ -1190,5 +1092,4 @@ export const appRouter = {
   trackers: trackersRouter,
   front: frontRouter,
 }
-
 export type AppRouter = typeof appRouter
