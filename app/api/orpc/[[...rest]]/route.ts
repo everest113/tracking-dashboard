@@ -7,6 +7,11 @@ const handler = new RPCHandler(appRouter, {
   interceptors: [
     onError((error) => {
       console.error('🔴 oRPC Error:', error)
+      
+      // Log Zod validation errors if present
+      if (error.cause && 'issues' in error.cause) {
+        console.error('📋 Validation issues:', JSON.stringify(error.cause.issues, null, 2))
+      }
     }),
   ],
 })

@@ -26,25 +26,25 @@ import type { TrackingUpdateResult } from '@/lib/application/types'
 const ShipmentResponseSchema = z.object({
   id: z.number(),
   trackingNumber: z.string(),
-  carrier: z.string().nullable(),
+  carrier: z.string().nullish(),
   status: z.string(),
-  poNumber: z.string().nullable(),
-  supplier: z.string().nullable(),
-  shippedDate: z.string().nullable(),
-  estimatedDelivery: z.string().nullable(),
-  deliveredDate: z.string().nullable(),
-  ship24Status: z.string().nullable(),
-  ship24LastUpdate: z.string().nullable(),
-  lastChecked: z.string().nullable(),
-  lastError: z.string().nullable(),
+  poNumber: z.string().nullish(),
+  supplier: z.string().nullish(),
+  shippedDate: z.string().nullish(),
+  estimatedDelivery: z.string().nullish(),
+  deliveredDate: z.string().nullish(),
+  ship24Status: z.string().nullish(),
+  ship24LastUpdate: z.string().nullish(),
+  lastChecked: z.string().nullish(),
+  lastError: z.string().nullish(),
   createdAt: z.string(),
   updatedAt: z.string(),
   trackingEvents: z.array(z.object({
     id: z.number(),
-    status: z.string().nullable(),
-    location: z.string().nullable(),
-    message: z.string().nullable(),
-    eventTime: z.string().nullable(),
+    status: z.string().nullish(),
+    location: z.string().nullish(),
+    message: z.string().nullish(),
+    eventTime: z.string().nullish(),
   })).optional(),
 })
 
@@ -98,7 +98,7 @@ const shipmentsRouter = {
         const serialized = serializeShipments(shipments)
         const formatted = serialized.map(formatShipmentForApi)
 
-        return {
+        const result = {
           items: formatted,
           pagination: {
             page,
@@ -109,9 +109,18 @@ const shipmentsRouter = {
             hasPrev: page > 1,
           },
         }
+
+        // Debug logging
+        console.log('📦 shipments.list result structure:', {
+          itemsCount: result.items.length,
+          firstItem: result.items[0] ? Object.keys(result.items[0]) : [],
+          pagination: result.pagination,
+        })
+
+        return result
       }),
 
-    create: publicProcedure
+  create: publicProcedure
       .input(shipmentSchema)
       .output(ShipmentResponseSchema)
       .handler(async ({ context, input }) => {
