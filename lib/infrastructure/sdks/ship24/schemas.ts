@@ -9,8 +9,8 @@ import { z } from 'zod'
 export const Ship24TrackerSchema = z.object({
   trackerId: z.string(),
   trackingNumber: z.string(),
-  courierCode: z.array(z.string()).optional(),
-  shipmentReference: z.string().optional(),
+  courierCode: z.array(z.string()).nullable().optional(),
+  shipmentReference: z.string().nullable().optional(),
 })
 
 export const Ship24TrackerResponseSchema = z.object({

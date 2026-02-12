@@ -43,16 +43,9 @@ class ServerLogger implements ILogger {
       serializers: {
         error: pino.stdSerializers.err,
       },
-      ...(pretty && {
-        transport: {
-          target: 'pino-pretty',
-          options: {
-            colorize: true,
-            translateTime: 'SYS:standard',
-            ignore: 'pid,hostname',
-          },
-        },
-      }),
+      // Pretty printing disabled due to worker thread issues
+      // Use JSON output and pipe to pino-pretty externally if needed:
+      // npm run dev | npx pino-pretty
     })
   }
 

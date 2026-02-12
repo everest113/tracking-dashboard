@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useImperativeHandle, forwardRef } from 'react'
 import { getErrorMessage } from '@/lib/utils/fetch-helpers'
 import { formatDistanceToNow } from 'date-fns'
 import SyncHistoryDialog from './SyncHistoryDialog'
@@ -18,14 +18,14 @@ interface SyncHistory {
   errors: unknown[]
 }
 
-export default function LastSyncDisplay() {
+export interface LastSyncDisplayRef {
+  refresh: () => Promise<void>
+}
+
+const LastSyncDisplay = forwardRef<LastSyncDisplayRef>((props, ref) => {
   const [lastSync, setLastSync] = useState<SyncHistory | null>(null)
   const [loading, setLoading] = useState(true)
   const [showHistory, setShowHistory] = useState(false)
-
-  useEffect(() => {
-    fetchLastSync()
-  }, [])
 
   const fetchLastSync = async () => {
     try {
@@ -39,6 +39,15 @@ export default function LastSyncDisplay() {
       setLoading(false)
     }
   }
+
+  useEffect(() => {
+    fetchLastSync()
+  }, [])
+  
+  // Expose refresh method to parent
+  useImperativeHandle(ref, () => ({
+    refresh: fetchLastSync
+  }))
 
   if (loading) {
     return <div className="text-sm text-muted-foreground">Loading...</div>
@@ -73,4 +82,8 @@ export default function LastSyncDisplay() {
       />
     </>
   )
-}
+})
+
+LastSyncDisplay.displayName = 'LastSyncDisplay'
+
+export default LastSyncDisplay
