@@ -59,6 +59,7 @@ export default function Home() {
     delivered: 0,
     overdue: 0,
     exceptions: 0,
+    trackingErrors: 0,
     neverChecked: 0,
   })
   const [pagination, setPagination] = useState<PaginationData>({

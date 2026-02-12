@@ -73,6 +73,7 @@ export const ShipmentSummarySchema = z.object({
   delivered: z.number(),
   overdue: z.number(),
   exceptions: z.number(),
+  trackingErrors: z.number(),
   neverChecked: z.number(),
 })
 

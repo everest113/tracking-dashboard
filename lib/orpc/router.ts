@@ -187,6 +187,7 @@ const shipmentsRouter = {
           inTransit,
           delivered,
           exceptions,
+          trackingErrors,
           neverChecked,
           overdueShipments,
         ] = await Promise.all([
@@ -212,14 +213,17 @@ const shipmentsRouter = {
             where: { status: 'delivered' },
           }),
           
-          // Exceptions (failed attempts, exceptions, or errors)
+          // Delivery exceptions only (carrier-reported issues)
           context.prisma.shipments.count({
             where: {
-              OR: [
-                { status: 'exception' },
-                { status: 'failed_attempt' },
-                { last_error: { not: null } },
-              ],
+              status: { in: ['exception', 'failed_attempt'] },
+            },
+          }),
+          
+          // Tracking/sync errors (can't fetch tracking data)
+          context.prisma.shipments.count({
+            where: {
+              last_error: { not: null },
             },
           }),
           
@@ -250,6 +254,7 @@ const shipmentsRouter = {
           delivered,
           overdue: overdueShipments.length,
           exceptions,
+          trackingErrors,
           neverChecked,
         }
       }),

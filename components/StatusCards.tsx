@@ -1,6 +1,6 @@
 'use client'
 
-import { Clock, TruckIcon, AlertTriangle, AlertCircle, EyeOff } from 'lucide-react'
+import { Clock, TruckIcon, AlertTriangle, AlertCircle, EyeOff, WifiOff } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 
 interface StatusCardsProps {
@@ -11,6 +11,7 @@ interface StatusCardsProps {
     delivered: number
     overdue: number
     exceptions: number
+    trackingErrors: number
     neverChecked: number
   }
   loading?: boolean
@@ -40,6 +41,13 @@ export default function StatusCards({ summary, loading }: StatusCardsProps) {
       icon: AlertCircle,
       color: 'text-orange-600',
       bgColor: 'bg-orange-50 border-orange-200',
+    },
+    {
+      label: 'TRACKING ERRORS',
+      value: summary.trackingErrors,
+      icon: WifiOff,
+      color: 'text-yellow-600',
+      bgColor: 'bg-yellow-50 border-yellow-200',
     },
     {
       label: 'NEVER CHECKED',
