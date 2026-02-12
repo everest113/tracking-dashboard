@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useCallback } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { format, formatDistanceToNow, addDays } from 'date-fns'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -13,8 +14,17 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { Package, MapPin, Clock, ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight, CheckCircle2, AlertCircle, TruckIcon, Search, Copy, Check } from 'lucide-react'
-import type { ShipmentFilter, ShipmentSort } from '@/lib/orpc/schemas'
+import { Package, MapPin, Clock, ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight, CheckCircle2, AlertCircle, TruckIcon, Search, Copy, Check, RefreshCw, Loader2, MoreHorizontal, Trash2 } from 'lucide-react'
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { api } from '@/lib/orpc/client'
+import RefreshNow from '@/components/RefreshNow'
 
 interface TrackingEvent {
   id: number
@@ -54,152 +64,123 @@ interface PaginationData {
 interface ShipmentTableProps {
   shipments: Shipment[]
   pagination: PaginationData
-  onQueryChange: (query: {
-    pagination?: { page: number; pageSize: number }
-    filter?: ShipmentFilter
-    sort?: ShipmentSort
-  }) => void
-  loading?: boolean
   activeStatus?: string
 }
 
 type SortField = 'shippedDate' | 'estimatedDelivery' | 'deliveredDate' | 'createdAt'
 
-export default function ShipmentTable({ shipments, pagination, onQueryChange, loading, activeStatus = 'all' }: ShipmentTableProps) {
-  const [searchQuery, setSearchQuery] = useState('')
-  const [sortField, setSortField] = useState<SortField | null>(null)
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc')
+export default function ShipmentTable({ 
+  shipments, 
+  pagination, 
+  activeStatus = 'all',
+}: ShipmentTableProps) {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  
+  // Local state for controlled inputs
+  const [searchInput, setSearchInput] = useState(searchParams.get('search') || '')
   const [copiedTracking, setCopiedTracking] = useState<string | null>(null)
+  const [refreshingShipmentId, setRefreshingShipmentId] = useState<number | null>(null)
+  const [deletingShipmentId, setDeletingShipmentId] = useState<number | null>(null)
 
-  const applyFilters = useCallback(() => {
-    const filter: ShipmentFilter = {}
+  // Get current sort from URL
+  const sortField = searchParams.get('sortField') as SortField | null
+  const sortDir = (searchParams.get('sortDir') as 'asc' | 'desc') || 'desc'
+
+  // URL update helper
+  const updateUrl = useCallback((updates: Record<string, string | null>) => {
+    const params = new URLSearchParams(searchParams.toString())
     
-    // Single search across tracking, PO, and supplier
-    if (searchQuery) filter.search = searchQuery
-    
-    // Handle special tracking errors tab
-    if (activeStatus === 'trackingErrors') {
-      filter.hasError = true
-    } else if (activeStatus !== 'all') {
-      filter.status = activeStatus as ShipmentFilter['status']
-    }
-
-    const sort = sortField ? {
-      field: sortField,
-      direction: sortDirection,
-    } : undefined
-
-    onQueryChange({
-      pagination: { page: 1, pageSize: pagination.pageSize },
-      filter: Object.keys(filter).length > 0 ? filter : undefined,
-      sort,
+    Object.entries(updates).forEach(([key, value]) => {
+      if (value === null || value === '') {
+        params.delete(key)
+      } else {
+        params.set(key, value)
+      }
     })
-  }, [searchQuery, activeStatus, sortField, sortDirection, pagination.pageSize, onQueryChange])
+    
+    const query = params.toString()
+    router.push(query ? `/?${query}` : '/')
+  }, [router, searchParams])
 
-  // Debounce filter changes
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      applyFilters()
-    }, 300)
+  // Handlers
+  const handleSearch = useCallback((e: React.FormEvent) => {
+    e.preventDefault()
+    updateUrl({ search: searchInput || null, page: null })
+  }, [searchInput, updateUrl])
 
-    return () => clearTimeout(timer)
-  }, [applyFilters])
-
-  const handleSort = (field: SortField) => {
-    let newDirection: 'asc' | 'desc' = 'asc'
+  const handleSort = useCallback((field: SortField) => {
+    let newDir: 'asc' | 'desc' = 'asc'
     
     if (sortField === field) {
-      // Toggle direction or clear
-      if (sortDirection === 'asc') {
-        newDirection = 'desc'
+      if (sortDir === 'asc') {
+        newDir = 'desc'
       } else {
-        // Clear sort
-        setSortField(null)
-        onQueryChange({
-          pagination: { page: pagination.page, pageSize: pagination.pageSize },
-          filter: buildCurrentFilter(),
-          sort: undefined,
-        })
+        // Third click clears sort
+        updateUrl({ sortField: null, sortDir: null })
         return
       }
     }
-
-    setSortField(field)
-    setSortDirection(newDirection)
     
-    onQueryChange({
-      pagination: { page: pagination.page, pageSize: pagination.pageSize },
-      filter: buildCurrentFilter(),
-      sort: { field, direction: newDirection },
-    })
+    updateUrl({ sortField: field, sortDir: newDir })
+  }, [sortField, sortDir, updateUrl])
+
+  const handlePageChange = useCallback((newPage: number) => {
+    updateUrl({ page: newPage === 1 ? null : String(newPage) })
+  }, [updateUrl])
+
+  const clearFilters = useCallback(() => {
+    setSearchInput('')
+    updateUrl({ search: null, sortField: null, sortDir: null, page: null })
+  }, [updateUrl])
+
+  const handleRefreshShipment = async (shipmentId: number) => {
+    setRefreshingShipmentId(shipmentId)
+    try {
+      await api.manualUpdateTracking.refreshOne({ shipmentId })
+      router.refresh()
+    } catch (error) {
+      console.error('Failed to refresh shipment:', error)
+    } finally {
+      setRefreshingShipmentId(null)
+    }
   }
 
-  const buildCurrentFilter = (): ShipmentFilter | undefined => {
-    const filter: ShipmentFilter = {}
-    if (searchQuery) filter.search = searchQuery
-    
-    // Handle special tracking errors tab
-    if (activeStatus === 'trackingErrors') {
-      filter.hasError = true
-    } else if (activeStatus !== 'all') {
-      filter.status = activeStatus as ShipmentFilter['status']
+  const handleDeleteShipment = async (shipmentId: number) => {
+    if (!confirm('Are you sure you want to delete this shipment? This action cannot be undone.')) {
+      return
     }
     
-    return Object.keys(filter).length > 0 ? filter : undefined
-  }
-
-  const getSortIcon = (field: SortField) => {
-    if (sortField !== field) {
-      return <ArrowUpDown className="h-4 w-4 text-muted-foreground" />
+    setDeletingShipmentId(shipmentId)
+    try {
+      await api.shipments.delete({ shipmentId })
+      router.refresh()
+    } catch (error) {
+      console.error('Failed to delete shipment:', error)
+    } finally {
+      setDeletingShipmentId(null)
     }
-    if (sortDirection === 'asc') {
-      return <ArrowUp className="h-4 w-4" />
+  }
+
+  const handleCopyTracking = useCallback(async (trackingNumber: string) => {
+    try {
+      await navigator.clipboard.writeText(trackingNumber)
+      setCopiedTracking(trackingNumber)
+      setTimeout(() => setCopiedTracking(null), 2000)
+    } catch (error) {
+      console.error('Failed to copy:', error)
     }
-    return <ArrowDown className="h-4 w-4" />
-  }
+  }, [])
 
-  const clearFilters = () => {
-    setSearchQuery('')
-    setSortField(null)
-    
-    // Preserve the active tab's filter
-    let preservedFilter: ShipmentFilter | undefined
-    if (activeStatus === 'trackingErrors') {
-      preservedFilter = { hasError: true }
-    } else if (activeStatus !== 'all') {
-      preservedFilter = { status: activeStatus as ShipmentFilter['status'] }
-    }
-    
-    onQueryChange({
-      pagination: { page: 1, pageSize: pagination.pageSize },
-      filter: preservedFilter,
-    })
-  }
-
-  const handlePageChange = (newPage: number) => {
-    onQueryChange({
-      pagination: { page: newPage, pageSize: pagination.pageSize },
-      filter: buildCurrentFilter(),
-      sort: sortField ? { field: sortField, direction: sortDirection } : undefined,
-    })
-  }
-
-  const hasActiveFilters = searchQuery || sortField
-
+  // Helpers
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'delivered':
-        return 'bg-green-500'
-      case 'in_transit':
-        return 'bg-blue-500'
-      case 'out_for_delivery':
-        return 'bg-purple-500'
-      case 'exception':
-        return 'bg-red-500'
-      case 'pending':
-        return 'bg-gray-500'
-      default:
-        return 'bg-gray-400'
+      case 'delivered': return 'bg-green-500'
+      case 'in_transit': return 'bg-blue-500'
+      case 'out_for_delivery': return 'bg-purple-500'
+      case 'exception': return 'bg-red-500'
+      case 'pending': return 'bg-gray-500'
+      default: return 'bg-yellow-500'
     }
   }
 
@@ -221,68 +202,64 @@ export default function ShipmentTable({ shipments, pagination, onQueryChange, lo
     }
   }
 
-  // Calculate expected delivery estimate (shipped + 5 business days)
-  const getExpectedDelivery = (shipment: Shipment) => {
-    // If we have carrier estimate, use it
-    if (shipment.estimatedDelivery) {
-      return {
-        date: formatDate(shipment.estimatedDelivery),
-        source: 'carrier' as const
-      }
-    }
-    
-    // Otherwise estimate based on shipped date (if available)
-    if (shipment.shippedDate && shipment.status !== 'delivered') {
-      const shipped = new Date(shipment.shippedDate)
-      const estimated = addDays(shipped, 5) // 5 business days estimate
-      return {
-        date: formatDate(estimated.toISOString()),
-        source: 'estimated' as const
-      }
-    }
-    
-    return null
-  }
-
   const getLatestEvent = (events?: TrackingEvent[]) => {
     if (!events || events.length === 0) return null
     return events[0]
   }
 
-  const handleCopyTracking = async (trackingNumber: string) => {
-    try {
-      await navigator.clipboard.writeText(trackingNumber)
-      setCopiedTracking(trackingNumber)
-      setTimeout(() => {
-        setCopiedTracking((prev) => (prev === trackingNumber ? null : prev))
-      }, 2000)
-    } catch (error) {
-      console.error('Failed to copy tracking number', error)
+  const getExpectedDelivery = (shipment: Shipment) => {
+    if (shipment.estimatedDelivery) {
+      return {
+        date: formatDate(shipment.estimatedDelivery),
+        source: 'carrier' as const,
+      }
     }
+    if (shipment.shippedDate) {
+      const estimated = addDays(new Date(shipment.shippedDate), 5)
+      return {
+        date: format(estimated, 'MMM d, yyyy'),
+        source: 'estimated' as const,
+      }
+    }
+    return null
   }
+
+  const getSortIcon = (field: SortField) => {
+    if (sortField !== field) {
+      return <ArrowUpDown className="h-4 w-4 text-muted-foreground" />
+    }
+    return sortDir === 'asc' 
+      ? <ArrowUp className="h-4 w-4" />
+      : <ArrowDown className="h-4 w-4" />
+  }
+
+  const hasActiveFilters = searchInput || sortField
 
   return (
     <div className="space-y-4">
-      {/* Filters */}
-      <div className="flex flex-wrap gap-3">
-        <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+      {/* Search & Actions */}
+      <div className="flex items-center gap-4">
+        <form onSubmit={handleSearch} className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Search tracking #, PO #, or supplier..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search tracking, PO, or supplier..."
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
             className="pl-9"
-            disabled={loading}
           />
-        </div>
+        </form>
         {hasActiveFilters && (
-          <Button variant="ghost" size="sm" onClick={clearFilters} disabled={loading}>
+          <Button variant="ghost" size="sm" onClick={clearFilters}>
             Clear filters
           </Button>
         )}
+        <div className="ml-auto">
+          <RefreshNow />
+        </div>
       </div>
 
-      <div className="rounded-md border">
+      {/* Table */}
+      <div className="border rounded-lg overflow-hidden">
         <Table>
           <TableHeader>
             <TableRow>
@@ -290,46 +267,32 @@ export default function ShipmentTable({ shipments, pagination, onQueryChange, lo
               <TableHead>PO / Supplier</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-8 px-2 hover:bg-transparent"
-                  onClick={() => handleSort('shippedDate')}
-                  disabled={loading}
-                >
+                <Button variant="ghost" size="sm" className="h-8 px-2" onClick={() => handleSort('shippedDate')}>
                   Shipped
                   {getSortIcon('shippedDate')}
                 </Button>
               </TableHead>
               <TableHead>
-                Expected
+                <Button variant="ghost" size="sm" className="h-8 px-2" onClick={() => handleSort('estimatedDelivery')}>
+                  Expected
+                  {getSortIcon('estimatedDelivery')}
+                </Button>
               </TableHead>
               <TableHead>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-8 px-2 hover:bg-transparent"
-                  onClick={() => handleSort('deliveredDate')}
-                  disabled={loading}
-                >
+                <Button variant="ghost" size="sm" className="h-8 px-2" onClick={() => handleSort('deliveredDate')}>
                   Delivered
                   {getSortIcon('deliveredDate')}
                 </Button>
               </TableHead>
               <TableHead>Latest Update</TableHead>
+              <TableHead className="w-[50px]"></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {loading && shipments.length === 0 ? (
+            {shipments.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground">
-                  Loading...
-                </TableCell>
-              </TableRow>
-            ) : shipments.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground">
-                  {hasActiveFilters ? 'No shipments match your search' : 'No shipments found'}
+                <TableCell colSpan={8} className="text-center text-muted-foreground">
+                  No shipments found
                 </TableCell>
               </TableRow>
             ) : (
@@ -340,7 +303,8 @@ export default function ShipmentTable({ shipments, pagination, onQueryChange, lo
                 const deliveredDate = formatDateTime(shipment.deliveredDate)
 
                 return (
-                  <TableRow key={shipment.id} className={loading ? 'opacity-50' : ''}>
+                  <TableRow key={shipment.id}>
+                    {/* Tracking Number */}
                     <TableCell>
                       <div className="flex flex-col gap-1">
                         <div className="flex items-center gap-2">
@@ -358,55 +322,43 @@ export default function ShipmentTable({ shipments, pagination, onQueryChange, lo
                             )}
                           </button>
                         </div>
-                        <div className="flex items-center gap-1">
-                          <span className="text-xs text-muted-foreground uppercase">
-                            {shipment.carrier || 'Unknown'}
-                          </span>
-                          {shipment.lastError && (
-                            <span title={shipment.lastError}>
-                              <AlertCircle className="h-3 w-3 text-red-500" />
-                            </span>
-                          )}
-                        </div>
+                        <span className="text-xs text-muted-foreground uppercase">
+                          {shipment.carrier || 'Unknown'}
+                        </span>
                       </div>
                     </TableCell>
 
+                    {/* PO / Supplier */}
                     <TableCell>
                       <div className="flex flex-col gap-1">
-                        {shipment.supplier && (
-                          <span className="text-sm">{shipment.supplier}</span>
-                        )}
-                        {shipment.poNumber && (
-                          <span className="text-xs text-muted-foreground">PO: {shipment.poNumber}</span>
-                        )}
+                        {shipment.supplier && <span className="text-sm">{shipment.supplier}</span>}
+                        {shipment.poNumber && <span className="text-xs text-muted-foreground">PO: {shipment.poNumber}</span>}
                         {!shipment.supplier && !shipment.poNumber && <span className="text-muted-foreground">-</span>}
                       </div>
                     </TableCell>
 
+                    {/* Status */}
                     <TableCell>
                       <div className="flex flex-col gap-1">
                         <Badge className={getStatusColor(shipment.status)}>
                           {shipment.status.replace('_', ' ')}
                         </Badge>
                         {shipment.ship24Status && shipment.ship24Status !== shipment.status && (
-                          <span className="text-xs text-muted-foreground">
-                            {shipment.ship24Status}
-                          </span>
+                          <span className="text-xs text-muted-foreground">{shipment.ship24Status}</span>
                         )}
                       </div>
                     </TableCell>
 
+                    {/* Shipped */}
                     <TableCell>
                       {shippedDate ? (
-                        <div className="flex items-center gap-1.5 text-sm">
-                          <Package className="h-3.5 w-3.5 text-blue-500" />
-                          <span>{shippedDate}</span>
-                        </div>
+                        <span className="text-sm">{shippedDate}</span>
                       ) : (
                         <span className="text-muted-foreground">-</span>
                       )}
                     </TableCell>
 
+                    {/* Expected */}
                     <TableCell>
                       {expectedInfo ? (
                         <div className="flex flex-col gap-0.5">
@@ -427,6 +379,7 @@ export default function ShipmentTable({ shipments, pagination, onQueryChange, lo
                       )}
                     </TableCell>
 
+                    {/* Delivered */}
                     <TableCell>
                       {deliveredDate ? (
                         <div className="flex items-center gap-1.5 text-sm font-medium text-green-600">
@@ -438,8 +391,56 @@ export default function ShipmentTable({ shipments, pagination, onQueryChange, lo
                       )}
                     </TableCell>
 
+                    {/* Latest Update */}
                     <TableCell>
-                      {latestEvent ? (
+                      {shipment.lastError ? (
+                        <div className="flex flex-col gap-1 max-w-[250px]">
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <button 
+                                type="button"
+                                className="flex items-center gap-1.5 text-sm text-red-600 hover:text-red-700 transition-colors"
+                                aria-label="View error details"
+                              >
+                                <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />
+                                <span className="font-medium">Tracking Error</span>
+                              </button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-80 text-sm">
+                              <div className="space-y-3">
+                                <p className="font-medium text-red-600">Error Details</p>
+                                <p className="text-muted-foreground break-words whitespace-pre-wrap text-xs">
+                                  {shipment.lastError}
+                                </p>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="w-full"
+                                  onClick={() => handleRefreshShipment(shipment.id)}
+                                  disabled={refreshingShipmentId === shipment.id}
+                                >
+                                  {refreshingShipmentId === shipment.id ? (
+                                    <>
+                                      <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                                      Retrying...
+                                    </>
+                                  ) : (
+                                    <>
+                                      <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                                      Retry Now
+                                    </>
+                                  )}
+                                </Button>
+                              </div>
+                            </PopoverContent>
+                          </Popover>
+                          {shipment.lastChecked && (
+                            <span className="text-xs text-muted-foreground">
+                              {formatDistanceToNow(new Date(shipment.lastChecked), { addSuffix: true })}
+                            </span>
+                          )}
+                        </div>
+                      ) : latestEvent ? (
                         <div className="flex flex-col gap-1 max-w-[250px]">
                           {latestEvent.location && (
                             <div className="flex items-center gap-1 text-sm">
@@ -470,6 +471,49 @@ export default function ShipmentTable({ shipments, pagination, onQueryChange, lo
                         <span className="text-muted-foreground">Never</span>
                       )}
                     </TableCell>
+
+                    {/* Actions */}
+                    <TableCell>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0"
+                            disabled={refreshingShipmentId === shipment.id || deletingShipmentId === shipment.id}
+                          >
+                            {(refreshingShipmentId === shipment.id || deletingShipmentId === shipment.id) ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <MoreHorizontal className="h-4 w-4" />
+                            )}
+                            <span className="sr-only">Open menu</span>
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          {shipment.lastError && (
+                            <>
+                              <DropdownMenuItem
+                                onClick={() => handleRefreshShipment(shipment.id)}
+                                disabled={refreshingShipmentId === shipment.id}
+                              >
+                                <RefreshCw className="h-4 w-4 mr-2" />
+                                Retry Tracking
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                            </>
+                          )}
+                          <DropdownMenuItem
+                            onClick={() => handleDeleteShipment(shipment.id)}
+                            disabled={deletingShipmentId === shipment.id}
+                            className="text-red-600 focus:text-red-600"
+                          >
+                            <Trash2 className="h-4 w-4 mr-2" />
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </TableCell>
                   </TableRow>
                 )
               })
@@ -479,37 +523,36 @@ export default function ShipmentTable({ shipments, pagination, onQueryChange, lo
       </div>
 
       {/* Pagination */}
-      <div className="flex items-center justify-between">
-        <div className="text-sm text-muted-foreground">
-          Showing {shipments.length > 0 ? (pagination.page - 1) * pagination.pageSize + 1 : 0} to {Math.min(pagination.page * pagination.pageSize, pagination.total)} of {pagination.total} shipments
-        </div>
-        
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => handlePageChange(pagination.page - 1)}
-            disabled={!pagination.hasPrev || loading}
-          >
-            <ChevronLeft className="h-4 w-4" />
-            Previous
-          </Button>
-          
-          <div className="text-sm text-muted-foreground">
-            Page {pagination.page} of {pagination.totalPages}
+      {pagination.totalPages > 1 && (
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-muted-foreground">
+            Showing {((pagination.page - 1) * pagination.pageSize) + 1} to{' '}
+            {Math.min(pagination.page * pagination.pageSize, pagination.total)} of{' '}
+            {pagination.total} shipments
+          </p>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handlePageChange(pagination.page - 1)}
+              disabled={!pagination.hasPrev}
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <span className="text-sm">
+              Page {pagination.page} of {pagination.totalPages}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handlePageChange(pagination.page + 1)}
+              disabled={!pagination.hasNext}
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
           </div>
-          
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => handlePageChange(pagination.page + 1)}
-            disabled={!pagination.hasNext || loading}
-          >
-            Next
-            <ChevronRight className="h-4 w-4" />
-          </Button>
         </div>
-      </div>
+      )}
     </div>
   )
 }

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { RefreshCw, ChevronDown, ChevronUp, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -18,11 +19,8 @@ import { Label } from '@/components/ui/label'
 import { Checkbox } from '@/components/ui/checkbox'
 import ProgressStream, { ProgressEvent } from './ProgressStream'
 
-interface RefreshNowProps {
-  onSuccess: () => void
-}
-
-export default function RefreshNow({ onSuccess }: RefreshNowProps) {
+export default function RefreshNow() {
+  const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [showDialog, setShowDialog] = useState(false)
   const [showAdvanced, setShowAdvanced] = useState(false)
@@ -135,7 +133,7 @@ export default function RefreshNow({ onSuccess }: RefreshNowProps) {
         description: messages.join(' • '),
       })
 
-      onSuccess()
+      router.refresh()
     } catch (error) {
       addProgress('error', `Error: ${getErrorMessage(error)}`)
       toast.error('Refresh failed', {

@@ -1,21 +1,19 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
-import { AlertTriangle, RefreshCw } from 'lucide-react'
+import { AlertTriangle, RefreshCw, Loader2 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { api } from '@/lib/orpc/client'
 
-interface StaleDataBannerProps {
-  onRefresh: () => void
-  refreshTrigger?: number // Increment this to trigger a re-check
-}
-
-export default function StaleDataBanner({ onRefresh, refreshTrigger }: StaleDataBannerProps) {
+export default function StaleDataBanner() {
+  const router = useRouter()
   const [isStale, setIsStale] = useState(false)
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
 
   const checkStaleData = useCallback(async () => {
     try {
@@ -67,17 +65,22 @@ export default function StaleDataBanner({ onRefresh, refreshTrigger }: StaleData
     }
   }, [])
 
-  // Initial check
   useEffect(() => {
     checkStaleData()
   }, [checkStaleData])
 
-  // Re-check when refreshTrigger changes
-  useEffect(() => {
-    if (refreshTrigger !== undefined && refreshTrigger > 0) {
-      checkStaleData()
+  const handleRefresh = async () => {
+    setRefreshing(true)
+    try {
+      await api.manualUpdateTracking.update()
+      router.refresh()
+      await checkStaleData()
+    } catch (error) {
+      console.error('Failed to refresh:', error)
+    } finally {
+      setRefreshing(false)
     }
-  }, [refreshTrigger, checkStaleData])
+  }
 
   if (loading || !isStale || !lastUpdate) {
     return null
@@ -94,10 +97,15 @@ export default function StaleDataBanner({ onRefresh, refreshTrigger }: StaleData
         <Button 
           variant="outline" 
           size="sm"
-          onClick={onRefresh}
+          onClick={handleRefresh}
+          disabled={refreshing}
           className="ml-4 border-yellow-300 bg-white hover:bg-yellow-100 text-yellow-800 hover:text-yellow-900"
         >
-          <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+          {refreshing ? (
+            <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+          ) : (
+            <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+          )}
           Refresh Now
         </Button>
       </AlertDescription>
