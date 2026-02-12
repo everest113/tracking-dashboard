@@ -1,3 +1,4 @@
+import { os } from '@orpc/server'
 import { publicProcedure } from './base'
 import { z } from 'zod'
 import { shipmentSchema } from '@/lib/validations'
@@ -62,7 +63,7 @@ const formatShipmentForApi = (shipment: ReturnType<typeof serializeShipment>) =>
   })),
 })
 
-export const appRouter = {
+const router = {
   shipments: {
     list: publicProcedure
       .input(ShipmentListQuerySchema)
@@ -954,5 +955,7 @@ export const appRouter = {
       }),
   },
 } as const
+
+export const appRouter = router
 
 export type AppRouter = typeof appRouter
