@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
-import { RefreshCw, ChevronDown, ChevronUp } from 'lucide-react'
+import { RefreshCw, ChevronDown, ChevronUp, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { getErrorMessage } from '@/lib/utils/fetch-helpers'
 import { api } from '@/lib/orpc/client'
@@ -16,6 +16,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Checkbox } from '@/components/ui/checkbox'
+import ProgressStream, { ProgressEvent } from './ProgressStream'
 
 interface RefreshNowProps {
   onSuccess: () => void
@@ -27,7 +28,7 @@ export default function RefreshNow({ onSuccess }: RefreshNowProps) {
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [customDate, setCustomDate] = useState<string | null>(null)
   const [forceRescan, setForceRescan] = useState(false)
-  const [progress, setProgress] = useState<string[]>([])
+  const [progressEvents, setProgressEvents] = useState<ProgressEvent[]>([])
   const [hasStarted, setHasStarted] = useState(false)
 
   // Enable force rescan option (re-analyze already-scanned conversations)
@@ -37,15 +38,15 @@ export default function RefreshNow({ onSuccess }: RefreshNowProps) {
   useEffect(() => {
     if (showDialog && !hasStarted) {
       // Reset state when dialog opens
-      setProgress([])
+      setProgressEvents([])
       setShowAdvanced(false)
       setCustomDate(null)
       setForceRescan(false)
     }
   }, [showDialog, hasStarted])
 
-  const addProgress = (message: string) => {
-    setProgress(prev => [...prev, message])
+  const addProgress = (type: ProgressEvent['type'], message: string) => {
+    setProgressEvents(prev => [...prev, { type, message, timestamp: Date.now() }])
   }
 
   const getStartDate = async (): Promise<string> => {
@@ -74,14 +75,14 @@ export default function RefreshNow({ onSuccess }: RefreshNowProps) {
   const handleRefresh = async () => {
     setLoading(true)
     setHasStarted(true)
-    setProgress([])
+    setProgressEvents([])
 
     try {
       // Step 1: Scan Front inbox for new shipments
-      addProgress('🔍 Scanning Front inbox for new tracking numbers...')
+      addProgress('processing', 'Scanning Front inbox for new tracking numbers...')
       const startDate = await getStartDate()
       const formattedDate = new Date(startDate).toLocaleDateString()
-      addProgress(`📅 Checking conversations from ${formattedDate}`)
+      addProgress('processing', `Checking conversations from ${formattedDate}`)
 
       const scanResult = await api.front.scan({
         after: startDate,
@@ -89,36 +90,36 @@ export default function RefreshNow({ onSuccess }: RefreshNowProps) {
       })
 
       if (scanResult.summary.shipmentsAdded > 0) {
-        addProgress(`✅ Found ${scanResult.summary.shipmentsAdded} new shipment${scanResult.summary.shipmentsAdded !== 1 ? 's' : ''}`)
+        addProgress('found', `${scanResult.summary.shipmentsAdded} new shipment${scanResult.summary.shipmentsAdded !== 1 ? 's' : ''} found!`)
       } else {
-        addProgress('ℹ️ No new shipments found')
+        addProgress('skipped', 'No new shipments found')
       }
 
       if (scanResult.summary.conversationsAlreadyScanned > 0) {
-        addProgress(`⏭️ Skipped ${scanResult.summary.conversationsAlreadyScanned} already-scanned conversation${scanResult.summary.conversationsAlreadyScanned !== 1 ? 's' : ''}`)
+        addProgress('skipped', `${scanResult.summary.conversationsAlreadyScanned} conversation${scanResult.summary.conversationsAlreadyScanned !== 1 ? 's' : ''} already scanned`)
       }
 
       // Step 2: Backfill untracked shipments (register with Ship24)
-      addProgress('📦 Enrolling shipments in tracking...')
+      addProgress('processing', 'Enrolling shipments in tracking...')
       const backfillResult = await api.trackers.backfill()
 
       if (backfillResult.registered > 0) {
-        addProgress(`✅ Enrolled ${backfillResult.registered} shipment${backfillResult.registered !== 1 ? 's' : ''} for tracking`)
+        addProgress('found', `${backfillResult.registered} shipment${backfillResult.registered !== 1 ? 's' : ''} enrolled for tracking`)
       } else {
-        addProgress('ℹ️ All shipments already enrolled')
+        addProgress('skipped', 'All shipments already enrolled')
       }
 
       // Step 3: Update all tracking statuses (fetch latest from Ship24)
-      addProgress('🔄 Fetching latest tracking statuses...')
+      addProgress('processing', 'Fetching latest tracking statuses...')
       const updateResult = await api.manualUpdateTracking.update()
 
-      addProgress(`✅ Refreshed ${updateResult.checked} shipment${updateResult.checked !== 1 ? 's' : ''}`)
+      addProgress('complete', `Refreshed ${updateResult.checked} shipment${updateResult.checked !== 1 ? 's' : ''}`)
       
       if (updateResult.updated > 0) {
-        addProgress(`📊 ${updateResult.updated} status change${updateResult.updated !== 1 ? 's' : ''} detected`)
+        addProgress('found', `${updateResult.updated} status change${updateResult.updated !== 1 ? 's' : ''} detected`)
       }
 
-      addProgress('✨ Refresh complete!')
+      addProgress('complete', 'Refresh complete!')
 
       // Show summary toast
       const messages: string[] = []
@@ -136,7 +137,7 @@ export default function RefreshNow({ onSuccess }: RefreshNowProps) {
 
       onSuccess()
     } catch (error) {
-      addProgress(`❌ Error: ${getErrorMessage(error)}`)
+      addProgress('error', `Error: ${getErrorMessage(error)}`)
       toast.error('Refresh failed', {
         description: getErrorMessage(error) || 'An unexpected error occurred.',
       })
@@ -153,7 +154,7 @@ export default function RefreshNow({ onSuccess }: RefreshNowProps) {
   const handleCloseDialog = () => {
     setShowDialog(false)
     setHasStarted(false)
-    setProgress([])
+    setProgressEvents([])
   }
 
   return (
@@ -248,14 +249,12 @@ export default function RefreshNow({ onSuccess }: RefreshNowProps) {
 
             {/* Show progress AFTER starting */}
             {hasStarted && (
-              <div className="rounded-md bg-muted p-4 max-h-[300px] overflow-y-auto">
-                {progress.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">Initializing...</p>
-                ) : (
-                  <div className="space-y-1">
-                    {progress.map((msg, i) => (
-                      <p key={i} className="text-sm font-mono">{msg}</p>
-                    ))}
+              <div className="space-y-4">
+                <ProgressStream events={progressEvents} />
+                {loading && (
+                  <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    <span>Processing...</span>
                   </div>
                 )}
               </div>
@@ -278,7 +277,7 @@ export default function RefreshNow({ onSuccess }: RefreshNowProps) {
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => {
                 setHasStarted(false)
-                setProgress([])
+                setProgressEvents([])
               }}>
                 Refresh Again
               </Button>
