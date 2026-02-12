@@ -1,10 +1,7 @@
 import type { NextConfig } from "next";
-import path from "path";
 
 const nextConfig: NextConfig = {
-  turbopack: {
-    root: path.resolve(__dirname),
-  },
+  // Empty config - Next.js 16 Turbopack is unstable
 };
 
 export default nextConfig;
