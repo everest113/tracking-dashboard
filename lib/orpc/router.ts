@@ -1,11 +1,10 @@
-import { os } from '@orpc/server'
+import { os, ORPCError } from '@orpc/server'
 import { publicProcedure } from './base'
 import { z } from 'zod'
 import { shipmentSchema } from '@/lib/validations'
 import { getShipmentTrackingService } from '@/lib/application/ShipmentTrackingService'
 import { Prisma } from '@prisma/client'
 import { getErrorMessage } from '@/lib/utils/fetch-helpers'
-import { ORPCError } from '@orpc/shared/error'
 import {
   ShipmentListQuerySchema,
   createPaginatedResponseSchema,
