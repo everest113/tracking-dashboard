@@ -175,7 +175,6 @@ export async function extractTracking(
     console.log('[Extraction] Metadata:', {
       supplier: metadata.supplier || '(none)',
       poNumber: metadata.poNumber || '(none)',
-      shippedDate: metadata.shippedDate || '(none)',
     })
 
     // Combine results
@@ -183,7 +182,7 @@ export async function extractTracking(
       trackingNumber: tracking.trackingNumber,
       carrier: tracking.carrier,
       poNumber: metadata.poNumber || '',
-      shippedDate: metadata.shippedDate || '',
+      shippedDate: tracking.shippedDate || '',  // Shipped date comes from tracking extraction
       confidence: tracking.confidence,
     }))
 

@@ -9,12 +9,13 @@ import { z } from 'zod'
  */
 
 // ============================================
-// Schema 1: Tracking Numbers (strict)
+// Schema 1: Tracking Numbers + Shipped Date
 // ============================================
 
 export const ExtractedTrackingSchema = z.object({
   trackingNumber: z.string().min(1, 'Tracking number required'),
   carrier: z.enum(['ups', 'usps', 'fedex', 'dhl', 'other']),
+  shippedDate: z.string(),  // Empty string if not found, ISO format (YYYY-MM-DD) if found
   confidence: z.number().min(0).max(1),
 })
 
@@ -26,13 +27,12 @@ export type ExtractedTracking = z.infer<typeof ExtractedTrackingSchema>
 export type TrackingOnlyResult = z.infer<typeof TrackingOnlyResultSchema>
 
 // ============================================
-// Schema 2: Metadata (supplier, PO, dates)
+// Schema 2: Metadata (supplier, PO)
 // ============================================
 
 export const MetadataExtractionSchema = z.object({
   supplier: z.string(),  // Empty string if not found
   poNumber: z.string(),  // Empty string if not found
-  shippedDate: z.string(),  // Empty string if not found, ISO format if found
 })
 
 export type MetadataExtraction = z.infer<typeof MetadataExtractionSchema>

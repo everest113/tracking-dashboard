@@ -16,20 +16,22 @@ ${msg.body}
 }
 
 /**
- * Prompt 1: Extract ONLY tracking numbers (strict validation)
+ * Prompt 1: Extract tracking numbers + shipped date
  * 
- * This prompt is focused solely on identifying valid carrier tracking numbers.
- * It should NOT extract order numbers, reference numbers, phone numbers, etc.
+ * This prompt is focused on identifying valid carrier tracking numbers
+ * and the date the shipment was sent. These are closely related - often
+ * mentioned together in shipping notifications.
  */
 export function buildTrackingOnlyPrompt(messages: EmailMessage[]): string {
   const threadContext = buildThreadContext(messages)
 
-  return `Extract ONLY valid shipping carrier tracking numbers from this email conversation.
+  return `Extract valid shipping carrier tracking numbers and shipped dates from this email conversation.
 
 ${threadContext}
 
 ## Your Task
-Find tracking numbers for packages shipped via UPS, USPS, FedEx, DHL, or other carriers.
+1. Find tracking numbers for packages shipped via UPS, USPS, FedEx, DHL, or other carriers
+2. Extract the shipped date for each tracking number (if mentioned)
 
 ## Valid Tracking Number Formats
 
@@ -66,6 +68,14 @@ DO NOT extract these as tracking numbers:
 - Partial numbers or fragments
 - Numbers embedded in email addresses or URLs
 
+## Shipped Date Extraction
+
+For each tracking number, look for shipped date:
+- "shipped on", "shipped date", "dispatch date", "sent on", "ship date"
+- Often appears near the tracking number in the text
+- Parse any date format and return as ISO (YYYY-MM-DD)
+- If no shipped date found for a tracking number, return empty string ""
+
 ## Rules
 
 1. Only extract numbers that CLEARLY match carrier tracking formats above
@@ -77,13 +87,20 @@ DO NOT extract these as tracking numbers:
 
 ## Response Format
 
-Return ONLY tracking numbers with their carrier and confidence.
+Return tracking numbers with carrier, shipped date, and confidence.
 If no tracking numbers found, return: { "shipments": [] }
 
 Example with tracking:
 {
   "shipments": [
-    { "trackingNumber": "1Z999AA10123456784", "carrier": "ups", "confidence": 0.95 }
+    { "trackingNumber": "1Z999AA10123456784", "carrier": "ups", "shippedDate": "2024-02-08", "confidence": 0.95 }
+  ]
+}
+
+Example without shipped date:
+{
+  "shipments": [
+    { "trackingNumber": "1Z999AA10123456784", "carrier": "ups", "shippedDate": "", "confidence": 0.95 }
   ]
 }
 
@@ -94,20 +111,20 @@ Example without tracking:
 }
 
 /**
- * Prompt 2: Extract metadata (supplier, PO, shipped date)
+ * Prompt 2: Extract metadata (supplier, PO)
  * 
  * This prompt is called ONLY if tracking numbers were found.
- * It focuses on context comprehension, not pattern matching.
+ * It focuses on context comprehension - identifying business context.
  */
 export function buildMetadataPrompt(messages: EmailMessage[]): string {
   const threadContext = buildThreadContext(messages)
 
-  return `Extract supplier information, PO number, and shipped date from this email conversation.
+  return `Extract supplier information and PO number from this email conversation.
 
 ${threadContext}
 
 ## Your Task
-Extract contextual information about this shipment.
+Extract business context about this shipment.
 
 ## 1. Supplier Company Name
 Identify the company that sent this shipment:
@@ -124,18 +141,11 @@ Look for patterns like:
 - "SO", "S.O." (Sales Order)
 - Check BOTH subject line and body
 
-## 3. Shipped Date
-Extract the date the package was shipped:
-- Look for "shipped on", "shipped date", "dispatch date", "sent on"
-- Parse any date format and return as ISO (YYYY-MM-DD)
-- If not explicitly stated, return empty string (system will use email date as fallback)
-
 ## Response Format
 
 {
   "supplier": "Company Name or empty string",
-  "poNumber": "PO-12345 or empty string",
-  "shippedDate": "2024-02-08 or empty string"
+  "poNumber": "PO-12345 or empty string"
 }
 
 Return empty string "" for any field not found. Do NOT guess or fabricate values.`
