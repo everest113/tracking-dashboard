@@ -63,9 +63,8 @@ const formatShipmentForApi = (shipment: ReturnType<typeof serializeShipment>) =>
   })),
 })
 
-const router = {
-  shipments: {
-    list: publicProcedure
+const shipmentsRouter = os.router({
+  list: publicProcedure
       .input(ShipmentListQuerySchema)
       .output(createPaginatedResponseSchema(ShipmentResponseSchema))
       .handler(async ({ context, input }) => {
@@ -166,9 +165,10 @@ const router = {
 
         return formatShipmentForApi(serializeShipment(shipment))
       }),
-  },
-  trackingStats: {
-    get: publicProcedure
+})
+
+const trackingStatsRouter = os.router({
+  get: publicProcedure
       .output(z.object({
         total: z.number(),
         active: z.number(),
@@ -211,9 +211,10 @@ const router = {
           timestamp: new Date().toISOString()
         }
       }),
-  },
-  syncHistory: {
-    get: publicProcedure
+})
+
+const syncHistoryRouter = os.router({
+  get: publicProcedure
       .input(z.object({ limit: z.number().default(10) }).default({ limit: 10 }))
       .output(z.object({
         success: z.boolean(),
@@ -275,9 +276,10 @@ const router = {
           lastSync: lastSyncRecord ? mapRecord(lastSyncRecord) : null,
         }
       }),
-  },
-  manualUpdateTracking: {
-    update: publicProcedure
+})
+
+const manualUpdateTrackingRouter = os.router({
+  update: publicProcedure
       .output(
         z.object({
           success: z.boolean(),
@@ -422,9 +424,10 @@ const router = {
           })
         }
       }),
-  },
-  trackers: {
-    backfill: publicProcedure
+})
+
+const trackersRouter = os.router({
+  backfill: publicProcedure
       .output(z.object({
         success: z.boolean(),
         registered: z.number(),
@@ -585,9 +588,10 @@ const router = {
           })
         }
       }),
-  },
-  front: {
-    scan: publicProcedure
+})
+
+const frontRouter = os.router({
+  scan: publicProcedure
       .input(
         z.object({
           after: z.string().optional(),
@@ -953,9 +957,17 @@ const router = {
           })
         }
       }),
-  },
-} as const
+})
 
-export const appRouter = router
+// Flatten the router for testing
+export const appRouter = os.router({
+  'shipments.list': shipmentsRouter.list,
+  'shipments.create': shipmentsRouter.create,
+  'trackingStats.get': trackingStatsRouter.get,
+  'syncHistory.get': syncHistoryRouter.get,
+  'manualUpdateTracking.update': manualUpdateTrackingRouter.update,
+  'trackers.backfill': trackersRouter.backfill,
+  'front.scan': frontRouter.scan,
+})
 
 export type AppRouter = typeof appRouter
