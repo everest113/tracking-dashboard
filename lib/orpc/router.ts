@@ -505,6 +505,134 @@ const manualUpdateTrackingRouter = {
           })
         }
       }),
+
+  refreshOne: publicProcedure
+      .input(z.object({
+        shipmentId: z.number(),
+      }))
+      .output(z.object({
+        success: z.boolean(),
+        trackingNumber: z.string(),
+        oldStatus: z.string(),
+        newStatus: z.string(),
+        statusChanged: z.boolean(),
+        error: z.string().optional(),
+        lastError: z.string().nullish(),
+      }))
+      .handler(async ({ context, input }) => {
+        const { shipmentId } = input
+        
+        console.log(`=== Refreshing single shipment ID: ${shipmentId} ===`)
+        
+        const shipment = await context.prisma.shipments.findUnique({
+          where: { id: shipmentId },
+        })
+        
+        if (!shipment) {
+          throw new ORPCError('NOT_FOUND', {
+            message: `Shipment with ID ${shipmentId} not found`,
+          })
+        }
+        
+        if (!shipment.ship24_tracker_id) {
+          return {
+            success: false,
+            trackingNumber: shipment.tracking_number,
+            oldStatus: shipment.status,
+            newStatus: shipment.status,
+            statusChanged: false,
+            error: 'Shipment does not have a Ship24 tracker registered',
+            lastError: shipment.last_error,
+          }
+        }
+        
+        try {
+          const ship24Client = createShip24Client()
+          const response = await ship24Client.getTrackerResults(shipment.ship24_tracker_id)
+          
+          if (response.data?.trackings?.[0]) {
+            const tracking = response.data.trackings[0]
+            const trackingUpdate = Ship24Mapper.toDomainTrackingUpdate(tracking)
+            const newStatus = trackingUpdate.status.type
+            const oldStatus = shipment.status
+            
+            await context.prisma.shipments.update({
+              where: { id: shipment.id },
+              data: {
+                status: newStatus,
+                last_checked: new Date(),
+                last_error: null, // Clear the error on success
+                ...(trackingUpdate.estimatedDelivery && {
+                  estimated_delivery: trackingUpdate.estimatedDelivery,
+                }),
+                ...(trackingUpdate.deliveredDate && {
+                  delivered_date: trackingUpdate.deliveredDate,
+                }),
+                ...(trackingUpdate.shippedDate && {
+                  shipped_date: trackingUpdate.shippedDate,
+                }),
+                ...(trackingUpdate.carrier && {
+                  carrier: trackingUpdate.carrier,
+                }),
+                ship24_status: tracking.shipment?.statusMilestone || null,
+                ship24_last_update: new Date(),
+              },
+            })
+            
+            const statusChanged = oldStatus !== newStatus
+            console.log(`  ✓ ${shipment.tracking_number}: ${oldStatus} → ${newStatus}`)
+            
+            return {
+              success: true,
+              trackingNumber: shipment.tracking_number,
+              oldStatus,
+              newStatus,
+              statusChanged,
+              lastError: null,
+            }
+          } else {
+            const errorMsg = 'No tracking data available from Ship24'
+            await context.prisma.shipments.update({
+              where: { id: shipment.id },
+              data: {
+                last_checked: new Date(),
+                last_error: errorMsg,
+              },
+            })
+            
+            return {
+              success: false,
+              trackingNumber: shipment.tracking_number,
+              oldStatus: shipment.status,
+              newStatus: shipment.status,
+              statusChanged: false,
+              error: errorMsg,
+              lastError: errorMsg,
+            }
+          }
+        } catch (error) {
+          const errorMsg = getErrorMessage(error)
+          console.error(`  ✗ Error refreshing ${shipment.tracking_number}:`, errorMsg)
+          
+          await context.prisma.shipments.update({
+            where: { id: shipment.id },
+            data: {
+              last_checked: new Date(),
+              last_error: errorMsg,
+            },
+          })
+          
+          return {
+            success: false,
+            trackingNumber: shipment.tracking_number,
+            oldStatus: shipment.status,
+            newStatus: shipment.status,
+            statusChanged: false,
+            error: errorMsg,
+            lastError: errorMsg,
+          }
+        }
+      }),
 }
 const trackersRouter = {
   backfill: publicProcedure

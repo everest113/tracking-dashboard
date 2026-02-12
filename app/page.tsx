@@ -214,6 +214,7 @@ export default function Home() {
             onQueryChange={handleQueryChange}
             loading={loading}
             activeStatus={activeStatus}
+            onShipmentRefreshed={handleRefresh}
           />
         )}
       </div>

@@ -13,8 +13,9 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { Package, MapPin, Clock, ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight, CheckCircle2, AlertCircle, TruckIcon, Search, Copy, Check } from 'lucide-react'
+import { Package, MapPin, Clock, ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight, CheckCircle2, AlertCircle, TruckIcon, Search, Copy, Check, RefreshCw, Loader2 } from 'lucide-react'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
+import { api } from '@/lib/orpc/client'
 import type { ShipmentFilter, ShipmentSort } from '@/lib/orpc/schemas'
 
 interface TrackingEvent {
@@ -62,15 +63,17 @@ interface ShipmentTableProps {
   }) => void
   loading?: boolean
   activeStatus?: string
+  onShipmentRefreshed?: () => void
 }
 
 type SortField = 'shippedDate' | 'estimatedDelivery' | 'deliveredDate' | 'createdAt'
 
-export default function ShipmentTable({ shipments, pagination, onQueryChange, loading, activeStatus = 'all' }: ShipmentTableProps) {
+export default function ShipmentTable({ shipments, pagination, onQueryChange, loading, activeStatus = 'all', onShipmentRefreshed }: ShipmentTableProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const [sortField, setSortField] = useState<SortField | null>(null)
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc')
   const [copiedTracking, setCopiedTracking] = useState<string | null>(null)
+  const [refreshingShipmentId, setRefreshingShipmentId] = useState<number | null>(null)
 
   // Track the previous activeStatus to avoid re-applying filters when only the tab changes
   const prevActiveStatusRef = useRef(activeStatus)
@@ -195,6 +198,21 @@ export default function ShipmentTable({ shipments, pagination, onQueryChange, lo
   }
 
   const hasActiveFilters = searchQuery || sortField
+
+  const handleRefreshShipment = async (shipmentId: number) => {
+    setRefreshingShipmentId(shipmentId)
+    try {
+      const result = await api.manualUpdateTracking.refreshOne({ shipmentId })
+      if (result.success) {
+        // Trigger parent to refetch the data
+        onShipmentRefreshed?.()
+      }
+    } catch (error) {
+      console.error('Failed to refresh shipment:', error)
+    } finally {
+      setRefreshingShipmentId(null)
+    }
+  }
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -458,11 +476,30 @@ export default function ShipmentTable({ shipments, pagination, onQueryChange, lo
                               </button>
                             </PopoverTrigger>
                             <PopoverContent className="w-80 text-sm">
-                              <div className="space-y-2">
+                              <div className="space-y-3">
                                 <p className="font-medium text-red-600">Error Details</p>
-                                <p className="text-muted-foreground break-words whitespace-pre-wrap">
+                                <p className="text-muted-foreground break-words whitespace-pre-wrap text-xs">
                                   {shipment.lastError}
                                 </p>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="w-full"
+                                  onClick={() => handleRefreshShipment(shipment.id)}
+                                  disabled={refreshingShipmentId === shipment.id}
+                                >
+                                  {refreshingShipmentId === shipment.id ? (
+                                    <>
+                                      <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                                      Retrying...
+                                    </>
+                                  ) : (
+                                    <>
+                                      <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                                      Retry Now
+                                    </>
+                                  )}
+                                </Button>
                               </div>
                             </PopoverContent>
                           </Popover>
