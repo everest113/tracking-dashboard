@@ -58,4 +58,3 @@ next-env.d.ts
 # Testing
 .env.test
 coverage/
-package-lock.json
