@@ -6,6 +6,7 @@ import StatusCards from '@/components/StatusCards'
 import LastSyncDisplay from '@/components/LastSyncDisplay'
 import RefreshNow from '@/components/RefreshNow'
 import SyncDialog from '@/components/SyncDialog'
+import StaleDataBanner from '@/components/StaleDataBanner'
 import { api } from '@/lib/orpc/client'
 import type { ShipmentFilter as SchemaShipmentFilter, ShipmentSort as SchemaShipmentSort, ShipmentSummary } from '@/lib/orpc/schemas'
 
@@ -174,6 +175,9 @@ export default function Home() {
             </div>
           </div>
         </div>
+
+        {/* Stale Data Warning */}
+        <StaleDataBanner onRefresh={handleRefresh} />
 
         {/* Status Cards */}
         <div className="mb-8">
