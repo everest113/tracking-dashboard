@@ -3,15 +3,16 @@ import { onError } from '@orpc/server'
 import { appRouter } from '@/lib/orpc/router'
 import { createContext } from '@/lib/orpc/context'
 
-// Next.js: Force dynamic rendering (no static generation for API routes)
-export const dynamic = 'force-dynamic'
-
-const isDev = process.env.NODE_ENV === 'development'
+/**
+ * Enable verbose request/response logging.
+ * Set DEBUG_ORPC=true in .env.local to enable.
+ */
+const DEBUG_ORPC = process.env.DEBUG_ORPC === 'true'
 
 const handler = new RPCHandler(appRouter, {
   interceptors: [
     onError((error) => {
-      // Always log errors
+      // Always log errors (these are important regardless of debug mode)
       console.error('🔴 oRPC Error:', error)
       
       // Log Zod validation errors if present
@@ -25,8 +26,7 @@ const handler = new RPCHandler(appRouter, {
 async function handleRequest(request: Request) {
   const url = new URL(request.url)
   
-  // Only log requests in development
-  if (isDev) {
+  if (DEBUG_ORPC) {
     console.log('🌐 Request:', request.method, url.pathname)
   }
   
@@ -37,12 +37,12 @@ async function handleRequest(request: Request) {
     })
 
     if (result.response) {
-      if (isDev) {
+      if (DEBUG_ORPC) {
         console.log('✅ Response:', result.response.status)
       }
       return result.response
     } else {
-      if (isDev) {
+      if (DEBUG_ORPC) {
         console.log('❌ No matching procedure for path:', url.pathname)
       }
       return new Response('Not found', { status: 404 })

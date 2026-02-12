@@ -41,7 +41,9 @@ export default function SyncDialog({ onSuccess }: { onSuccess: () => void }) {
   const [status, setStatus] = useState<SyncStatus>('idle')
   const [result, setResult] = useState<ScanResult | null>(null)
   
-  const isDevMode = process.env.NODE_ENV === 'development'
+  // Enable force rescan option (re-analyze already-scanned conversations)
+  // Set NEXT_PUBLIC_ENABLE_FORCE_RESCAN=true in .env.local to enable
+  const forceRescanEnabled = process.env.NEXT_PUBLIC_ENABLE_FORCE_RESCAN === 'true'
   const [forceRescan, setForceRescan] = useState(false)
   
   const threeDaysAgo = new Date()
@@ -53,7 +55,10 @@ export default function SyncDialog({ onSuccess }: { onSuccess: () => void }) {
   const [progressEvents, setProgressEvents] = useState<ProgressEvent[]>([])
 
   useEffect(() => {
-    console.log('🔧 SyncDialog dev mode:', isDevMode, '| Force rescan available:', isDevMode)
+    // Debug: log force rescan setting (controlled by NEXT_PUBLIC_ENABLE_FORCE_RESCAN)
+    if (forceRescanEnabled) {
+      console.log('🔧 SyncDialog: Force rescan enabled')
+    }
   }, [])
 
   useEffect(() => {
@@ -104,8 +109,8 @@ export default function SyncDialog({ onSuccess }: { onSuccess: () => void }) {
     const formattedDate = new Date(syncDate).toLocaleDateString()
     addProgressEvent('processing', 'Initializing scan...')
     
-    if (forceRescan && isDevMode) {
-      addProgressEvent('processing', '🔄 DEV MODE: Force rescanning enabled - will update existing shipments')
+    if (forceRescan && forceRescanEnabled) {
+      addProgressEvent('processing', '🔄 Force rescanning enabled - will update existing shipments')
     }
     
     addProgressEvent('processing', `Connecting to Front inbox...`)
@@ -114,7 +119,7 @@ export default function SyncDialog({ onSuccess }: { onSuccess: () => void }) {
     try {
       const data = await api.front.scan({
         after: syncDate,
-        forceRescan: forceRescan && isDevMode,
+        forceRescan: forceRescan && forceRescanEnabled,
       })
 
       setResult(data as unknown as ScanResult)
@@ -201,7 +206,6 @@ export default function SyncDialog({ onSuccess }: { onSuccess: () => void }) {
         <Button variant="outline">
           <RefreshCw className="h-4 w-4" />
           Scan for New Shipments
-          {isDevMode && <span className="ml-1 text-xs opacity-70">[DEV]</span>}
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-[600px]">
@@ -239,7 +243,7 @@ export default function SyncDialog({ onSuccess }: { onSuccess: () => void }) {
               </p>
             </div>
 
-            {isDevMode && (
+            {forceRescanEnabled && (
               <div className="rounded-lg border border-orange-200 bg-orange-50 p-4">
                 <div className="flex items-start space-x-3">
                   <Checkbox
@@ -252,7 +256,7 @@ export default function SyncDialog({ onSuccess }: { onSuccess: () => void }) {
                       htmlFor="forceRescan"
                       className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
                     >
-                      🔄 Force rescan (Developer Mode)
+                      🔄 Force rescan
                     </label>
                     <p className="text-xs text-muted-foreground">
                       Re-analyze conversations and <strong>update existing shipments</strong> with fresh data from emails.

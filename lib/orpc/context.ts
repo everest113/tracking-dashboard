@@ -2,7 +2,11 @@ import { prisma } from '@/lib/prisma'
 import { createRequestLogger } from '@/lib/infrastructure/logging/server-logger'
 import type { ILogger } from '@/lib/infrastructure/logging/types'
 
-const isDev = process.env.NODE_ENV === 'development'
+/**
+ * Enable verbose request logging.
+ * Set DEBUG_ORPC=true in .env.local to enable.
+ */
+const DEBUG_ORPC = process.env.DEBUG_ORPC === 'true'
 
 export interface Context extends Record<string, unknown> {
   req: Request
@@ -26,8 +30,7 @@ export async function createContext(req: Request): Promise<Context> {
     userAgent,
   })
 
-  // Only log in development
-  if (isDev) {
+  if (DEBUG_ORPC) {
     console.log(`📥 [${method}] ${url} [${requestId.substring(0, 8)}]`)
   }
 

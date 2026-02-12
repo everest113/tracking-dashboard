@@ -30,7 +30,9 @@ export default function RefreshNow({ onSuccess }: RefreshNowProps) {
   const [progress, setProgress] = useState<string[]>([])
   const [hasStarted, setHasStarted] = useState(false)
 
-  const isDevMode = process.env.NODE_ENV === 'development'
+  // Enable force rescan option (re-analyze already-scanned conversations)
+  // Set NEXT_PUBLIC_ENABLE_FORCE_RESCAN=true in .env.local to enable
+  const forceRescanEnabled = process.env.NEXT_PUBLIC_ENABLE_FORCE_RESCAN === 'true'
 
   useEffect(() => {
     if (showDialog && !hasStarted) {
@@ -83,7 +85,7 @@ export default function RefreshNow({ onSuccess }: RefreshNowProps) {
 
       const scanResult = await api.front.scan({
         after: startDate,
-        forceRescan: forceRescan && isDevMode,
+        forceRescan: forceRescan && forceRescanEnabled,
       })
 
       if (scanResult.summary.shipmentsAdded > 0) {
@@ -218,7 +220,7 @@ export default function RefreshNow({ onSuccess }: RefreshNowProps) {
                         </p>
                       </div>
 
-                      {isDevMode && (
+                      {forceRescanEnabled && (
                         <div className="flex items-start space-x-3 rounded-md border border-orange-200 bg-orange-50 p-3">
                           <Checkbox
                             id="forceRescan"
@@ -230,7 +232,7 @@ export default function RefreshNow({ onSuccess }: RefreshNowProps) {
                               htmlFor="forceRescan"
                               className="text-sm font-medium leading-none"
                             >
-                              Force rescan (Dev Mode)
+                              Force rescan
                             </label>
                             <p className="text-xs text-muted-foreground">
                               Re-analyze already-scanned conversations. Uses AI credits.
