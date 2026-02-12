@@ -13,7 +13,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { Package, MapPin, Clock, ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight, CheckCircle2, AlertCircle, TruckIcon, Search, Copy, Check, Info } from 'lucide-react'
+import { Package, MapPin, Clock, ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight, CheckCircle2, AlertCircle, TruckIcon, Search, Copy, Check } from 'lucide-react'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import type { ShipmentFilter, ShipmentSort } from '@/lib/orpc/schemas'
 
@@ -446,29 +446,26 @@ export default function ShipmentTable({ shipments, pagination, onQueryChange, lo
                     <TableCell>
                       {shipment.lastError ? (
                         <div className="flex flex-col gap-1 max-w-[250px]">
-                          <div className="flex items-center gap-1.5 text-sm text-red-600">
-                            <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />
-                            <span className="font-medium">Tracking Error</span>
-                            <Popover>
-                              <PopoverTrigger asChild>
-                                <button 
-                                  type="button"
-                                  className="inline-flex items-center justify-center rounded-full p-0.5 hover:bg-red-100 transition-colors"
-                                  aria-label="View error details"
-                                >
-                                  <Info className="h-3.5 w-3.5" />
-                                </button>
-                              </PopoverTrigger>
-                              <PopoverContent className="w-80 text-sm">
-                                <div className="space-y-2">
-                                  <p className="font-medium text-red-600">Error Details</p>
-                                  <p className="text-muted-foreground break-words whitespace-pre-wrap">
-                                    {shipment.lastError}
-                                  </p>
-                                </div>
-                              </PopoverContent>
-                            </Popover>
-                          </div>
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <button 
+                                type="button"
+                                className="flex items-center gap-1.5 text-sm text-red-600 hover:text-red-700 transition-colors"
+                                aria-label="View error details"
+                              >
+                                <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />
+                                <span className="font-medium">Tracking Error</span>
+                              </button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-80 text-sm">
+                              <div className="space-y-2">
+                                <p className="font-medium text-red-600">Error Details</p>
+                                <p className="text-muted-foreground break-words whitespace-pre-wrap">
+                                  {shipment.lastError}
+                                </p>
+                              </div>
+                            </PopoverContent>
+                          </Popover>
                           {shipment.lastChecked && (
                             <span className="text-xs text-muted-foreground">
                               {formatDistanceToNow(new Date(shipment.lastChecked), { addSuffix: true })}
