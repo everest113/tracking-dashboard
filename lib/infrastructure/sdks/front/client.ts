@@ -17,8 +17,7 @@ import {
 export class FrontClient extends BaseSdkClient {
   constructor(apiKey: string) {
     super({
-      // Use custom Front domain if provided, otherwise default to api2.frontapp.com
-      baseUrl: process.env.FRONT_API_URL || 'https://stitchi.api.frontapp.com',
+      baseUrl: 'https://api2.frontapp.com',
       headers: {
         'Authorization': `Bearer ${apiKey}`,
       },
@@ -67,53 +66,15 @@ export class FrontClient extends BaseSdkClient {
     
     // Build search query using Front's search syntax
     // Format: inbox:ID after:TIMESTAMP
-    
-    // First, let's test if we can get ANY conversations from this inbox
-    let testQuery = `inbox:${inboxId}`
-    console.log(`🔍 Testing inbox access with query: "${testQuery}"`)
-    
-    try {
-      const testEndpoint = `/conversations/search/${encodeURIComponent(testQuery)}?limit=5`
-      console.log(`   Test endpoint: ${testEndpoint}`)
-      
-      // Make raw request to see actual response
-      const baseUrl = process.env.FRONT_API_URL || 'https://stitchi.api.frontapp.com'
-      const rawResponse = await fetch(`${baseUrl}${testEndpoint}`, {
-        headers: {
-          'Authorization': `Bearer ${process.env.FRONT_API_TOKEN}`,
-        },
-      })
-      const rawData = await rawResponse.json()
-      console.log(`   Raw API response:`, JSON.stringify(rawData, null, 2).substring(0, 500))
-      console.log(`   Raw results count: ${rawData._results?.length || 0}`)
-      
-      const testResponse: FrontListResponse<FrontConversation> = await this.get<FrontListResponse<FrontConversation>>(
-        testEndpoint,
-        FrontListResponseSchema(FrontConversationSchema)
-      )
-      console.log(`   ✅ After schema validation: ${testResponse._results.length} conversations`)
-      if (testResponse._results.length > 0) {
-        const latest = testResponse._results[0]
-        console.log(`   Latest conversation: ${latest.id} - "${latest.subject}" (created: ${latest.created_at})`)
-      }
-    } catch (error) {
-      console.error(`   ❌ Test query failed:`, error instanceof Error ? error.message : error)
-    }
-    
     const parts: string[] = [`inbox:${inboxId}`]
     
-    let timestampStr = ''
     if (options.after) {
       const timestamp = Math.floor(options.after.getTime() / 1000)
-      timestampStr = `after:${timestamp}`
-      parts.push(timestampStr)
+      parts.push(`after:${timestamp}`)
     }
     
     const query = parts.join(' ')
-    console.log(`\n🔍 Actual search query: "${query}"`)
-    console.log(`  - Inbox: ${inboxId}`)
-    console.log(`  - After date: ${options.after?.toISOString() || 'none'}`)
-    console.log(`  - Timestamp: ${timestampStr || 'none'}`)
+    console.log(`Search query: "${query}"`)
     
     let allConversations: FrontConversation[] = []
     let currentPage = 0
@@ -130,15 +91,6 @@ export class FrontClient extends BaseSdkClient {
         endpoint,
         FrontListResponseSchema(FrontConversationSchema)
       )
-
-      console.log(`API returned ${response._results.length} conversations on this page`)
-      if (response._results.length > 0) {
-        console.log(`Sample conversation:`, {
-          id: response._results[0].id,
-          subject: response._results[0].subject,
-          created_at: response._results[0].created_at,
-        })
-      }
 
       allConversations = allConversations.concat(response._results)
       nextPageToken = response._pagination.next
