@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { format, formatDistanceToNow, addDays } from 'date-fns'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -71,13 +71,22 @@ export default function ShipmentTable({ shipments, pagination, onQueryChange, lo
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc')
   const [copiedTracking, setCopiedTracking] = useState<string | null>(null)
 
+  // Track the previous activeStatus to avoid re-applying filters when only the tab changes
+  const prevActiveStatusRef = useRef(activeStatus)
+  
   const applyFilters = useCallback(() => {
+    // Skip if only activeStatus changed - parent handles tab changes via handleStatusChange
+    if (prevActiveStatusRef.current !== activeStatus) {
+      prevActiveStatusRef.current = activeStatus
+      return
+    }
+    
     const filter: ShipmentFilter = {}
     
     // Single search across tracking, PO, and supplier
     if (searchQuery) filter.search = searchQuery
     
-    // Handle special tracking errors tab
+    // Include current status filter
     if (activeStatus === 'trackingErrors') {
       filter.hasError = true
     } else if (activeStatus !== 'all') {
