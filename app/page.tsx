@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { useQueryState, parseAsInteger, parseAsString, parseAsStringEnum } from 'nuqs'
 import ShipmentTable from '@/components/ShipmentTable'
 import StatusTabs from '@/components/StatusTabs'
@@ -120,8 +120,8 @@ export default function Home() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  // Derive filter from URL state
-  const filter: ShipmentFilter = (() => {
+  // Derive filter from URL state (memoized to prevent infinite loops)
+  const filter: ShipmentFilter = useMemo(() => {
     const f: ShipmentFilter = {}
     if (search) f.search = search
     if (tab === 'trackingErrors') {
@@ -130,12 +130,14 @@ export default function Home() {
       f.status = tab as ShipmentFilter['status']
     }
     return f
-  })()
+  }, [search, tab])
 
-  // Derive sort from URL state
-  const sort: SchemaShipmentSort | undefined = sortField 
-    ? { field: sortField as SchemaShipmentSort['field'], direction: sortDir as SchemaShipmentSort['direction'] }
-    : undefined
+  // Derive sort from URL state (memoized to prevent infinite loops)
+  const sort: SchemaShipmentSort | undefined = useMemo(() => {
+    return sortField 
+      ? { field: sortField as SchemaShipmentSort['field'], direction: sortDir as SchemaShipmentSort['direction'] }
+      : undefined
+  }, [sortField, sortDir])
 
   const fetchShipments = useCallback(async () => {
     setLoading(true)
