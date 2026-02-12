@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
+import { useQueryState, parseAsInteger, parseAsString, parseAsStringEnum } from 'nuqs'
 import ShipmentTable from '@/components/ShipmentTable'
 import StatusTabs from '@/components/StatusTabs'
 import LastSyncDisplay, { LastSyncDisplayRef } from '@/components/LastSyncDisplay'
@@ -61,9 +62,41 @@ interface StatusCounts {
   trackingErrors: number
 }
 
+// Valid status tab values
+const statusTabs = [
+  'all',
+  'pending',
+  'info_received',
+  'in_transit',
+  'out_for_delivery',
+  'failed_attempt',
+  'available_for_pickup',
+  'delivered',
+  'exception',
+  'trackingErrors',
+]
+
+type StatusTab = typeof statusTabs[number]
+
+// Valid sort fields
+const sortFields = ['shippedDate', 'estimatedDelivery', 'deliveredDate', 'createdAt']
+type SortField = 'shippedDate' | 'estimatedDelivery' | 'deliveredDate' | 'createdAt'
+
+const sortDirections = ['asc', 'desc']
+type SortDirection = 'asc' | 'desc'
+
 export default function Home() {
   const lastSyncRef = useRef<LastSyncDisplayRef>(null)
   const [refreshCounter, setRefreshCounter] = useState(0)
+  
+  // URL Query State (nuqs)
+  const [tab, setTab] = useQueryState('tab', parseAsStringEnum(statusTabs).withDefault('all'))
+  const [page, setPage] = useQueryState('page', parseAsInteger.withDefault(1))
+  const [search, setSearch] = useQueryState('search', parseAsString.withDefault(''))
+  const [sortField, setSortField] = useQueryState('sortField', parseAsStringEnum(sortFields))
+  const [sortDir, setSortDir] = useQueryState('sortDir', parseAsStringEnum(sortDirections).withDefault('desc'))
+  
+  // Local state for data
   const [shipments, setShipments] = useState<Shipment[]>([])
   const [statusCounts, setStatusCounts] = useState<StatusCounts>({
     all: 0,
@@ -77,47 +110,55 @@ export default function Home() {
     exception: 0,
     trackingErrors: 0,
   })
-  const [pagination, setPagination] = useState<PaginationData>({
-    page: 1,
+  const [paginationMeta, setPaginationMeta] = useState<Omit<PaginationData, 'page'>>({
     pageSize: 20,
     total: 0,
     totalPages: 0,
     hasNext: false,
     hasPrev: false,
   })
-  const [activeStatus, setActiveStatus] = useState<string>('all')
-  const [filter, setFilter] = useState<ShipmentFilter>({})
-  const [sort, setSort] = useState<SchemaShipmentSort | undefined>()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const fetchShipments = async () => {
+  // Derive filter from URL state
+  const filter: ShipmentFilter = (() => {
+    const f: ShipmentFilter = {}
+    if (search) f.search = search
+    if (tab === 'trackingErrors') {
+      f.hasError = true
+    } else if (tab !== 'all') {
+      f.status = tab as ShipmentFilter['status']
+    }
+    return f
+  })()
+
+  // Derive sort from URL state
+  const sort: SchemaShipmentSort | undefined = sortField 
+    ? { field: sortField as SchemaShipmentSort['field'], direction: sortDir as SchemaShipmentSort['direction'] }
+    : undefined
+
+  const fetchShipments = useCallback(async () => {
     setLoading(true)
     setError(null)
     
     try {
       const data = await api.shipments.list({
         pagination: {
-          page: pagination.page,
-          pageSize: pagination.pageSize,
+          page,
+          pageSize: 20,
         },
-        filter: {
-          search: filter.search,
-          trackingNumber: filter.trackingNumber,
-          poNumber: filter.poNumber,
-          supplier: filter.supplier,
-          status: filter.status,
-          carrier: filter.carrier,
-          hasError: filter.hasError,
-        },
-        sort: sort ? {
-          field: sort.field,
-          direction: sort.direction,
-        } : undefined,
+        filter,
+        sort,
       })
       
       setShipments(data.items)
-      setPagination(data.pagination)
+      setPaginationMeta({
+        pageSize: data.pagination.pageSize,
+        total: data.pagination.total,
+        totalPages: data.pagination.totalPages,
+        hasNext: data.pagination.hasNext,
+        hasPrev: data.pagination.hasPrev,
+      })
       setStatusCounts(data.statusCounts)
     } catch (err) {
       console.error('Failed to fetch shipments:', err)
@@ -126,50 +167,54 @@ export default function Home() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [page, filter, sort])
 
   useEffect(() => {
     fetchShipments()
-  }, [pagination.page, filter, sort])
+  }, [fetchShipments])
+
+  // Combined pagination object for ShipmentTable
+  const pagination: PaginationData = {
+    page,
+    ...paginationMeta,
+  }
 
   const handleQueryChange = useCallback((newQuery: {
     pagination?: { page: number; pageSize: number }
     filter?: ShipmentFilter
     sort?: ShipmentSort
   }) => {
-    if (newQuery.pagination) {
-      setPagination(prev => ({ ...prev, ...newQuery.pagination }))
+    if (newQuery.pagination?.page) {
+      setPage(newQuery.pagination.page)
     }
     if (newQuery.filter !== undefined) {
-      setFilter(newQuery.filter)
+      // Update search from filter
+      if (newQuery.filter.search !== undefined) {
+        setSearch(newQuery.filter.search || null)
+      }
       // Reset to page 1 when filter changes
-      setPagination(prev => ({ ...prev, page: 1 }))
+      setPage(1)
     }
     if (newQuery.sort !== undefined) {
-      setSort(newQuery.sort)
+      if (newQuery.sort) {
+        setSortField(newQuery.sort.field as SortField)
+        setSortDir(newQuery.sort.direction)
+      } else {
+        setSortField(null)
+      }
     }
-  }, [])
+  }, [setPage, setSearch, setSortField, setSortDir])
 
-  const handleStatusChange = (status: string) => {
-    setActiveStatus(status)
-    
-    // Handle special tracking errors tab
-    if (status === 'trackingErrors') {
-      setFilter({ hasError: true })
-    } else if (status === 'all') {
-      setFilter({})
-    } else {
-      setFilter({ status: status as ShipmentFilter['status'] })
-    }
-    
-    setPagination(prev => ({ ...prev, page: 1 }))
-  }
+  const handleStatusChange = useCallback((status: string) => {
+    setTab(status as StatusTab)
+    setPage(1) // Reset to page 1 when tab changes
+  }, [setTab, setPage])
 
-  const handleRefresh = () => {
+  const handleRefresh = useCallback(() => {
     fetchShipments()
     lastSyncRef.current?.refresh()
-    setRefreshCounter(c => c + 1) // Trigger stale banner re-check
-  }
+    setRefreshCounter(c => c + 1)
+  }, [fetchShipments])
 
   return (
     <main className="min-h-screen bg-background">
@@ -197,7 +242,7 @@ export default function Home() {
         {/* Status Tabs */}
         <StatusTabs
           counts={statusCounts}
-          activeTab={activeStatus}
+          activeTab={tab}
           onTabChange={handleStatusChange}
         />
 
@@ -213,8 +258,10 @@ export default function Home() {
             pagination={pagination}
             onQueryChange={handleQueryChange}
             loading={loading}
-            activeStatus={activeStatus}
+            activeStatus={tab}
             onShipmentRefreshed={handleRefresh}
+            initialSearch={search}
+            initialSort={sort}
           />
         )}
       </div>

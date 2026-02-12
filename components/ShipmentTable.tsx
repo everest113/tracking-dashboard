@@ -71,17 +71,38 @@ interface ShipmentTableProps {
   loading?: boolean
   activeStatus?: string
   onShipmentRefreshed?: () => void
+  initialSearch?: string
+  initialSort?: ShipmentSort | null
 }
 
 type SortField = 'shippedDate' | 'estimatedDelivery' | 'deliveredDate' | 'createdAt'
 
-export default function ShipmentTable({ shipments, pagination, onQueryChange, loading, activeStatus = 'all', onShipmentRefreshed }: ShipmentTableProps) {
-  const [searchQuery, setSearchQuery] = useState('')
-  const [sortField, setSortField] = useState<SortField | null>(null)
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc')
+export default function ShipmentTable({ 
+  shipments, 
+  pagination, 
+  onQueryChange, 
+  loading, 
+  activeStatus = 'all', 
+  onShipmentRefreshed,
+  initialSearch = '',
+  initialSort = null,
+}: ShipmentTableProps) {
+  const [searchQuery, setSearchQuery] = useState(initialSearch)
+  const [sortField, setSortField] = useState<SortField | null>(initialSort?.field as SortField | null ?? null)
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>(initialSort?.direction ?? 'desc')
   const [copiedTracking, setCopiedTracking] = useState<string | null>(null)
   const [refreshingShipmentId, setRefreshingShipmentId] = useState<number | null>(null)
   const [deletingShipmentId, setDeletingShipmentId] = useState<number | null>(null)
+
+  // Sync internal state when URL-controlled props change
+  useEffect(() => {
+    setSearchQuery(initialSearch)
+  }, [initialSearch])
+
+  useEffect(() => {
+    setSortField(initialSort?.field as SortField | null ?? null)
+    setSortDirection(initialSort?.direction ?? 'desc')
+  }, [initialSort?.field, initialSort?.direction])
 
   // Track the previous activeStatus to avoid re-applying filters when only the tab changes
   const prevActiveStatusRef = useRef(activeStatus)
