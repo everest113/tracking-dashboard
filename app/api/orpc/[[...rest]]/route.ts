@@ -1,5 +1,5 @@
 import { RPCHandler } from '@orpc/server/fetch'
-import { onError } from '@orpc/shared'
+import { onError } from '@orpc/server'
 import { appRouter } from '@/lib/orpc/router'
 import { createContext } from '@/lib/orpc/context'
 
