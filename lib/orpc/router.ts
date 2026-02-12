@@ -575,12 +575,56 @@ const trackersRouter = {
           let errors = 0
           const errorMessages: string[] = []
 
+          // Validation helper: filter out invalid tracking numbers
+          const isValidTrackingNumber = (trackingNumber: string): boolean => {
+            // Must be 5-50 characters
+            if (trackingNumber.length < 5 || trackingNumber.length > 50) return false
+            
+            // Can only contain letters, numbers, and hyphens
+            if (!/^[a-zA-Z0-9-]+$/.test(trackingNumber)) return false
+            
+            // No all-zeros or excessive consecutive zeros
+            if (/^0+$/.test(trackingNumber)) return false // All zeros
+            if (/0{10,}/.test(trackingNumber)) return false // 10+ consecutive zeros
+            
+            // No all-same character
+            if (/^(.)\1+$/.test(trackingNumber)) return false
+            
+            return true
+          }
+
+          // Filter out invalid tracking numbers
+          const validShipments = unregisteredShipments.filter((s: UnregisteredShipment) => {
+            const valid = isValidTrackingNumber(s.tracking_number)
+            if (!valid) {
+              console.log(`  ⏭️  Skipping invalid: ${s.tracking_number}`)
+              errorMessages.push(`Skipped invalid tracking number: ${s.tracking_number}`)
+            }
+            return valid
+          })
+
+          console.log(`${validShipments.length} valid tracking numbers, ${unregisteredShipments.length - validShipments.length} invalid (skipped)`)
+
+          if (validShipments.length === 0) {
+            return {
+              success: true,
+              message: 'No valid tracking numbers to register',
+              registered: 0,
+              skipped: unregisteredShipments.length,
+              errors: 0,
+              total: unregisteredShipments.length,
+              errorMessages,
+              durationMs: Date.now() - startTime,
+              timestamp: new Date().toISOString(),
+            }
+          }
+
           // Process in batches of 50 (Ship24 bulk limit)
           const BATCH_SIZE = 50
           const service = getShipmentTrackingService()
 
-          for (let i = 0; i < unregisteredShipments.length; i += BATCH_SIZE) {
-            const batch = unregisteredShipments.slice(i, i + BATCH_SIZE)
+          for (let i = 0; i < validShipments.length; i += BATCH_SIZE) {
+            const batch = validShipments.slice(i, i + BATCH_SIZE)
 
             console.log(`Processing batch ${Math.floor(i / BATCH_SIZE) + 1} (${batch.length} shipments)`)
 
@@ -633,7 +677,7 @@ const trackersRouter = {
               }
 
               // Rate limiting: small delay between batches
-              if (i + BATCH_SIZE < unregisteredShipments.length) {
+              if (i + BATCH_SIZE < validShipments.length) {
                 await new Promise((resolve) => setTimeout(resolve, 500))
               }
             } catch (batchErr) {
@@ -649,12 +693,14 @@ const trackersRouter = {
 
           const duration = Date.now() - startTime
 
+          const invalidCount = unregisteredShipments.length - validShipments.length
+          
           const summary = {
             success: true,
             registered,
-            skipped,
+            skipped: invalidCount, // Invalid tracking numbers
             errors,
-            total: unregisteredShipments.length,
+            total: validShipments.length, // Only count valid ones
             errorMessages: errorMessages.slice(0, 10),
             durationMs: duration,
             timestamp: new Date().toISOString(),
@@ -709,6 +755,16 @@ const frontRouter = {
       )
       .handler(async ({ context, input }) => {
         const startTime = Date.now()
+        
+        // Create sync history record
+        const syncRecord = await context.prisma.sync_history.create({
+          data: {
+            source: 'manual',
+            batch_size: input.batchSize,
+            limit: input.pageSize,
+            started_at: new Date(),
+          },
+        })
 
         try {
           console.log('=== Front Scan Started ===')
@@ -745,6 +801,21 @@ const frontRouter = {
           console.log(`Found ${conversations.length} total conversations`)
 
           if (conversations.length === 0) {
+            // Update sync history with empty result
+            await context.prisma.sync_history.update({
+              where: { id: syncRecord.id },
+              data: {
+                completed_at: new Date(),
+                status: 'success',
+                conversations_processed: 0,
+                conversations_already_scanned: 0,
+                shipments_added: 0,
+                shipments_skipped: 0,
+                conversations_with_no_tracking: 0,
+                duration_ms: Date.now() - startTime,
+              },
+            })
+            
             return {
               success: true,
               summary: {
@@ -1052,6 +1123,22 @@ const frontRouter = {
           console.log('=== Scan Complete ===')
           console.log(`Processed: ${conversationsProcessed}, Skipped (up-to-date): ${results.skippedUpToDate}, Already scanned: ${results.alreadyScanned}`)
 
+          // Update sync history with results
+          await context.prisma.sync_history.update({
+            where: { id: syncRecord.id },
+            data: {
+              completed_at: new Date(),
+              status: results.errors.length > 0 ? 'partial' : 'success',
+              conversations_processed: conversationsProcessed,
+              conversations_already_scanned: conversationsSkipped,
+              shipments_added: results.added,
+              shipments_skipped: results.skipped,
+              conversations_with_no_tracking: results.noTracking,
+              duration_ms: duration,
+              errors: results.errors,
+            },
+          })
+
           return {
             success: true,
             summary: {
@@ -1074,6 +1161,17 @@ const frontRouter = {
 
           console.error('=== Scan Error ===')
           console.error('Error:', errorMessage)
+
+          // Update sync history with error status
+          await context.prisma.sync_history.update({
+            where: { id: syncRecord.id },
+            data: {
+              completed_at: new Date(),
+              status: 'error',
+              duration_ms: Date.now() - startTime,
+              errors: [errorMessage],
+            },
+          })
 
           throw new ORPCError({
             code: 'INTERNAL_SERVER_ERROR',
