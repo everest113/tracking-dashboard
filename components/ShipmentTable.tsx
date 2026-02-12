@@ -24,6 +24,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { api } from '@/lib/orpc/client'
+import RefreshNow from '@/components/RefreshNow'
 
 interface TrackingEvent {
   id: number
@@ -236,7 +237,7 @@ export default function ShipmentTable({
 
   return (
     <div className="space-y-4">
-      {/* Search & Clear */}
+      {/* Search & Actions */}
       <div className="flex items-center gap-4">
         <form onSubmit={handleSearch} className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -247,6 +248,7 @@ export default function ShipmentTable({
             className="pl-9"
           />
         </form>
+        <RefreshNow />
         {hasActiveFilters && (
           <Button variant="ghost" size="sm" onClick={clearFilters}>
             Clear filters

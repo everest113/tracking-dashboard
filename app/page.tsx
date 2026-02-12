@@ -2,7 +2,6 @@ import { Suspense } from 'react'
 import ShipmentTable from '@/components/ShipmentTable'
 import StatusTabs from '@/components/StatusTabs'
 import LastSyncDisplay from '@/components/LastSyncDisplay'
-import RefreshNow from '@/components/RefreshNow'
 import StaleDataBanner from '@/components/StaleDataBanner'
 import TableSkeleton from '@/components/TableSkeleton'
 import { getShipments, type ShipmentQueryParams } from '@/lib/data/shipments'
@@ -48,10 +47,7 @@ export default async function Home({ searchParams }: PageProps) {
                 Monitor all shipments and tracking status
               </p>
             </div>
-            <div className="flex flex-col items-end gap-3">
-              <LastSyncDisplay />
-              <RefreshNow />
-            </div>
+            <LastSyncDisplay />
           </div>
         </div>
 
