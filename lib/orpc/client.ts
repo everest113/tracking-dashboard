@@ -1,7 +1,7 @@
 'use client'
 
 import { createORPCClient } from '@orpc/client'
-import { ORPCLink } from '@orpc/client/fetch'
+import { RPCLink } from '@orpc/client/fetch'
 import type { AppRouter } from './router'
 
 // Get the base URL - must be absolute URL for fetch
@@ -16,7 +16,7 @@ function getBaseURL() {
     : 'http://localhost:3000/api/orpc'
 }
 
-const link = new ORPCLink({
+const link = new RPCLink({
   url: getBaseURL(),
 })
 

@@ -1,12 +1,15 @@
-import { ORPCHandler } from '@orpc/server/fetch'
+import { RPCHandler } from '@orpc/server/fetch'
+import { onError } from '@orpc/server'
 import { appRouter } from '@/lib/orpc/router'
 import { createContext } from '@/lib/orpc/context'
 
-// Debug: log router structure
-console.log('📚 Router keys:', Object.keys(appRouter))
-console.log('📚 Shipments keys:', Object.keys(appRouter.shipments))
-
-const handler = new ORPCHandler(appRouter)
+const handler = new RPCHandler(appRouter, {
+  interceptors: [
+    onError((error) => {
+      console.error('🔴 oRPC Error:', error)
+    }),
+  ],
+})
 
 async function handleRequest(request: Request) {
   const url = new URL(request.url)
