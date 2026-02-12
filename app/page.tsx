@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import ShipmentTable from '@/components/ShipmentTable'
 import StatusTabs from '@/components/StatusTabs'
 import LastSyncDisplay, { LastSyncDisplayRef } from '@/components/LastSyncDisplay'
@@ -132,7 +132,7 @@ export default function Home() {
     fetchShipments()
   }, [pagination.page, filter, sort])
 
-  const handleQueryChange = (newQuery: {
+  const handleQueryChange = useCallback((newQuery: {
     pagination?: { page: number; pageSize: number }
     filter?: ShipmentFilter
     sort?: ShipmentSort
@@ -148,7 +148,7 @@ export default function Home() {
     if (newQuery.sort !== undefined) {
       setSort(newQuery.sort)
     }
-  }
+  }, [])
 
   const handleStatusChange = (status: string) => {
     setActiveStatus(status)
