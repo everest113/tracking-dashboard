@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { AlertTriangle, RefreshCw } from 'lucide-react'
@@ -9,29 +9,27 @@ import { api } from '@/lib/orpc/client'
 
 interface StaleDataBannerProps {
   onRefresh: () => void
+  refreshTrigger?: number // Increment this to trigger a re-check
 }
 
-export default function StaleDataBanner({ onRefresh }: StaleDataBannerProps) {
+export default function StaleDataBanner({ onRefresh, refreshTrigger }: StaleDataBannerProps) {
   const [isStale, setIsStale] = useState(false)
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    checkStaleData()
-  }, [])
-
-  const checkStaleData = async () => {
+  const checkStaleData = useCallback(async () => {
     try {
-      // Fetch recent shipments and find the one with most recent update
-      const data = await api.shipments.list({
-        pagination: { page: 1, pageSize: 50 },
-      })
+      // Check both sync history AND shipment updates
+      const [shipmentsData, syncData] = await Promise.all([
+        api.shipments.list({ pagination: { page: 1, pageSize: 50 } }),
+        api.syncHistory.get({ limit: 1 }),
+      ])
 
-      if (data.items.length > 0) {
-        // Find the shipment with the most recent ship24LastUpdate
-        let mostRecentUpdate: Date | null = null
-        
-        for (const shipment of data.items) {
+      let mostRecentUpdate: Date | null = null
+
+      // Check most recent ship24LastUpdate from shipments
+      if (shipmentsData.items.length > 0) {
+        for (const shipment of shipmentsData.items) {
           if (shipment.ship24LastUpdate) {
             const updateTime = new Date(shipment.ship24LastUpdate)
             if (!mostRecentUpdate || updateTime > mostRecentUpdate) {
@@ -39,27 +37,47 @@ export default function StaleDataBanner({ onRefresh }: StaleDataBannerProps) {
             }
           }
         }
-        
-        const lastUpdateTime = mostRecentUpdate
+      }
 
-        if (lastUpdateTime) {
-          setLastUpdate(lastUpdateTime)
-          
-          // Check if last update was more than 36 hours ago
-          const thirtySixHoursAgo = new Date()
-          thirtySixHoursAgo.setHours(thirtySixHoursAgo.getHours() - 36)
-          
-          if (lastUpdateTime < thirtySixHoursAgo) {
-            setIsStale(true)
-          }
+      // Also check sync history (Front scan completion time)
+      if (syncData.lastSync?.completedAt) {
+        const syncTime = new Date(syncData.lastSync.completedAt)
+        if (!mostRecentUpdate || syncTime > mostRecentUpdate) {
+          mostRecentUpdate = syncTime
         }
+      }
+
+      if (mostRecentUpdate) {
+        setLastUpdate(mostRecentUpdate)
+        
+        // Check if last update was more than 36 hours ago
+        const thirtySixHoursAgo = new Date()
+        thirtySixHoursAgo.setHours(thirtySixHoursAgo.getHours() - 36)
+        
+        setIsStale(mostRecentUpdate < thirtySixHoursAgo)
+      } else {
+        // No data at all - consider it stale
+        setIsStale(true)
+        setLastUpdate(null)
       }
     } catch (error) {
       console.error('Failed to check stale data:', error)
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
+
+  // Initial check
+  useEffect(() => {
+    checkStaleData()
+  }, [checkStaleData])
+
+  // Re-check when refreshTrigger changes
+  useEffect(() => {
+    if (refreshTrigger !== undefined && refreshTrigger > 0) {
+      checkStaleData()
+    }
+  }, [refreshTrigger, checkStaleData])
 
   if (loading || !isStale || !lastUpdate) {
     return null

@@ -1,9 +1,9 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import ShipmentTable from '@/components/ShipmentTable'
 import StatusCards from '@/components/StatusCards'
-import LastSyncDisplay from '@/components/LastSyncDisplay'
+import LastSyncDisplay, { LastSyncDisplayRef } from '@/components/LastSyncDisplay'
 import RefreshNow from '@/components/RefreshNow'
 import StaleDataBanner from '@/components/StaleDataBanner'
 import { api } from '@/lib/orpc/client'
@@ -49,6 +49,8 @@ interface PaginationData {
 }
 
 export default function Home() {
+  const lastSyncRef = useRef<LastSyncDisplayRef>(null)
+  const [refreshCounter, setRefreshCounter] = useState(0)
   const [shipments, setShipments] = useState<Shipment[]>([])
   const [summary, setSummary] = useState<ShipmentSummary>({
     total: 0,
@@ -150,6 +152,8 @@ export default function Home() {
   const handleRefresh = () => {
     fetchSummary()
     fetchShipments()
+    lastSyncRef.current?.refresh()
+    setRefreshCounter(c => c + 1) // Trigger stale banner re-check
   }
 
   return (
@@ -166,14 +170,14 @@ export default function Home() {
               </p>
             </div>
             <div className="flex flex-col items-end gap-3">
-              <LastSyncDisplay />
+              <LastSyncDisplay ref={lastSyncRef} />
               <RefreshNow onSuccess={handleRefresh} />
             </div>
           </div>
         </div>
 
         {/* Stale Data Warning */}
-        <StaleDataBanner onRefresh={handleRefresh} />
+        <StaleDataBanner onRefresh={handleRefresh} refreshTrigger={refreshCounter} />
 
         {/* Status Cards */}
         <div className="mb-8">
