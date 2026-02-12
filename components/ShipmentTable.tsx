@@ -239,7 +239,7 @@ export default function ShipmentTable({
     <div className="space-y-4">
       {/* Search & Actions */}
       <div className="flex items-center gap-4">
-        <form onSubmit={handleSearch} className="relative flex-1 max-w-sm">
+        <form onSubmit={handleSearch} className="relative max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Search tracking, PO, or supplier..."
@@ -248,12 +248,14 @@ export default function ShipmentTable({
             className="pl-9"
           />
         </form>
-        <RefreshNow />
         {hasActiveFilters && (
           <Button variant="ghost" size="sm" onClick={clearFilters}>
             Clear filters
           </Button>
         )}
+        <div className="ml-auto">
+          <RefreshNow />
+        </div>
       </div>
 
       {/* Table */}
