@@ -5,7 +5,6 @@ import ShipmentTable from '@/components/ShipmentTable'
 import StatusCards from '@/components/StatusCards'
 import LastSyncDisplay from '@/components/LastSyncDisplay'
 import RefreshNow from '@/components/RefreshNow'
-import SyncDialog from '@/components/SyncDialog'
 import StaleDataBanner from '@/components/StaleDataBanner'
 import { api } from '@/lib/orpc/client'
 import type { ShipmentFilter as SchemaShipmentFilter, ShipmentSort as SchemaShipmentSort, ShipmentSummary } from '@/lib/orpc/schemas'
@@ -168,10 +167,7 @@ export default function Home() {
             </div>
             <div className="flex flex-col items-end gap-3">
               <LastSyncDisplay />
-              <div className="flex gap-2">
-                <SyncDialog onSuccess={handleRefresh} />
-                <RefreshNow onSuccess={handleRefresh} />
-              </div>
+              <RefreshNow onSuccess={handleRefresh} />
             </div>
           </div>
         </div>
