@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { format, formatDistanceToNow, addDays } from 'date-fns'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -18,27 +18,27 @@ import type { ShipmentFilter, ShipmentSort } from '@/lib/orpc/schemas'
 
 interface TrackingEvent {
   id: number
-  status: string | null
-  location: string | null
-  message: string | null
-  eventTime: string | null
+  status?: string | null
+  location?: string | null
+  message?: string | null
+  eventTime?: string | null
 }
 
 interface Shipment {
   id: number
   trackingNumber: string
-  carrier: string | null
+  carrier?: string | null
   status: string
-  poNumber: string | null
-  supplier: string | null
-  shippedDate: string | null
-  estimatedDelivery: string | null
-  deliveredDate: string | null
-  ship24Status: string | null
-  ship24LastUpdate: string | null
-  lastChecked: string | null
+  poNumber?: string | null
+  supplier?: string | null
+  shippedDate?: string | null
+  estimatedDelivery?: string | null
+  deliveredDate?: string | null
+  ship24Status?: string | null
+  ship24LastUpdate?: string | null
+  lastChecked?: string | null
   createdAt: string
-  lastError: string | null
+  lastError?: string | null
   trackingEvents?: TrackingEvent[]
 }
 
@@ -71,17 +71,8 @@ export default function ShipmentTable({ shipments, pagination, onQueryChange, lo
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc')
   const [copiedTracking, setCopiedTracking] = useState<string | null>(null)
 
-  // Debounce filter changes
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      applyFilters()
-    }, 300)
-
-    return () => clearTimeout(timer)
-  }, [searchQuery, activeStatus])
-
-  const applyFilters = () => {
-    const filter: Record<string, any> = {}
+  const applyFilters = useCallback(() => {
+    const filter: ShipmentFilter = {}
     
     // Single search across tracking, PO, and supplier
     if (searchQuery) filter.search = searchQuery
@@ -90,7 +81,7 @@ export default function ShipmentTable({ shipments, pagination, onQueryChange, lo
     if (activeStatus === 'trackingErrors') {
       filter.hasError = true
     } else if (activeStatus !== 'all') {
-      filter.status = activeStatus
+      filter.status = activeStatus as ShipmentFilter['status']
     }
 
     const sort = sortField ? {
@@ -103,7 +94,16 @@ export default function ShipmentTable({ shipments, pagination, onQueryChange, lo
       filter: Object.keys(filter).length > 0 ? filter : undefined,
       sort,
     })
-  }
+  }, [searchQuery, activeStatus, sortField, sortDirection, pagination.pageSize, onQueryChange])
+
+  // Debounce filter changes
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      applyFilters()
+    }, 300)
+
+    return () => clearTimeout(timer)
+  }, [applyFilters])
 
   const handleSort = (field: SortField) => {
     let newDirection: 'asc' | 'desc' = 'asc'
@@ -134,15 +134,15 @@ export default function ShipmentTable({ shipments, pagination, onQueryChange, lo
     })
   }
 
-  const buildCurrentFilter = (): Record<string, any> | undefined => {
-    const filter: Record<string, any> = {}
+  const buildCurrentFilter = (): ShipmentFilter | undefined => {
+    const filter: ShipmentFilter = {}
     if (searchQuery) filter.search = searchQuery
     
     // Handle special tracking errors tab
     if (activeStatus === 'trackingErrors') {
       filter.hasError = true
     } else if (activeStatus !== 'all') {
-      filter.status = activeStatus
+      filter.status = activeStatus as ShipmentFilter['status']
     }
     
     return Object.keys(filter).length > 0 ? filter : undefined
@@ -163,11 +163,11 @@ export default function ShipmentTable({ shipments, pagination, onQueryChange, lo
     setSortField(null)
     
     // Preserve the active tab's filter
-    let preservedFilter: Record<string, any> | undefined
+    let preservedFilter: ShipmentFilter | undefined
     if (activeStatus === 'trackingErrors') {
       preservedFilter = { hasError: true }
     } else if (activeStatus !== 'all') {
-      preservedFilter = { status: activeStatus }
+      preservedFilter = { status: activeStatus as ShipmentFilter['status'] }
     }
     
     onQueryChange({
@@ -203,7 +203,7 @@ export default function ShipmentTable({ shipments, pagination, onQueryChange, lo
     }
   }
 
-  const formatDate = (dateStr: string | null) => {
+  const formatDate = (dateStr?: string | null) => {
     if (!dateStr) return null
     try {
       return format(new Date(dateStr), 'MMM d, yyyy')
@@ -212,7 +212,7 @@ export default function ShipmentTable({ shipments, pagination, onQueryChange, lo
     }
   }
 
-  const formatDateTime = (dateStr: string | null) => {
+  const formatDateTime = (dateStr?: string | null) => {
     if (!dateStr) return null
     try {
       return format(new Date(dateStr), 'MMM d, h:mm a')

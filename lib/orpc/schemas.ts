@@ -111,7 +111,7 @@ export type ShipmentSummary = z.infer<typeof ShipmentSummarySchema>
 export function buildShipmentWhereClause(filter?: ShipmentFilter) {
   if (!filter) return {}
 
-  const where: any = {}
+  const where: Record<string, unknown> = {}
 
   // Unified search: search across tracking_number, po_number, and supplier
   if (filter.search) {

@@ -11,26 +11,26 @@ import type { ShipmentFilter as SchemaShipmentFilter, ShipmentSort as SchemaShip
 
 interface TrackingEvent {
   id: number
-  status: string | null
-  location: string | null
-  message: string | null
-  eventTime: string | null
+  status?: string | null
+  location?: string | null
+  message?: string | null
+  eventTime?: string | null
 }
 
 interface Shipment {
   id: number
   trackingNumber: string
-  carrier: string | null
+  carrier?: string | null
   status: string
-  poNumber: string | null
-  supplier: string | null
-  shippedDate: string | null
-  estimatedDelivery: string | null
-  deliveredDate: string | null
-  ship24Status: string | null
-  ship24LastUpdate: string | null
-  lastChecked: string | null
-  lastError: string | null
+  poNumber?: string | null
+  supplier?: string | null
+  shippedDate?: string | null
+  estimatedDelivery?: string | null
+  deliveredDate?: string | null
+  ship24Status?: string | null
+  ship24LastUpdate?: string | null
+  lastChecked?: string | null
+  lastError?: string | null
   createdAt: string
   updatedAt: string
   trackingEvents?: TrackingEvent[]
@@ -159,7 +159,7 @@ export default function Home() {
     } else if (status === 'all') {
       setFilter({})
     } else {
-      setFilter({ status: status as any })
+      setFilter({ status: status as ShipmentFilter['status'] })
     }
     
     setPagination(prev => ({ ...prev, page: 1 }))

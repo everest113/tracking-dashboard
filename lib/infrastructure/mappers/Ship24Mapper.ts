@@ -33,7 +33,7 @@ export class Ship24Mapper {
     const tracker = tracking.tracker
     const shipment = tracking.shipment || {}
     const events = tracking.events || []
-    const statistics = (tracking as any).statistics || {}
+    const statistics = tracking.statistics || {}
 
     // Get status
     const latestStatus = shipment.statusMilestone || shipment.status || 'unknown'
@@ -143,7 +143,7 @@ export class Ship24Mapper {
   /**
    * Format location object from Ship24 event
    */
-  private static formatLocationObject(location: any): string | null {
+  private static formatLocationObject(location: { city?: string | null; state?: string | null; postalCode?: string | null }): string | null {
     if (!location || !location.city) {
       return null
     }
