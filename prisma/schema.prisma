@@ -111,3 +111,107 @@ enum EventStatus {
   COMPLETED
   FAILED
 }
+
+// ============================================================================
+// Notification System
+// ============================================================================
+
+enum NotificationChannel {
+  EMAIL
+  SLACK
+  WEBHOOK
+  SMS
+}
+
+enum NotificationStatus {
+  PENDING
+  PROCESSING
+  SENT
+  FAILED
+}
+
+model notification_templates {
+  id          String              @id @default(cuid())
+  name        String              @unique
+  channel     NotificationChannel
+  subject     String?             // For email
+  body        String              // Template body (Handlebars syntax)
+  metadata    Json?               // Channel-specific metadata (e.g., Slack block kit)
+  enabled     Boolean             @default(true)
+  created_at  DateTime            @default(now())
+  updated_at  DateTime            @updatedAt
+
+  rules       notification_rules[]
+}
+
+model notification_rules {
+  id            String              @id @default(cuid())
+  name          String
+  description   String?
+  trigger_event String              // e.g., "shipment.delivered", "shipment.exception"
+  filter        Json?               // Optional JSONPath/predicate to filter events
+  template_id   String
+  enabled       Boolean             @default(true)
+  created_at    DateTime            @default(now())
+  updated_at    DateTime            @updatedAt
+
+  template      notification_templates @relation(fields: [template_id], references: [id], onDelete: Cascade)
+  recipients    notification_recipients[]
+
+  @@index([trigger_event])
+  @@index([enabled])
+}
+
+model notification_recipients {
+  id         String              @id @default(cuid())
+  rule_id    String
+  channel    NotificationChannel
+  target     String              // Email address, Slack channel ID, webhook URL, phone number
+  metadata   Json?               // Additional recipient-specific data
+  created_at DateTime            @default(now())
+  updated_at DateTime            @updatedAt
+
+  rule       notification_rules  @relation(fields: [rule_id], references: [id], onDelete: Cascade)
+
+  @@index([rule_id])
+}
+
+model notification_queue {
+  id           String             @id @default(cuid())
+  rule_id      String?
+  event_id     String?            // Reference to source event_queue.id
+  channel      NotificationChannel
+  recipient    String             // Target address/channel
+  subject      String?
+  body         String
+  metadata     Json?              // Rendered payload, attachments, etc.
+  status       NotificationStatus @default(PENDING)
+  attempts     Int                @default(0)
+  max_attempts Int                @default(5)
+  available_at DateTime           @default(now())
+  locked_at    DateTime?
+  sent_at      DateTime?
+  last_error   String?
+  created_at   DateTime           @default(now())
+  updated_at   DateTime           @updatedAt
+
+  @@index([channel, status])
+  @@index([available_at])
+}
+
+model notification_log {
+  id           String              @id @default(cuid())
+  queue_id     String?             // Reference to notification_queue.id
+  channel      NotificationChannel
+  recipient    String
+  subject      String?
+  body         String
+  status       NotificationStatus
+  provider_id  String?             // External provider message ID (e.g., SES message ID)
+  metadata     Json?
+  sent_at      DateTime            @default(now())
+
+  @@index([channel])
+  @@index([sent_at])
+  @@index([recipient])
+}
