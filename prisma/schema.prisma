@@ -78,3 +78,36 @@ model tracking_events {
 
   @@index([shipment_id], map: "idx_shipment_id")
 }
+
+model event_queue {
+  id           String      @id @default(cuid())
+  topic        String
+  payload      Json
+  status       EventStatus @default(PENDING)
+  attempts     Int         @default(0)
+  max_attempts Int?        @default(5)
+  dedupe_key   String?     @unique
+  available_at DateTime    @default(now())
+  locked_at    DateTime?
+  created_at   DateTime    @default(now())
+  updated_at   DateTime    @updatedAt
+  last_error   String?
+}
+
+model event_consumer_offsets {
+  id         Int      @id @default(autoincrement())
+  consumer   String
+  topic      String
+  last_id    String?
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@unique([consumer, topic])
+}
+
+enum EventStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
