@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { format, formatDistanceToNow, addDays } from 'date-fns'
+import { format, formatDistanceToNow } from 'date-fns'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -14,7 +14,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { Package, MapPin, Clock, ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight, CheckCircle2, AlertCircle, TruckIcon, Search, Copy, Check, RefreshCw, Loader2, MoreHorizontal, Trash2 } from 'lucide-react'
+import { Package, MapPin, ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight, CheckCircle2, AlertCircle, TruckIcon, Search, Copy, Check, RefreshCw, Loader2, MoreHorizontal, Trash2, ExternalLink } from 'lucide-react'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import {
   DropdownMenu,
@@ -208,20 +208,35 @@ export default function ShipmentTable({
   }
 
   const getExpectedDelivery = (shipment: Shipment) => {
-    if (shipment.estimatedDelivery) {
-      return {
-        date: formatDate(shipment.estimatedDelivery),
-        source: 'carrier' as const,
-      }
+    if (!shipment.estimatedDelivery) {
+      return null
     }
-    if (shipment.shippedDate) {
-      const estimated = addDays(new Date(shipment.shippedDate), 5)
-      return {
-        date: format(estimated, 'MMM d, yyyy'),
-        source: 'estimated' as const,
-      }
+    return {
+      date: formatDate(shipment.estimatedDelivery),
+      source: 'carrier' as const,
     }
-    return null
+  }
+
+
+  const getCarrierTrackingUrl = (carrier?: string | null, trackingNumber?: string) => {
+    if (!trackingNumber) return null
+    const normalized = (carrier || '').toLowerCase()
+
+    switch (normalized) {
+      case 'ups':
+        return `https://www.ups.com/track?loc=en_US&tracknum=${encodeURIComponent(trackingNumber)}`
+      case 'usps':
+      case 'us-post':
+        return `https://tools.usps.com/go/TrackConfirmAction?tLabels=${encodeURIComponent(trackingNumber)}`
+      case 'fedex':
+        return `https://www.fedex.com/fedextrack/?trknbr=${encodeURIComponent(trackingNumber)}`
+      case 'dhl':
+        return `https://www.dhl.com/global-en/home/tracking/tracking-express.html?submit=1&tracking-id=${encodeURIComponent(trackingNumber)}`
+      case 'lasership':
+        return `https://www.lasership.com/track/${encodeURIComponent(trackingNumber)}`
+      default:
+        return `https://www.google.com/search?q=${encodeURIComponent(trackingNumber)}+tracking`
+    }
   }
 
   const getSortIcon = (field: SortField) => {
@@ -301,6 +316,7 @@ export default function ShipmentTable({
                 const shippedDate = formatDate(shipment.shippedDate)
                 const expectedInfo = getExpectedDelivery(shipment)
                 const deliveredDate = formatDateTime(shipment.deliveredDate)
+                const trackingUrl = getCarrierTrackingUrl(shipment.carrier, shipment.trackingNumber)
 
                 return (
                   <TableRow key={shipment.id}>
@@ -321,6 +337,17 @@ export default function ShipmentTable({
                               <Copy className="h-3.5 w-3.5" />
                             )}
                           </button>
+                          {trackingUrl && (
+                            <a
+                              href={trackingUrl}
+                              target="_blank"
+                              rel="noreferrer noopener"
+                              className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-input text-muted-foreground hover:text-foreground hover:bg-muted"
+                              aria-label={`Open ${shipment.carrier || 'carrier'} tracking page for ${shipment.trackingNumber}`}
+                            >
+                              <ExternalLink className="h-3.5 w-3.5" />
+                            </a>
+                          )}
                         </div>
                         <span className="text-xs text-muted-foreground uppercase">
                           {shipment.carrier || 'Unknown'}
@@ -361,18 +388,9 @@ export default function ShipmentTable({
                     {/* Expected */}
                     <TableCell>
                       {expectedInfo ? (
-                        <div className="flex flex-col gap-0.5">
-                          <div className="flex items-center gap-1.5 text-sm">
-                            {expectedInfo.source === 'carrier' ? (
-                              <TruckIcon className="h-3.5 w-3.5 text-orange-500" />
-                            ) : (
-                              <Clock className="h-3.5 w-3.5 text-gray-400" />
-                            )}
-                            <span>{expectedInfo.date}</span>
-                          </div>
-                          {expectedInfo.source === 'estimated' && (
-                            <span className="text-xs text-muted-foreground ml-5">~5 days</span>
-                          )}
+                        <div className="flex items-center gap-1.5 text-sm">
+                          <TruckIcon className="h-3.5 w-3.5 text-orange-500" />
+                          <span>{expectedInfo.date}</span>
                         </div>
                       ) : (
                         <span className="text-muted-foreground">-</span>
