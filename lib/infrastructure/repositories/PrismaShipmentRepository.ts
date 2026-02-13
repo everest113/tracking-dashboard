@@ -1,3 +1,5 @@
+import { getEventQueue } from '@/lib/application/events/getEventQueue'
+import { buildShipmentEvents } from '@/lib/application/events/shipment/buildShipmentEvents'
 import { prisma } from '@/lib/prisma'
 import type { Shipment } from '@/lib/domain/entities/Shipment'
 import { Shipment as S } from '@/lib/domain/entities/Shipment'
@@ -138,6 +140,10 @@ export const createPrismaShipmentRepository = (): ShipmentRepository => {
           status: persistenceData.status,
         })
         
+        const existingRecord = await prisma.shipments.findUnique({
+          where: { tracking_number: persistenceData.trackingNumber },
+        })
+
         const record = await prisma.shipments.upsert({
           where: { 
             tracking_number: persistenceData.trackingNumber,
@@ -151,8 +157,16 @@ export const createPrismaShipmentRepository = (): ShipmentRepository => {
           trackingNumber: record.tracking_number,
           isNew: !shipment.id,
         })
+
+        const previousShipment = existingRecord ? S.fromDatabase(prismaShipmentToRecord(existingRecord)) : null
+        const savedShipment = S.fromDatabase(prismaShipmentToRecord(record))
+        const events = buildShipmentEvents(previousShipment, savedShipment)
+        if (events.length) {
+          const eventQueue = getEventQueue()
+          await eventQueue.enqueue(events)
+        }
         
-        return S.fromDatabase(prismaShipmentToRecord(record))
+        return savedShipment
       } catch (error) {
         logger.error('Failed to save shipment', { 
           error,
