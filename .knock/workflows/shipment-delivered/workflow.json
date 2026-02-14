@@ -1,0 +1,25 @@
+{
+  "name": "Shipment Delivered",
+  "steps": [
+    {
+      "channel_key": "in-app",
+      "channel_type": "in_app_feed",
+      "name": "In-app notification",
+      "ref": "in_app_notification",
+      "template": {
+        "action_url": "/shipments/{{data.trackingNumber}}",
+        "markdown_body@": "in_app_notification/markdown_body.md"
+      },
+      "type": "channel"
+    }
+  ],
+  "trigger_frequency": "every_trigger",
+  "__readonly": {
+    "environment": "development",
+    "key": "shipment-delivered",
+    "active": true,
+    "valid": true,
+    "created_at": "2026-02-14T00:48:24.648813Z"
+  },
+  "$schema": "https://schemas.knock.app/cli/workflow.json"
+}
