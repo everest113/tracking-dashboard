@@ -8,10 +8,6 @@ concurrency:
   group: preview-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
-env:
-  NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
-  NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
-
 jobs:
   setup-preview-db:
     name: Setup Preview Database
@@ -28,12 +24,10 @@ jobs:
         id: create-branch
         uses: neondatabase/create-branch-action@v5
         with:
-          project_id: ${{ env.NEON_PROJECT_ID }}
-          api_key: ${{ env.NEON_API_KEY }}
+          project_id: ${{ secrets.NEON_PROJECT_ID }}
+          api_key: ${{ secrets.NEON_API_KEY }}
           branch_name: preview/pr-${{ github.event.pull_request.number }}
-          # Branch from main (production)
           parent: main
-          # Use pooled connection for serverless
           database: neondb
 
       - uses: actions/setup-node@v4

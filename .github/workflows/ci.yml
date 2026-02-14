@@ -67,6 +67,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: shadow
+          POSTGRES_PASSWORD: shadow
+          POSTGRES_DB: shadow_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5433:5432
+
     steps:
       - uses: actions/checkout@v4
 
@@ -84,6 +99,7 @@ jobs:
           npx prisma migrate diff \
             --from-migrations ./prisma/migrations \
             --to-schema-datamodel ./prisma/schema.prisma \
+            --shadow-database-url "postgresql://shadow:shadow@localhost:5433/shadow_db" \
             --exit-code || {
               echo "❌ Schema drift detected!"
               echo ""
