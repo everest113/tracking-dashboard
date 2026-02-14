@@ -48,13 +48,34 @@ afterAll(async () => {
  */
 beforeEach(async () => {
   // Truncate all tables (order matters due to foreign keys)
+  // Each deletion is wrapped separately to handle missing tables gracefully
   try {
     await prisma.tracking_events.deleteMany()
+  } catch {
+    // Table might not exist
+  }
+  
+  try {
+    await prisma.omg_purchase_orders.deleteMany()
+  } catch {
+    // Table might not exist
+  }
+  
+  try {
     await prisma.shipments.deleteMany()
+  } catch {
+    // Table might not exist
+  }
+  
+  try {
     await prisma.scanned_conversations.deleteMany()
+  } catch {
+    // Table might not exist
+  }
+  
+  try {
     await prisma.sync_history.deleteMany()
-  } catch (error) {
-    // Ignore errors during cleanup - tables might not exist yet
-    console.warn('Cleanup warning:', error)
+  } catch {
+    // Table might not exist
   }
 })
