@@ -135,7 +135,7 @@ const shipmentsRouter = {
           const base = formatShipmentForApi(shipment)
           
           if (omgPo) {
-            const urls = getOmgUrls(omgPo.omg_order_uuid, omgPo.omg_po_uuid)
+            const urls = getOmgUrls(omgPo.omg_order_id, omgPo.omg_po_id)
             return {
               ...base,
               omgData: {

@@ -55,8 +55,8 @@ model omg_purchase_orders {
 
   // OMG identifiers
   order_number   String    @db.VarChar(50) // Human-readable order number (e.g., "164")
-  omg_order_uuid String    @db.VarChar(50) // MongoDB ObjectID for URLs
-  omg_po_uuid    String    @db.VarChar(50) // MongoDB ObjectID for URLs
+  omg_order_id   String    @db.VarChar(50) // MongoDB ObjectID for URLs
+  omg_po_id      String    @db.VarChar(50) // MongoDB ObjectID for URLs
 
   // Denormalized order data
   order_name     String?   @db.VarChar(255) // e.g., "Sample Order"
@@ -72,7 +72,7 @@ model omg_purchase_orders {
   // Relations
   shipment       shipments? @relation(fields: [shipment_id], references: [id], onDelete: SetNull)
 
-  @@unique([omg_po_uuid]) // Each OMG PO should only appear once
+  @@unique([omg_po_id]) // Each OMG PO should only appear once
   @@index([po_number], map: "idx_omg_po_number")
   @@index([order_number], map: "idx_omg_order_number")
 }

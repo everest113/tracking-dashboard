@@ -72,13 +72,13 @@ export async function syncPurchaseOrder(
 
     // Upsert the OMG purchase order record
     const omgPo = await prisma.omg_purchase_orders.upsert({
-      where: { omg_po_uuid: po._id },
+      where: { omg_po_id: po._id },
       create: {
         shipment_id: shipment?.id ?? null,
         po_number: po.poNumber,
         order_number: order.number, // Human-readable order number (e.g., "164")
-        omg_order_uuid: order._id, // MongoDB ObjectID for URLs
-        omg_po_uuid: po._id, // MongoDB ObjectID for URLs
+        omg_order_id: order._id, // MongoDB ObjectID for URLs
+        omg_po_id: po._id, // MongoDB ObjectID for URLs
         order_name: order.name,
         customer_name: order.customer?.name ?? null,
         recipients: extractRecipients(po),
@@ -165,7 +165,7 @@ export async function getShipmentOmgData(shipmentId: number) {
 
   return {
     ...omgPo,
-    urls: getOmgUrls(omgPo.omg_order_uuid, omgPo.omg_po_uuid),
+    urls: getOmgUrls(omgPo.omg_order_id, omgPo.omg_po_id),
   }
 }
 
