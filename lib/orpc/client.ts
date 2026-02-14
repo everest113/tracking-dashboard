@@ -10,6 +10,9 @@ import type { AppRouter } from './router'
  * 
  * This client is designed for use in React components via useEffect or event handlers.
  * It should NOT be used during server-side rendering.
+ * 
+ * The client is created at module load time, which is fine because 'use client'
+ * ensures this only runs in the browser where window.location is available.
  */
 function getBaseUrl(): string {
   // Client-side: use current origin (works regardless of port)
@@ -22,29 +25,15 @@ function getBaseUrl(): string {
     return `${process.env.NEXT_PUBLIC_APP_URL}/api/orpc`
   }
   
-  // Fallback for build time - use relative URL
+  // Fallback for build time - use relative URL (fetch will resolve against origin)
   return '/api/orpc'
 }
 
-// Lazy-initialize the client to ensure window.location is available
-let _api: RouterClient<AppRouter> | null = null
-
-function getApi(): RouterClient<AppRouter> {
-  if (!_api) {
-    const link = new RPCLink({
-      url: getBaseUrl(),
-    })
-    _api = createORPCClient<RouterClient<AppRouter>>(link)
-  }
-  return _api
-}
-
-// Proxy that lazily initializes the client on first access
-export const api = new Proxy({} as RouterClient<AppRouter>, {
-  get(_target, prop) {
-    return getApi()[prop as keyof RouterClient<AppRouter>]
-  },
+const link = new RPCLink({
+  url: getBaseUrl(),
 })
+
+export const api = createORPCClient<RouterClient<AppRouter>>(link)
 
 // Re-export types for consumers
 export type { AppRouter }
