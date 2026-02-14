@@ -310,6 +310,84 @@ const shipmentsRouter = {
           trackingNumber: shipment.tracking_number,
         }
       }),
+
+  /**
+   * Sync shipment tracking to OMG Orders
+   * Pushes tracking number to the matching PO in OMG
+   */
+  syncToOmg: publicProcedure
+      .input(z.object({
+        shipmentId: z.number(),
+      }))
+      .output(z.object({
+        success: z.boolean(),
+        message: z.string(),
+        poNumber: z.string().nullish(),
+      }))
+      .handler(async ({ context, input }) => {
+        const { shipmentId } = input
+        
+        // Get shipment
+        const shipment = await context.prisma.shipments.findUnique({
+          where: { id: shipmentId },
+        })
+        
+        if (!shipment) {
+          throw new ORPCError('NOT_FOUND', {
+            message: `Shipment with ID ${shipmentId} not found`,
+          })
+        }
+        
+        // Validate required fields
+        if (!shipment.po_number) {
+          return {
+            success: false,
+            message: 'Shipment has no PO number',
+            poNumber: null,
+          }
+        }
+        
+        if (!shipment.carrier) {
+          return {
+            success: false,
+            message: 'Shipment has no carrier',
+            poNumber: shipment.po_number,
+          }
+        }
+        
+        // Import OMG client dynamically to avoid issues if env vars not set
+        const { addTrackingToPurchaseOrder } = await import('@/lib/infrastructure/omg')
+        
+        try {
+          const result = await addTrackingToPurchaseOrder(shipment.po_number, {
+            trackingNumber: shipment.tracking_number,
+            carrier: shipment.carrier,
+            status: 'Shipped',
+          })
+          
+          if (result) {
+            console.log(`✅ Synced shipment ${shipment.tracking_number} to OMG PO ${shipment.po_number}`)
+            return {
+              success: true,
+              message: `Tracking synced to OMG PO ${shipment.po_number}`,
+              poNumber: shipment.po_number,
+            }
+          } else {
+            return {
+              success: false,
+              message: `PO ${shipment.po_number} not found in OMG`,
+              poNumber: shipment.po_number,
+            }
+          }
+        } catch (err) {
+          console.error(`❌ Failed to sync to OMG:`, err)
+          return {
+            success: false,
+            message: err instanceof Error ? err.message : 'Unknown error syncing to OMG',
+            poNumber: shipment.po_number,
+          }
+        }
+      }),
 }
 const trackingStatsRouter = {
   get: publicProcedure

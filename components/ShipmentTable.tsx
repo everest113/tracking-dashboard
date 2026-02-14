@@ -14,7 +14,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { Package, MapPin, ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight, CheckCircle2, AlertCircle, TruckIcon, Search, Copy, Check, RefreshCw, Loader2, MoreHorizontal, Trash2, ExternalLink } from 'lucide-react'
+import { Package, MapPin, ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight, CheckCircle2, AlertCircle, TruckIcon, Search, Copy, Check, RefreshCw, Loader2, MoreHorizontal, Trash2, ExternalLink, Upload } from 'lucide-react'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import {
   DropdownMenu,
@@ -82,6 +82,7 @@ export default function ShipmentTable({
   const [copiedTracking, setCopiedTracking] = useState<string | null>(null)
   const [refreshingShipmentId, setRefreshingShipmentId] = useState<number | null>(null)
   const [deletingShipmentId, setDeletingShipmentId] = useState<number | null>(null)
+  const [syncingToOmgId, setSyncingToOmgId] = useState<number | null>(null)
 
   // Get current sort from URL
   const sortField = searchParams.get('sortField') as SortField | null
@@ -159,6 +160,28 @@ export default function ShipmentTable({
       console.error('Failed to delete shipment:', error)
     } finally {
       setDeletingShipmentId(null)
+    }
+  }
+
+  const handleSyncToOmg = async (shipmentId: number, poNumber?: string | null) => {
+    if (!poNumber) {
+      alert('This shipment has no PO number. Cannot sync to OMG.')
+      return
+    }
+    
+    setSyncingToOmgId(shipmentId)
+    try {
+      const result = await api.shipments.syncToOmg({ shipmentId })
+      if (result.success) {
+        alert(`✅ ${result.message}`)
+      } else {
+        alert(`⚠️ ${result.message}`)
+      }
+    } catch (error) {
+      console.error('Failed to sync to OMG:', error)
+      alert('Failed to sync to OMG. Check console for details.')
+    } finally {
+      setSyncingToOmgId(null)
     }
   }
 
@@ -498,9 +521,9 @@ export default function ShipmentTable({
                             variant="ghost"
                             size="sm"
                             className="h-8 w-8 p-0"
-                            disabled={refreshingShipmentId === shipment.id || deletingShipmentId === shipment.id}
+                            disabled={refreshingShipmentId === shipment.id || deletingShipmentId === shipment.id || syncingToOmgId === shipment.id}
                           >
-                            {(refreshingShipmentId === shipment.id || deletingShipmentId === shipment.id) ? (
+                            {(refreshingShipmentId === shipment.id || deletingShipmentId === shipment.id || syncingToOmgId === shipment.id) ? (
                               <Loader2 className="h-4 w-4 animate-spin" />
                             ) : (
                               <MoreHorizontal className="h-4 w-4" />
@@ -521,6 +544,15 @@ export default function ShipmentTable({
                               <DropdownMenuSeparator />
                             </>
                           )}
+                          <DropdownMenuItem
+                            onClick={() => handleSyncToOmg(shipment.id, shipment.poNumber)}
+                            disabled={syncingToOmgId === shipment.id || !shipment.poNumber}
+                          >
+                            <Upload className="h-4 w-4 mr-2" />
+                            Sync to OMG
+                            {!shipment.poNumber && <span className="ml-1 text-xs text-muted-foreground">(no PO)</span>}
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
                           <DropdownMenuItem
                             onClick={() => handleDeleteShipment(shipment.id)}
                             disabled={deletingShipmentId === shipment.id}
