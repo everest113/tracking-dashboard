@@ -455,9 +455,8 @@ export default function ShipmentTable({
                 }
 
                 return (
-                  <Collapsible key={shipment.id} asChild open={isExpanded}>
-                    <>
-                      <TableRow
+                  <Collapsible key={shipment.id} open={isExpanded} className="contents">
+                    <TableRow
                         className={cn(
                           'group',
                           isExpanded && 'bg-muted/50',
@@ -820,7 +819,6 @@ export default function ShipmentTable({
                           </TableCell>
                         </TableRow>
                       </CollapsibleContent>
-                    </>
                   </Collapsible>
                 )
               })
