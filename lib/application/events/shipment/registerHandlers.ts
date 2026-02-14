@@ -1,5 +1,11 @@
 import { registerEventHandler } from '@/lib/application/events/registry'
-import { triggerShipmentNotification, KnockWorkflows } from '@/lib/infrastructure/notifications/knock'
+import {
+  triggerShipmentWorkflow,
+  upsertShipmentObject,
+  KnockWorkflows,
+  type ShipmentObjectData,
+  type TriggerOptions,
+} from '@/lib/infrastructure/notifications/knock'
 import { ShipmentEventTopics } from './topics'
 import type { QueuedEvent } from '@/lib/application/events/types'
 import type { ShipmentEventPayload } from './buildShipmentEvents'
@@ -14,51 +20,115 @@ const topicToWorkflow: Record<string, string> = {
   [ShipmentEventTopics.Exception]: KnockWorkflows.ShipmentException,
 }
 
+/**
+ * Build Knock object data from shipment snapshot.
+ */
+function toShipmentObjectData(snapshot: ShipmentEventPayload['current']): ShipmentObjectData {
+  return {
+    trackingNumber: snapshot.trackingNumber,
+    status: snapshot.status,
+    carrier: snapshot.carrier,
+    poNumber: snapshot.poNumber,
+    supplier: snapshot.supplier,
+    estimatedDelivery: snapshot.estimatedDelivery,
+    deliveredDate: snapshot.deliveredDate,
+    shippedDate: snapshot.shippedDate,
+  }
+}
+
+/**
+ * Get trigger options for a shipment event.
+ * 
+ * TODO: Implement tenant/actor lookup based on your data model:
+ * - tenant: Could be the customer account ID from the order
+ * - actor: Could be the CSM or system user who triggered the update
+ */
+function getTriggerOptions(
+  eventId: string,
+  payload: ShipmentEventPayload
+): TriggerOptions {
+  const shipmentId = payload.current.shipmentId.toString()
+  
+  return {
+    // Idempotency key prevents duplicate notifications for the same event
+    idempotencyKey: `${eventId}:${shipmentId}`,
+    
+    // Cancellation key allows canceling in-progress workflows
+    cancellationKey: `shipment:${shipmentId}`,
+    
+    // TODO: Look up tenant from order/project data
+    // tenant: getTenantForShipment(payload.current.poNumber),
+    
+    // TODO: Pass actor if this was triggered by a user action
+    // actor: getActorForEvent(eventId),
+  }
+}
+
 function createHandler(topic: string) {
   return async (event: QueuedEvent<ShipmentEventPayload>) => {
     const payload = event.payload
     console.log(`[event] ${topic}`, JSON.stringify(payload))
 
-    // Trigger Knock workflow (if configured and has recipients)
-    const knockWorkflow = topicToWorkflow[topic]
-    if (knockWorkflow && payload.current) {
-      const recipients = getRecipientsForShipment(payload)
+    if (!payload.current) {
+      console.warn(`[event] ${topic} - missing current payload, skipping`)
+      return
+    }
 
-      await triggerShipmentNotification(knockWorkflow, recipients, {
-        trackingNumber: payload.current.trackingNumber,
-        status: payload.current.status,
-        carrier: payload.current.carrier,
-        poNumber: payload.current.poNumber,
-        previousStatus: payload.previous?.status,
-        estimatedDelivery: payload.current.estimatedDelivery,
-        deliveredDate: payload.current.deliveredDate,
-      })
+    const shipmentId = payload.current.shipmentId.toString()
+
+    // 1. Upsert shipment as a Knock Object (keeps Knock in sync)
+    await upsertShipmentObject(shipmentId, toShipmentObjectData(payload.current))
+
+    // 2. Trigger the appropriate workflow
+    const knockWorkflow = topicToWorkflow[topic]
+    if (knockWorkflow) {
+      const options = getTriggerOptions(event.id, payload)
+
+      await triggerShipmentWorkflow(
+        knockWorkflow,
+        shipmentId,
+        {
+          trackingNumber: payload.current.trackingNumber,
+          status: payload.current.status,
+          carrier: payload.current.carrier,
+          poNumber: payload.current.poNumber,
+          previousStatus: payload.previous?.status ?? null,
+          estimatedDelivery: payload.current.estimatedDelivery,
+          deliveredDate: payload.current.deliveredDate,
+        },
+        options
+      )
     }
   }
 }
 
 /**
- * Determine who should receive notifications for a shipment event.
- *
- * TODO: Implement actual recipient lookup based on:
- * - payload.current.poNumber -> lookup order -> customer contacts
- * - Shipment metadata with contact info
- * - Account notification settings
- *
- * For now, returns empty array (no notifications sent).
- * Add recipient user IDs here to enable notifications.
+ * Handler for shipment.updated events.
+ * Only syncs the object to Knock, doesn't trigger a workflow.
  */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function getRecipientsForShipment(_payload: ShipmentEventPayload): string[] {
-  // Example: return ['user-123'] to notify a specific user
-  // In production: look up actual recipients from order/project data
-  return []
+function createUpdatedHandler() {
+  return async (event: QueuedEvent<ShipmentEventPayload>) => {
+    const payload = event.payload
+    console.log(`[event] ${ShipmentEventTopics.Updated}`, JSON.stringify(payload))
+
+    if (!payload.current) {
+      return
+    }
+
+    const shipmentId = payload.current.shipmentId.toString()
+
+    // Just sync the object - no workflow trigger for generic updates
+    await upsertShipmentObject(shipmentId, toShipmentObjectData(payload.current))
+  }
 }
 
 export function registerShipmentEventHandlers() {
+  // Events that trigger workflows
   registerEventHandler(ShipmentEventTopics.Created, createHandler(ShipmentEventTopics.Created))
-  registerEventHandler(ShipmentEventTopics.Updated, createHandler(ShipmentEventTopics.Updated))
   registerEventHandler(ShipmentEventTopics.StatusChanged, createHandler(ShipmentEventTopics.StatusChanged))
   registerEventHandler(ShipmentEventTopics.Delivered, createHandler(ShipmentEventTopics.Delivered))
   registerEventHandler(ShipmentEventTopics.Exception, createHandler(ShipmentEventTopics.Exception))
+
+  // Updated just syncs the object, no workflow
+  registerEventHandler(ShipmentEventTopics.Updated, createUpdatedHandler())
 }

@@ -2,15 +2,112 @@
 
 This directory contains the [Knock](https://knock.app) integration for sending notifications.
 
-## Why Knock?
+## Architecture
 
-Instead of building our own notification infrastructure (templates, queues, channel adapters, preferences), we use Knock which handles all of this out of the box:
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    KNOCK DATA MODEL                          │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  Objects (Collection: "shipments")                           │
+│  └── Shipment "ship_123"                                    │
+│      ├── trackingNumber, status, carrier, etc.              │
+│      └── Subscribers: [user-1, user-2, ...]                 │
+│                                                              │
+│  Users                                                       │
+│  └── "user-1"                                               │
+│      ├── email, name, phone_number                          │
+│      └── timezone, locale, avatar                           │
+│                                                              │
+│  Tenants (optional)                                          │
+│  └── Customer accounts for branding/scoping                 │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
 
-- **Multi-channel delivery** - Email, Slack, SMS, Push, In-App
-- **Visual template editor** - Non-developers can edit templates
-- **User preferences** - Built-in preference management
-- **Retry & deliverability** - Knock handles failures and retries
-- **Analytics** - Track delivery and engagement
+┌─────────────────────────────────────────────────────────────┐
+│                    NOTIFICATION FLOW                         │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  1. Shipment event fires (shipment.delivered)               │
+│  2. Handler upserts shipment as Knock Object                │
+│  3. Handler triggers workflow with shipment as recipient    │
+│  4. Knock fans out to all subscribed users                  │
+│  5. Users receive notifications on configured channels      │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## Key Concepts
+
+### Objects & Subscriptions
+
+Shipments are represented as **Knock Objects**. Users **subscribe** to shipments they want notifications for. When a workflow is triggered for a shipment, Knock automatically notifies all subscribers.
+
+```typescript
+import { 
+  upsertShipmentObject, 
+  subscribeToShipment,
+  triggerShipmentWorkflow 
+} from '@/lib/infrastructure/notifications/knock'
+
+// 1. Sync shipment to Knock
+await upsertShipmentObject('ship-123', {
+  trackingNumber: '1Z999...',
+  status: 'in_transit',
+  carrier: 'UPS',
+  // ...
+})
+
+// 2. Subscribe users who should receive notifications
+await subscribeToShipment('ship-123', ['user-customer', 'user-csm'])
+
+// 3. Trigger workflow - Knock notifies all subscribers
+await triggerShipmentWorkflow('shipment-delivered', 'ship-123', {
+  trackingNumber: '1Z999...',
+  status: 'delivered',
+  // ...
+})
+```
+
+### Tenants (Multi-tenancy)
+
+Pass a `tenant` to scope notifications to a customer account:
+
+```typescript
+await triggerShipmentWorkflow('shipment-delivered', 'ship-123', data, {
+  tenant: 'acme-corp',  // Customer account ID
+})
+```
+
+Benefits:
+- Per-tenant branding in emails
+- Scoped in-app notification feeds
+- Per-tenant preference defaults
+
+### Actors
+
+Pass an `actor` when a user triggered the event:
+
+```typescript
+await triggerShipmentWorkflow('shipment-status-changed', 'ship-123', data, {
+  actor: 'user-csm-123',  // CSM who updated the status
+})
+```
+
+Benefits:
+- Actor is excluded from notifications (they already know)
+- Actor shown in notification: "Jane updated the shipment"
+- Better audit trail
+
+### Idempotency
+
+Prevent duplicate notifications:
+
+```typescript
+await triggerShipmentWorkflow('shipment-delivered', 'ship-123', data, {
+  idempotencyKey: `${eventId}:ship-123`,
+})
+```
 
 ## Setup
 
@@ -27,26 +124,24 @@ KNOCK_API_KEY=sk_your_secret_key_here
 
 ### 3. Create Workflows in Knock Dashboard
 
-Create these workflows:
-
-| Workflow Key | Trigger Event | Purpose |
-|--------------|---------------|---------|
-| `shipment-created` | New shipment added | Welcome/confirmation |
+| Workflow Key | Trigger | Purpose |
+|--------------|---------|---------|
+| `shipment-created` | New shipment | Welcome/confirmation |
 | `shipment-status-changed` | Status update | Progress notification |
 | `shipment-delivered` | Delivery confirmed | Delivery notification |
 | `shipment-exception` | Issue detected | Alert notification |
 
-### 4. Configure Workflow Steps
+### 4. Configure Workflow Channels
 
 Each workflow can have multiple channel steps:
 
-- **Email** - Design with Knock's editor or import HTML
+- **Email** - Design with Knock's visual editor
 - **Slack** - Send to channels or DMs
 - **SMS** - Via Twilio, MessageBird, etc.
 - **Push** - iOS, Android, Web
 - **In-App** - Notification feed component
 
-## Data Available in Templates
+## Template Data
 
 All shipment workflows receive:
 
@@ -62,7 +157,7 @@ All shipment workflows receive:
 }
 ```
 
-### Example Email Template
+Access in templates:
 
 ```handlebars
 Subject: Shipment {{trackingNumber}} - {{status}}
@@ -75,35 +170,95 @@ Your shipment is now **{{status}}**.
 - **Carrier:** {{carrier}}
 {{#if poNumber}}- **PO:** {{poNumber}}{{/if}}
 
-Track your package: [View Status](https://track.example.com/{{trackingNumber}})
+Track your package: [View Status](https://example.com/track/{{trackingNumber}})
+```
+
+## API Reference
+
+### Object Management
+
+```typescript
+// Upsert shipment object
+await upsertShipmentObject(shipmentId, data)
+
+// Delete shipment object
+await deleteShipmentObject(shipmentId)
+```
+
+### Subscriptions
+
+```typescript
+// Subscribe users to shipment
+await subscribeToShipment(shipmentId, ['user-1', 'user-2'])
+
+// Unsubscribe users
+await unsubscribeFromShipment(shipmentId, ['user-1'])
+
+// Get subscribers
+const { subscribers } = await getShipmentSubscribers(shipmentId)
+```
+
+### Users
+
+```typescript
+// Identify user with full properties
+await identifyUser('user-123', {
+  email: 'user@example.com',
+  name: 'John Doe',
+  phone_number: '+1234567890',
+  timezone: 'America/New_York',
+  locale: 'en-US',
+  avatar: 'https://...',
+  // Custom properties
+  role: 'customer',
+  company: 'Acme Corp',
+})
+
+// Delete user
+await deleteUser('user-123')
+```
+
+### Workflow Triggers
+
+```typescript
+// Trigger for shipment (fans out to subscribers)
+await triggerShipmentWorkflow(workflow, shipmentId, data, {
+  tenant: 'acme-corp',
+  actor: 'user-csm',
+  idempotencyKey: 'unique-key',
+  cancellationKey: 'cancel-key',
+})
+
+// Trigger for specific users
+await triggerWorkflowForUsers(workflow, userIds, data, options)
+
+// Cancel a workflow
+await cancelWorkflow(workflow, cancellationKey, recipientIds)
 ```
 
 ## Development Mode
 
 Without `KNOCK_API_KEY`:
-- Notifications log to console
+- All functions succeed but log to console
 - No external API calls
 - Safe for local development
 
-## Adding Recipients
+## Integration Points
 
-Edit `getRecipientsForShipment()` in `registerHandlers.ts` to look up actual users:
+### When to Subscribe Users
 
-```typescript
-function getRecipientsForShipment(payload: ShipmentEventPayload): string[] {
-  // Look up customer from order
-  const customer = await getCustomerByPO(payload.current.poNumber)
-  return customer ? [customer.id] : []
-}
-```
+- Customer views/claims a shipment
+- CSM is assigned to an account
+- User enables notifications for a PO
 
-Recipients must be identified in Knock first:
+### When to Identify Users
 
-```typescript
-import { identifyUser } from '@/lib/infrastructure/notifications/knock'
+- User signs up
+- User profile is updated
+- User's email/phone changes
 
-await identifyUser('customer-123', {
-  email: 'customer@example.com',
-  name: 'Jane Doe',
-})
-```
+### When to Set Tenant
+
+- All notifications for a customer account
+- When brand customization is needed
+- For scoped in-app feeds
