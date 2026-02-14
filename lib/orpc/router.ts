@@ -5,6 +5,10 @@ import { shipmentSchema } from '@/lib/validations'
 import { getShipmentTrackingService } from '@/lib/application/ShipmentTrackingService'
 import { Prisma } from '@prisma/client'
 import { getErrorMessage } from '@/lib/utils/fetch-helpers'
+
+// Register domain event handlers (side effects like OMG sync)
+import '@/lib/domain/events/handlers'
+import { domainEvents } from '@/lib/domain/events'
 import {
   ShipmentListQuerySchema,
   ShipmentSummarySchema,
@@ -228,14 +232,12 @@ const shipmentsRouter = {
           },
         })
 
-        // Auto-sync with OMG if shipment has a PO number (non-blocking)
-        if (input.poNumber) {
-          import('@/lib/infrastructure/omg').then(({ syncShipmentOmgData }) => {
-            syncShipmentOmgData(shipment.id).catch((err) => {
-              console.warn(`[OMG] Auto-sync failed for shipment ${shipment.id}:`, err)
-            })
-          })
-        }
+        // Emit domain event - handlers will take care of side effects (OMG sync, etc.)
+        domainEvents.emit('ShipmentCreated', {
+          shipmentId: shipment.id,
+          trackingNumber: shipment.tracking_number,
+          poNumber: input.poNumber,
+        })
 
         return formatShipmentForApi(serializeShipment(shipment))
       }),
@@ -1220,6 +1222,15 @@ const frontRouter = {
                         })
                         shipmentsToRegister.push(updatedShipment)
                         results.updated++
+
+                        // Emit event if PO was linked/changed
+                        if (shipment.poNumber && shipment.poNumber !== existing.po_number) {
+                          domainEvents.emit('ShipmentPOLinked', {
+                            shipmentId: updatedShipment.id,
+                            poNumber: shipment.poNumber,
+                            previousPoNumber: existing.po_number,
+                          })
+                        }
                       } else {
                         results.skipped++
                         if (!existing.front_conversation_id) {
@@ -1250,6 +1261,13 @@ const frontRouter = {
                     })
                     shipmentsToRegister.push(newShipment)
                     results.added++
+
+                    // Emit domain event for side effects (OMG sync, etc.)
+                    domainEvents.emit('ShipmentCreated', {
+                      shipmentId: newShipment.id,
+                      trackingNumber: newShipment.tracking_number,
+                      poNumber: newShipment.po_number,
+                    })
                   }
                   if (shipmentsToRegister.length > 0) {
                     try {
