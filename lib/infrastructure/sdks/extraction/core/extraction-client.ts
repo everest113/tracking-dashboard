@@ -12,6 +12,77 @@ ALL fields are required - use empty string "" for missing text fields.
 Return only valid, high-confidence data.`
 
 /**
+ * Check if an error is a transient network error that should be retried
+ */
+function isTransientError(error: unknown): boolean {
+  if (error instanceof Error) {
+    const message = error.message.toLowerCase()
+    const cause = (error as { cause?: Error }).cause
+    
+    // Check for common transient error codes
+    const transientCodes = ['EPIPE', 'ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN']
+    for (const code of transientCodes) {
+      if (message.includes(code.toLowerCase())) return true
+      if (cause && 'code' in cause && cause.code === code) return true
+    }
+    
+    // Check for API connection errors
+    if (message.includes('cannot connect to api')) return true
+    if (message.includes('network error')) return true
+    if (message.includes('socket hang up')) return true
+    if (message.includes('write epipe')) return true
+  }
+  return false
+}
+
+/**
+ * Sleep for a given number of milliseconds
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+/**
+ * Retry a function with exponential backoff
+ */
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  options: { maxAttempts?: number; baseDelayMs?: number; maxDelayMs?: number } = {}
+): Promise<T> {
+  const { maxAttempts = 5, baseDelayMs = 1000, maxDelayMs = 30000 } = options
+  
+  let lastError: unknown
+  
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fn()
+    } catch (error) {
+      lastError = error
+      
+      // Only retry transient errors
+      if (!isTransientError(error)) {
+        throw error
+      }
+      
+      if (attempt === maxAttempts) {
+        console.error(`[Extraction] Failed after ${maxAttempts} attempts`, error)
+        throw error
+      }
+      
+      // Exponential backoff with jitter
+      const delay = Math.min(baseDelayMs * Math.pow(2, attempt - 1), maxDelayMs)
+      const jitter = Math.random() * 0.3 * delay // 0-30% jitter
+      const totalDelay = Math.round(delay + jitter)
+      
+      console.warn(`[Extraction] Attempt ${attempt} failed with transient error, retrying in ${totalDelay}ms...`)
+      await sleep(totalDelay)
+    }
+  }
+  
+  throw lastError
+}
+
+/**
  * Generic extraction client powered by Vercel AI SDK
  * 
  * This is the core extraction engine that all domain-specific
@@ -29,7 +100,7 @@ export class GenericExtractionClient implements ExtractionClient {
       model = 'gpt-4o-mini',
     } = input
 
-    try {
+    return withRetry(async () => {
       const { object } = await generateObject({
         model: openai(model),
         schema,
@@ -38,10 +109,11 @@ export class GenericExtractionClient implements ExtractionClient {
       })
 
       return object as ExtractionOutput<TSchema>
-    } catch (error) {
-      console.error('Extraction error:', error)
-      throw error
-    }
+    }, {
+      maxAttempts: 5,
+      baseDelayMs: 1000,
+      maxDelayMs: 30000,
+    })
   }
 }
 
