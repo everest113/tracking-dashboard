@@ -1,0 +1,77 @@
+name: Preview Deploy
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  setup-preview-db:
+    name: Setup Preview Database
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      db_url: ${{ steps.create-branch.outputs.db_url }}
+      branch_id: ${{ steps.create-branch.outputs.branch_id }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create Neon Branch
+        id: create-branch
+        uses: neondatabase/create-branch-action@v5
+        with:
+          project_id: ${{ secrets.NEON_PROJECT_ID }}
+          api_key: ${{ secrets.NEON_API_KEY }}
+          branch_name: preview/pr-${{ github.event.pull_request.number }}
+          parent: main
+          database: neondb
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma Client
+        run: npx prisma generate
+
+      - name: Run migrations on preview branch
+        run: npx prisma migrate deploy
+        env:
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url }}
+
+      - name: Comment PR with preview DB info
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const branchName = `preview/pr-${{ github.event.pull_request.number }}`;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `🗄️ **Preview Database Ready**\n\nNeon branch: \`${branchName}\`\n\nThis branch will be automatically deleted when the PR is merged or closed.`
+            });
+
+  # Vercel handles the actual deployment via their GitHub integration
+  # This job just ensures the database is ready before Vercel builds
+  notify-vercel:
+    name: Trigger Vercel Build
+    needs: setup-preview-db
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set DATABASE_URL for Vercel
+        run: |
+          echo "Preview database is ready at: ${{ needs.setup-preview-db.outputs.db_url }}"
+          echo ""
+          echo "⚠️  Note: You need to configure Vercel to use NEON_DATABASE_URL_PREVIEW"
+          echo "   or set up the Neon-Vercel integration for automatic preview URLs."

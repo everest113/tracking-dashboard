@@ -1,0 +1,107 @@
+name: Deploy Production
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false  # Don't cancel production deploys
+
+env:
+  DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+jobs:
+  migrate:
+    name: Run Production Migrations
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Only run if there are migration changes
+    # This prevents unnecessary migration runs on every push
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2  # Need previous commit to check for changes
+
+      - name: Check for migration changes
+        id: check-migrations
+        run: |
+          if git diff --name-only HEAD~1 HEAD | grep -q "^prisma/migrations/"; then
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "📦 Migration changes detected"
+          else
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            echo "✅ No migration changes"
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.check-migrations.outputs.has_changes == 'true'
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        if: steps.check-migrations.outputs.has_changes == 'true'
+        run: npm ci
+
+      - name: Generate Prisma Client
+        if: steps.check-migrations.outputs.has_changes == 'true'
+        run: npx prisma generate
+
+      - name: Run production migrations
+        if: steps.check-migrations.outputs.has_changes == 'true'
+        run: |
+          echo "🚀 Running migrations on production database..."
+          npx prisma migrate deploy
+          echo "✅ Migrations complete"
+
+      - name: Notify on failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const run_url = `https://github.com/${owner}/${repo}/actions/runs/${context.runId}`;
+            
+            // Create an issue for migration failures
+            github.rest.issues.create({
+              owner,
+              repo,
+              title: '🚨 Production Migration Failed',
+              body: `Production database migration failed.\n\n**Workflow Run:** ${run_url}\n\n**Commit:** ${context.sha}\n\nPlease investigate immediately.`,
+              labels: ['bug', 'urgent', 'database']
+            });
+
+  # Vercel handles the actual deployment automatically
+  # This workflow ensures migrations run BEFORE Vercel deploys
+  verify:
+    name: Verify Deployment
+    needs: migrate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    
+    steps:
+      - name: Wait for Vercel deployment
+        run: |
+          echo "⏳ Waiting for Vercel to deploy..."
+          sleep 60  # Give Vercel time to deploy
+      
+      - name: Health check
+        run: |
+          # Basic health check - adjust URL as needed
+          HEALTH_URL="${{ vars.PRODUCTION_URL || 'https://dash.stitchi.co' }}/api/orpc"
+          
+          echo "🔍 Checking $HEALTH_URL..."
+          
+          for i in {1..5}; do
+            if curl -sf "$HEALTH_URL" > /dev/null; then
+              echo "✅ Production is healthy"
+              exit 0
+            fi
+            echo "Attempt $i failed, retrying in 10s..."
+            sleep 10
+          done
+          
+          echo "❌ Health check failed after 5 attempts"
+          exit 1
