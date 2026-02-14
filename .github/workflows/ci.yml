@@ -75,7 +75,7 @@ jobs:
           POSTGRES_PASSWORD: shadow
           POSTGRES_DB: shadow_db
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -U shadow -d shadow_db"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -92,6 +92,17 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Wait for PostgreSQL
+        run: |
+          for i in {1..30}; do
+            if pg_isready -h localhost -p 5433 -U shadow; then
+              echo "PostgreSQL is ready"
+              break
+            fi
+            echo "Waiting for PostgreSQL... ($i/30)"
+            sleep 1
+          done
 
       - name: Check for schema drift
         run: |

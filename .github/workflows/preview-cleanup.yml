@@ -4,6 +4,10 @@ on:
   pull_request:
     types: [closed]
 
+permissions:
+  pull-requests: write
+  contents: read
+
 jobs:
   cleanup-preview-db:
     name: Delete Preview Database
