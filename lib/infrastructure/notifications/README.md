@@ -1,264 +1,161 @@
-# Knock Notifications
+# Notification Infrastructure
 
-This directory contains the [Knock](https://knock.app) integration for sending notifications.
+This directory contains the [Knock](https://knock.app) implementation of the notification system.
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    KNOCK DATA MODEL                          │
+│                    APPLICATION LAYER                         │
 ├─────────────────────────────────────────────────────────────┤
 │                                                              │
-│  Objects (Collection: "shipments")                           │
-│  └── Shipment "ship_123"                                    │
-│      ├── trackingNumber, status, carrier, etc.              │
-│      └── Subscribers: [user-1, user-2, ...]                 │
-│                                                              │
-│  Users                                                       │
-│  └── "user-1"                                               │
-│      ├── email, name, phone_number                          │
-│      └── timezone, locale, avatar                           │
-│                                                              │
-│  Tenants (optional)                                          │
-│  └── Customer accounts for branding/scoping                 │
+│  lib/application/notifications/                              │
+│  ├── ports/                    # Interfaces (abstractions)  │
+│  │   ├── NotificationService   # Workflow triggers          │
+│  │   ├── ObjectRepository      # Object & subscription mgmt │
+│  │   └── UserRepository        # User identification        │
+│  ├── types.ts                  # Domain types               │
+│  ├── ShipmentNotificationService.ts  # Shipment-specific   │
+│  └── index.ts                  # Factory/singleton          │
 │                                                              │
 └─────────────────────────────────────────────────────────────┘
-
+                              │
+                              │ implements
+                              ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                    NOTIFICATION FLOW                         │
+│                  INFRASTRUCTURE LAYER                        │
 ├─────────────────────────────────────────────────────────────┤
 │                                                              │
-│  1. Shipment event fires (shipment.delivered)               │
-│  2. Handler upserts shipment as Knock Object                │
-│  3. Handler triggers workflow with shipment as recipient    │
-│  4. Knock fans out to all subscribed users                  │
-│  5. Users receive notifications on configured channels      │
+│  lib/infrastructure/notifications/knock/                     │
+│  ├── KnockClient.ts            # SDK singleton              │
+│  ├── KnockNotificationService  # Implements NotificationSvc │
+│  ├── KnockObjectRepository     # Implements ObjectRepo      │
+│  ├── KnockUserRepository       # Implements UserRepo        │
+│  └── index.ts                  # Exports & singletons       │
 │                                                              │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## Key Concepts
+## DDD Principles Applied
 
-### Objects & Subscriptions
+### 1. Dependency Inversion
+- Application layer defines interfaces (ports)
+- Infrastructure layer provides implementations (adapters)
+- Event handlers depend on abstractions, not Knock directly
 
-Shipments are represented as **Knock Objects**. Users **subscribe** to shipments they want notifications for. When a workflow is triggered for a shipment, Knock automatically notifies all subscribers.
+### 2. Single Responsibility
+- `KnockClient.ts` - SDK lifecycle only
+- `KnockNotificationService.ts` - Workflow triggers only
+- `KnockObjectRepository.ts` - Object operations only
+- `KnockUserRepository.ts` - User operations only
 
-```typescript
-import { 
-  upsertShipmentObject, 
-  subscribeToShipment,
-  triggerShipmentWorkflow 
-} from '@/lib/infrastructure/notifications/knock'
+### 3. Domain Isolation
+- `ShipmentNotificationService` contains shipment-specific logic
+- Infrastructure layer is generic (any collection, any workflow)
+- Domain types live in application layer
 
-// 1. Sync shipment to Knock
-await upsertShipmentObject('ship-123', {
-  trackingNumber: '1Z999...',
-  status: 'in_transit',
-  carrier: 'UPS',
-  // ...
-})
+## Benefits
 
-// 2. Subscribe users who should receive notifications
-await subscribeToShipment('ship-123', ['user-customer', 'user-csm'])
+| Aspect | Benefit |
+|--------|---------|
+| **Testability** | Mock interfaces in unit tests |
+| **Swappability** | Replace Knock by implementing interfaces |
+| **Maintainability** | Small, focused modules |
+| **Clarity** | Clear boundaries between layers |
 
-// 3. Trigger workflow - Knock notifies all subscribers
-await triggerShipmentWorkflow('shipment-delivered', 'ship-123', {
-  trackingNumber: '1Z999...',
-  status: 'delivered',
-  // ...
-})
-```
+## Usage
 
-### Tenants (Multi-tenancy)
-
-Pass a `tenant` to scope notifications to a customer account:
+### Event Handlers (Application Layer)
 
 ```typescript
-await triggerShipmentWorkflow('shipment-delivered', 'ship-123', data, {
-  tenant: 'acme-corp',  // Customer account ID
-})
-```
+import { getShipmentNotificationService } from '@/lib/application/notifications'
 
-Benefits:
-- Per-tenant branding in emails
-- Scoped in-app notification feeds
-- Per-tenant preference defaults
+const service = getShipmentNotificationService()
 
-### Actors
+// Sync shipment to notification system
+await service.syncShipment(shipmentId, objectData)
 
-Pass an `actor` when a user triggered the event:
+// Subscribe users
+await service.subscribeUsers(shipmentId, ['user-1', 'user-2'])
 
-```typescript
-await triggerShipmentWorkflow('shipment-status-changed', 'ship-123', data, {
-  actor: 'user-csm-123',  // CSM who updated the status
+// Trigger notification
+await service.notifyDelivered(shipmentId, notificationData, {
+  tenant: 'acme-corp',
+  actor: 'system',
+  idempotencyKey: `${eventId}:${shipmentId}`,
 })
 ```
 
-Benefits:
-- Actor is excluded from notifications (they already know)
-- Actor shown in notification: "Jane updated the shipment"
-- Better audit trail
-
-### Idempotency
-
-Prevent duplicate notifications:
+### Direct Infrastructure Access (When Needed)
 
 ```typescript
-await triggerShipmentWorkflow('shipment-delivered', 'ship-123', data, {
-  idempotencyKey: `${eventId}:ship-123`,
+import { getUserRepository } from '@/lib/infrastructure/notifications/knock'
+
+const userRepo = getUserRepository()
+await userRepo.identify('user-123', {
+  email: 'user@example.com',
+  name: 'John Doe',
+  timezone: 'America/New_York',
 })
 ```
 
 ## Setup
 
-### 1. Create a Knock Account
-
-Sign up at https://knock.app (free tier available)
-
-### 2. Set Environment Variable
+### 1. Environment
 
 ```bash
 # .env.local
-KNOCK_API_KEY=sk_your_secret_key_here
+KNOCK_API_KEY=sk_your_secret_key
 ```
 
-### 3. Create Workflows in Knock Dashboard
+### 2. Knock Dashboard
 
-| Workflow Key | Trigger | Purpose |
-|--------------|---------|---------|
-| `shipment-created` | New shipment | Welcome/confirmation |
-| `shipment-status-changed` | Status update | Progress notification |
-| `shipment-delivered` | Delivery confirmed | Delivery notification |
-| `shipment-exception` | Issue detected | Alert notification |
+Create these workflows:
+- `shipment-created`
+- `shipment-status-changed`
+- `shipment-delivered`
+- `shipment-exception`
 
-### 4. Configure Workflow Channels
-
-Each workflow can have multiple channel steps:
-
-- **Email** - Design with Knock's visual editor
-- **Slack** - Send to channels or DMs
-- **SMS** - Via Twilio, MessageBird, etc.
-- **Push** - iOS, Android, Web
-- **In-App** - Notification feed component
-
-## Template Data
-
-All shipment workflows receive:
-
-```json
-{
-  "trackingNumber": "1Z999AA10123456784",
-  "status": "delivered",
-  "carrier": "UPS",
-  "poNumber": "PO-12345",
-  "previousStatus": "in_transit",
-  "estimatedDelivery": "2024-01-15T00:00:00Z",
-  "deliveredDate": "2024-01-14T14:30:00Z"
-}
-```
-
-Access in templates:
-
-```handlebars
-Subject: Shipment {{trackingNumber}} - {{status}}
-
-Hi {{recipient.name}},
-
-Your shipment is now **{{status}}**.
-
-- **Tracking:** {{trackingNumber}}
-- **Carrier:** {{carrier}}
-{{#if poNumber}}- **PO:** {{poNumber}}{{/if}}
-
-Track your package: [View Status](https://example.com/track/{{trackingNumber}})
-```
-
-## API Reference
-
-### Object Management
-
-```typescript
-// Upsert shipment object
-await upsertShipmentObject(shipmentId, data)
-
-// Delete shipment object
-await deleteShipmentObject(shipmentId)
-```
-
-### Subscriptions
-
-```typescript
-// Subscribe users to shipment
-await subscribeToShipment(shipmentId, ['user-1', 'user-2'])
-
-// Unsubscribe users
-await unsubscribeFromShipment(shipmentId, ['user-1'])
-
-// Get subscribers
-const { subscribers } = await getShipmentSubscribers(shipmentId)
-```
-
-### Users
-
-```typescript
-// Identify user with full properties
-await identifyUser('user-123', {
-  email: 'user@example.com',
-  name: 'John Doe',
-  phone_number: '+1234567890',
-  timezone: 'America/New_York',
-  locale: 'en-US',
-  avatar: 'https://...',
-  // Custom properties
-  role: 'customer',
-  company: 'Acme Corp',
-})
-
-// Delete user
-await deleteUser('user-123')
-```
-
-### Workflow Triggers
-
-```typescript
-// Trigger for shipment (fans out to subscribers)
-await triggerShipmentWorkflow(workflow, shipmentId, data, {
-  tenant: 'acme-corp',
-  actor: 'user-csm',
-  idempotencyKey: 'unique-key',
-  cancellationKey: 'cancel-key',
-})
-
-// Trigger for specific users
-await triggerWorkflowForUsers(workflow, userIds, data, options)
-
-// Cancel a workflow
-await cancelWorkflow(workflow, cancellationKey, recipientIds)
-```
-
-## Development Mode
+### 3. Development Mode
 
 Without `KNOCK_API_KEY`:
-- All functions succeed but log to console
+- All operations log to console
 - No external API calls
 - Safe for local development
 
-## Integration Points
+## File Structure
 
-### When to Subscribe Users
+```
+lib/
+├── application/
+│   └── notifications/
+│       ├── ports/
+│       │   ├── NotificationService.ts
+│       │   ├── ObjectRepository.ts
+│       │   ├── UserRepository.ts
+│       │   └── index.ts
+│       ├── types.ts
+│       ├── ShipmentNotificationService.ts
+│       └── index.ts
+│
+└── infrastructure/
+    └── notifications/
+        ├── knock/
+        │   ├── KnockClient.ts
+        │   ├── KnockNotificationService.ts
+        │   ├── KnockObjectRepository.ts
+        │   ├── KnockUserRepository.ts
+        │   └── index.ts
+        └── README.md
+```
 
-- Customer views/claims a shipment
-- CSM is assigned to an account
-- User enables notifications for a PO
+## Adding a New Provider
 
-### When to Identify Users
+To add a different notification provider (e.g., Novu):
 
-- User signs up
-- User profile is updated
-- User's email/phone changes
-
-### When to Set Tenant
-
-- All notifications for a customer account
-- When brand customization is needed
-- For scoped in-app feeds
+1. Create `lib/infrastructure/notifications/novu/`
+2. Implement the three interfaces:
+   - `createNovuNotificationService(): NotificationService`
+   - `createNovuObjectRepository(): ObjectRepository`
+   - `createNovuUserRepository(): UserRepository`
+3. Update `lib/application/notifications/index.ts` to use the new provider
