@@ -63,6 +63,7 @@ interface TrackingEvent {
 }
 
 interface OmgData {
+  orderNumber: string // Human-readable order number (e.g., "164")
   orderName?: string | null
   customerName?: string | null
   orderUrl: string
@@ -486,7 +487,34 @@ export default function ShipmentTable({
                         {/* Order Info */}
                         <TableCell>
                           <div className="flex flex-col gap-0.5 min-w-0">
-                            {shipment.poNumber ? (
+                            {shipment.omgData ? (
+                              // Synced OMG data - show order number linked to order, PO linked to PO page
+                              <>
+                                <div className="flex items-center gap-1.5">
+                                  <a
+                                    href={shipment.omgData.orderUrl}
+                                    target="_blank"
+                                    rel="noreferrer noopener"
+                                    className="font-medium text-primary hover:underline"
+                                    title={shipment.omgData.orderName || `Order ${shipment.omgData.orderNumber}`}
+                                  >
+                                    Order {shipment.omgData.orderNumber}
+                                  </a>
+                                  <ExternalLink className="h-3 w-3 text-muted-foreground flex-shrink-0" aria-hidden="true" />
+                                </div>
+                                {shipment.poNumber && (
+                                  <a
+                                    href={shipment.omgData.poUrl}
+                                    target="_blank"
+                                    rel="noreferrer noopener"
+                                    className="text-xs text-muted-foreground hover:text-primary hover:underline"
+                                  >
+                                    PO {shipment.poNumber}
+                                  </a>
+                                )}
+                              </>
+                            ) : shipment.poNumber ? (
+                              // No OMG data synced - show PO with fallback search link
                               <div className="flex items-center gap-1.5">
                                 {omgUrl ? (
                                   <a
@@ -494,7 +522,7 @@ export default function ShipmentTable({
                                     target="_blank"
                                     rel="noreferrer noopener"
                                     className="font-medium text-primary hover:underline truncate"
-                                    title={`Open Order ${parseOrderNumber(shipment.poNumber)} in OMG`}
+                                    title={`Search Order ${parseOrderNumber(shipment.poNumber)} in OMG`}
                                   >
                                     PO {shipment.poNumber}
                                   </a>
