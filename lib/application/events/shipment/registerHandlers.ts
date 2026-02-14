@@ -1,29 +1,15 @@
 import { registerEventHandler } from '@/lib/application/events/registry'
-import {
-  triggerShipmentWorkflow,
-  upsertShipmentObject,
-  KnockWorkflows,
-  type ShipmentObjectData,
-  type TriggerOptions,
-} from '@/lib/infrastructure/notifications/knock'
+import { getShipmentNotificationService } from '@/lib/application/notifications'
+import type { TriggerOptions } from '@/lib/application/notifications/ports'
+import type { ShipmentObjectData, ShipmentNotificationData } from '@/lib/application/notifications/types'
 import { ShipmentEventTopics } from './topics'
 import type { QueuedEvent } from '@/lib/application/events/types'
 import type { ShipmentEventPayload } from './buildShipmentEvents'
 
 /**
- * Map event topics to Knock workflow keys.
+ * Build object data from shipment snapshot.
  */
-const topicToWorkflow: Record<string, string> = {
-  [ShipmentEventTopics.Created]: KnockWorkflows.ShipmentCreated,
-  [ShipmentEventTopics.StatusChanged]: KnockWorkflows.ShipmentStatusChanged,
-  [ShipmentEventTopics.Delivered]: KnockWorkflows.ShipmentDelivered,
-  [ShipmentEventTopics.Exception]: KnockWorkflows.ShipmentException,
-}
-
-/**
- * Build Knock object data from shipment snapshot.
- */
-function toShipmentObjectData(snapshot: ShipmentEventPayload['current']): ShipmentObjectData {
+function toObjectData(snapshot: ShipmentEventPayload['current']): ShipmentObjectData {
   return {
     trackingNumber: snapshot.trackingNumber,
     status: snapshot.status,
@@ -37,98 +23,149 @@ function toShipmentObjectData(snapshot: ShipmentEventPayload['current']): Shipme
 }
 
 /**
- * Get trigger options for a shipment event.
- * 
- * TODO: Implement tenant/actor lookup based on your data model:
- * - tenant: Could be the customer account ID from the order
- * - actor: Could be the CSM or system user who triggered the update
+ * Build notification data from shipment snapshot.
  */
-function getTriggerOptions(
-  eventId: string,
-  payload: ShipmentEventPayload
-): TriggerOptions {
-  const shipmentId = payload.current.shipmentId.toString()
-  
+function toNotificationData(
+  current: ShipmentEventPayload['current'],
+  previous?: ShipmentEventPayload['previous']
+): ShipmentNotificationData {
   return {
-    // Idempotency key prevents duplicate notifications for the same event
+    trackingNumber: current.trackingNumber,
+    status: current.status,
+    carrier: current.carrier,
+    poNumber: current.poNumber,
+    previousStatus: previous?.status ?? null,
+    estimatedDelivery: current.estimatedDelivery,
+    deliveredDate: current.deliveredDate,
+  }
+}
+
+/**
+ * Build trigger options for a shipment event.
+ */
+function buildTriggerOptions(
+  eventId: string,
+  shipmentId: string
+): TriggerOptions {
+  return {
     idempotencyKey: `${eventId}:${shipmentId}`,
-    
-    // Cancellation key allows canceling in-progress workflows
     cancellationKey: `shipment:${shipmentId}`,
-    
-    // TODO: Look up tenant from order/project data
-    // tenant: getTenantForShipment(payload.current.poNumber),
-    
-    // TODO: Pass actor if this was triggered by a user action
+    // TODO: Implement tenant/actor lookup
+    // tenant: getTenantForShipment(poNumber),
     // actor: getActorForEvent(eventId),
   }
 }
 
-function createHandler(topic: string) {
-  return async (event: QueuedEvent<ShipmentEventPayload>) => {
-    const payload = event.payload
-    console.log(`[event] ${topic}`, JSON.stringify(payload))
+/**
+ * Handler for shipment.created events.
+ */
+function handleCreated(event: QueuedEvent<ShipmentEventPayload>) {
+  return async () => {
+    const { payload } = event
+    console.log(`[event] ${ShipmentEventTopics.Created}`, JSON.stringify(payload))
 
-    if (!payload.current) {
-      console.warn(`[event] ${topic} - missing current payload, skipping`)
-      return
-    }
+    if (!payload.current) return
 
     const shipmentId = payload.current.shipmentId.toString()
+    const service = getShipmentNotificationService()
 
-    // 1. Upsert shipment as a Knock Object (keeps Knock in sync)
-    await upsertShipmentObject(shipmentId, toShipmentObjectData(payload.current))
+    await service.syncShipment(shipmentId, toObjectData(payload.current))
+    await service.notifyCreated(
+      shipmentId,
+      toNotificationData(payload.current),
+      buildTriggerOptions(event.id, shipmentId)
+    )
+  }
+}
 
-    // 2. Trigger the appropriate workflow
-    const knockWorkflow = topicToWorkflow[topic]
-    if (knockWorkflow) {
-      const options = getTriggerOptions(event.id, payload)
+/**
+ * Handler for shipment.status.changed events.
+ */
+function handleStatusChanged(event: QueuedEvent<ShipmentEventPayload>) {
+  return async () => {
+    const { payload } = event
+    console.log(`[event] ${ShipmentEventTopics.StatusChanged}`, JSON.stringify(payload))
 
-      await triggerShipmentWorkflow(
-        knockWorkflow,
-        shipmentId,
-        {
-          trackingNumber: payload.current.trackingNumber,
-          status: payload.current.status,
-          carrier: payload.current.carrier,
-          poNumber: payload.current.poNumber,
-          previousStatus: payload.previous?.status ?? null,
-          estimatedDelivery: payload.current.estimatedDelivery,
-          deliveredDate: payload.current.deliveredDate,
-        },
-        options
-      )
-    }
+    if (!payload.current) return
+
+    const shipmentId = payload.current.shipmentId.toString()
+    const service = getShipmentNotificationService()
+
+    await service.syncShipment(shipmentId, toObjectData(payload.current))
+    await service.notifyStatusChanged(
+      shipmentId,
+      toNotificationData(payload.current, payload.previous),
+      buildTriggerOptions(event.id, shipmentId)
+    )
+  }
+}
+
+/**
+ * Handler for shipment.delivered events.
+ */
+function handleDelivered(event: QueuedEvent<ShipmentEventPayload>) {
+  return async () => {
+    const { payload } = event
+    console.log(`[event] ${ShipmentEventTopics.Delivered}`, JSON.stringify(payload))
+
+    if (!payload.current) return
+
+    const shipmentId = payload.current.shipmentId.toString()
+    const service = getShipmentNotificationService()
+
+    await service.syncShipment(shipmentId, toObjectData(payload.current))
+    await service.notifyDelivered(
+      shipmentId,
+      toNotificationData(payload.current, payload.previous),
+      buildTriggerOptions(event.id, shipmentId)
+    )
+  }
+}
+
+/**
+ * Handler for shipment.exception events.
+ */
+function handleException(event: QueuedEvent<ShipmentEventPayload>) {
+  return async () => {
+    const { payload } = event
+    console.log(`[event] ${ShipmentEventTopics.Exception}`, JSON.stringify(payload))
+
+    if (!payload.current) return
+
+    const shipmentId = payload.current.shipmentId.toString()
+    const service = getShipmentNotificationService()
+
+    await service.syncShipment(shipmentId, toObjectData(payload.current))
+    await service.notifyException(
+      shipmentId,
+      toNotificationData(payload.current, payload.previous),
+      buildTriggerOptions(event.id, shipmentId)
+    )
   }
 }
 
 /**
  * Handler for shipment.updated events.
- * Only syncs the object to Knock, doesn't trigger a workflow.
+ * Only syncs the object, doesn't trigger a workflow.
  */
-function createUpdatedHandler() {
-  return async (event: QueuedEvent<ShipmentEventPayload>) => {
-    const payload = event.payload
+function handleUpdated(event: QueuedEvent<ShipmentEventPayload>) {
+  return async () => {
+    const { payload } = event
     console.log(`[event] ${ShipmentEventTopics.Updated}`, JSON.stringify(payload))
 
-    if (!payload.current) {
-      return
-    }
+    if (!payload.current) return
 
     const shipmentId = payload.current.shipmentId.toString()
+    const service = getShipmentNotificationService()
 
-    // Just sync the object - no workflow trigger for generic updates
-    await upsertShipmentObject(shipmentId, toShipmentObjectData(payload.current))
+    await service.syncShipment(shipmentId, toObjectData(payload.current))
   }
 }
 
 export function registerShipmentEventHandlers() {
-  // Events that trigger workflows
-  registerEventHandler(ShipmentEventTopics.Created, createHandler(ShipmentEventTopics.Created))
-  registerEventHandler(ShipmentEventTopics.StatusChanged, createHandler(ShipmentEventTopics.StatusChanged))
-  registerEventHandler(ShipmentEventTopics.Delivered, createHandler(ShipmentEventTopics.Delivered))
-  registerEventHandler(ShipmentEventTopics.Exception, createHandler(ShipmentEventTopics.Exception))
-
-  // Updated just syncs the object, no workflow
-  registerEventHandler(ShipmentEventTopics.Updated, createUpdatedHandler())
+  registerEventHandler(ShipmentEventTopics.Created, (event) => handleCreated(event)())
+  registerEventHandler(ShipmentEventTopics.StatusChanged, (event) => handleStatusChanged(event)())
+  registerEventHandler(ShipmentEventTopics.Delivered, (event) => handleDelivered(event)())
+  registerEventHandler(ShipmentEventTopics.Exception, (event) => handleException(event)())
+  registerEventHandler(ShipmentEventTopics.Updated, (event) => handleUpdated(event)())
 }
