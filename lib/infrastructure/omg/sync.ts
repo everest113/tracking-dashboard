@@ -70,12 +70,13 @@ export async function syncPurchaseOrder(
       where: { po_number: poNumber },
     })
 
-    // Upsert the OMG purchase order record
+    // Upsert the OMG purchase order record by po_number (shipment's format)
+    // This ensures the join works correctly with shipments
     const omgPo = await prisma.omg_purchase_orders.upsert({
-      where: { omg_po_id: po._id },
+      where: { po_number: poNumber },
       create: {
         shipment_id: shipment?.id ?? null,
-        po_number: po.poNumber,
+        po_number: poNumber, // Use shipment's PO format for joins
         order_number: order.number, // Human-readable order number (e.g., "164")
         omg_order_id: order._id, // MongoDB ObjectID for URLs
         omg_po_id: po._id, // MongoDB ObjectID for URLs
@@ -86,8 +87,9 @@ export async function syncPurchaseOrder(
         raw_data: JSON.parse(JSON.stringify({ po, order })),
       },
       update: {
-        shipment_id: shipment?.id ?? null,
-        po_number: po.poNumber,
+        // Update OMG identifiers in case they changed
+        omg_order_id: order._id,
+        omg_po_id: po._id,
         order_number: order.number,
         order_name: order.name,
         customer_name: order.customer?.name ?? null,
@@ -155,10 +157,20 @@ export async function syncShipmentOmgData(
 
 /**
  * Get OMG data for a shipment (if synced)
+ * Looks up by PO number since multiple shipments can share the same OMG PO
  */
 export async function getShipmentOmgData(shipmentId: number) {
+  // First get the shipment's PO number
+  const shipment = await prisma.shipments.findUnique({
+    where: { id: shipmentId },
+    select: { po_number: true },
+  })
+
+  if (!shipment?.po_number) return null
+
+  // Then find the OMG record by PO number
   const omgPo = await prisma.omg_purchase_orders.findUnique({
-    where: { shipment_id: shipmentId },
+    where: { po_number: shipment.po_number },
   })
 
   if (!omgPo) return null
@@ -205,15 +217,22 @@ export async function batchSyncOmgData(options?: {
 }> {
   const limit = options?.limit ?? 100
 
-  // Find shipments with PO numbers that don't have OMG data linked
-  const shipments = await prisma.shipments.findMany({
-    where: {
-      po_number: { not: null },
-      omg_purchase_order: null,
-    },
-    select: { id: true, po_number: true },
-    take: limit,
+  // Find shipments with PO numbers that don't have OMG data yet
+  // First get all synced PO numbers, then find shipments not in that list
+  const syncedPoNumbers = await prisma.omg_purchase_orders.findMany({
+    select: { po_number: true },
   })
+  const syncedPoSet = new Set(syncedPoNumbers.map(r => r.po_number))
+
+  const allShipmentsWithPo = await prisma.shipments.findMany({
+    where: { po_number: { not: null } },
+    select: { id: true, po_number: true },
+  })
+
+  // Filter to shipments whose PO hasn't been synced yet
+  const shipments = allShipmentsWithPo
+    .filter(s => s.po_number && !syncedPoSet.has(s.po_number))
+    .slice(0, limit)
 
   let synced = 0
   let failed = 0

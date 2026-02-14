@@ -114,7 +114,7 @@ const shipmentsRouter = {
           context.prisma.shipments.count({ where: { ...searchFilter, status: 'exception' } }),
           context.prisma.shipments.count({ where: { ...searchFilter, last_error: { not: null } } }),
         ])
-        // Get paginated results with tracking events and OMG data
+        // Get paginated results with tracking events
         const shipments = await context.prisma.shipments.findMany({
           where,
           orderBy,
@@ -125,9 +125,20 @@ const shipmentsRouter = {
               orderBy: { event_time: 'desc' },
               take: 5,
             },
-            omg_purchase_order: true,
           },
         })
+        
+        // Get unique PO numbers and fetch OMG data by PO (not by shipment_id)
+        // This allows multiple shipments to share the same OMG PO data
+        const poNumbers = [...new Set(shipments.map(s => s.po_number).filter(Boolean))] as string[]
+        const omgRecords = poNumbers.length > 0 
+          ? await context.prisma.omg_purchase_orders.findMany({
+              where: { po_number: { in: poNumbers } },
+            })
+          : []
+        
+        // Build a map of PO number -> OMG data for O(1) lookups
+        const omgByPo = new Map(omgRecords.map(r => [r.po_number, r]))
         
         // Import OMG URL helper
         const { getOmgUrls } = await import('@/lib/infrastructure/omg')
@@ -135,7 +146,8 @@ const shipmentsRouter = {
         // Serialize to camelCase and add OMG data
         const serialized = serializeShipments(shipments)
         const formatted = serialized.map((shipment, index) => {
-          const omgPo = shipments[index].omg_purchase_order
+          const poNumber = shipments[index].po_number
+          const omgPo = poNumber ? omgByPo.get(poNumber) : null
           const base = formatShipmentForApi(shipment)
           
           if (omgPo) {
