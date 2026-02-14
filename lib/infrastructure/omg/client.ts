@@ -374,12 +374,27 @@ export async function findByTrackingNumber(
  * Parse PO number to extract order number
  * PO format: "{orderNumber}-{sequence}" e.g., "189-1"
  */
-function parsePoNumber(poNumber: string): { orderNumber: string; sequence: string } | null {
+/**
+ * Parse and normalize PO number
+ * Handles formats like "164-1", "164-01", "164-001" → normalized to "164-1"
+ * OMG stores PO numbers without leading zeros in the sequence
+ */
+function parsePoNumber(poNumber: string): { 
+  orderNumber: string
+  sequence: string
+  normalized: string 
+} | null {
   const match = poNumber.match(/^(\d+)-(\d+)$/)
   if (!match) return null
+  
+  const orderNumber = match[1]
+  // Remove leading zeros from sequence (e.g., "01" → "1")
+  const sequence = String(parseInt(match[2], 10))
+  
   return {
-    orderNumber: match[1],
-    sequence: match[2],
+    orderNumber,
+    sequence,
+    normalized: `${orderNumber}-${sequence}`,
   }
 }
 
@@ -399,6 +414,11 @@ export async function findPurchaseOrderByPoNumber(
     return null
   }
 
+  // Log normalization if it changed
+  if (parsed.normalized !== poNumber) {
+    console.log(`[OMG] Normalized PO number: "${poNumber}" → "${parsed.normalized}"`)
+  }
+
   // Find the order by order number
   // We need to search through orders to find matching order number
   let offset = 0
@@ -412,7 +432,8 @@ export async function findPurchaseOrderByPoNumber(
       if (order.number === parsed.orderNumber) {
         // Found the order, now find the PO
         const pos = await getPurchaseOrders(order._id)
-        const matchingPo = pos.find((po) => po.poNumber === poNumber)
+        // Use normalized PO number for matching (OMG doesn't use leading zeros)
+        const matchingPo = pos.find((po) => po.poNumber === parsed.normalized)
 
         if (matchingPo) {
           // Get full PO details
