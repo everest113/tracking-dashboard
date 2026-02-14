@@ -48,6 +48,7 @@ import {
 import { cn } from '@/lib/utils'
 import { api } from '@/lib/orpc/client'
 import RefreshNow from '@/components/RefreshNow'
+import { toast } from 'sonner'
 
 interface TrackingEvent {
   id: number
@@ -312,7 +313,9 @@ export default function ShipmentTable({
 
   const handleSyncToOmg = async (shipmentId: number, poNumber?: string | null) => {
     if (!poNumber) {
-      alert('This shipment has no PO number. Cannot sync to OMG.')
+      toast.error('Cannot sync to OMG', {
+        description: 'This shipment has no PO number.',
+      })
       return
     }
 
@@ -320,23 +323,26 @@ export default function ShipmentTable({
     try {
       const result = await api.shipments.syncToOmg({ shipmentId })
       if (result.success) {
-        // Show success with link to OMG if available
-        if (result.omgUrls) {
-          const viewInOmg = confirm(`✅ ${result.message}\n\nWould you like to open this PO in OMG?`)
-          if (viewInOmg) {
-            window.open(result.omgUrls.purchaseOrder, '_blank')
-          }
-        } else {
-          alert(`✅ ${result.message}`)
-        }
+        // Show success toast with optional action to open in OMG
+        toast.success('Synced to OMG', {
+          description: result.message,
+          action: result.omgUrls ? {
+            label: 'Open in OMG',
+            onClick: () => window.open(result.omgUrls!.purchaseOrder, '_blank'),
+          } : undefined,
+        })
         // Refresh to show the OMG link in the table
         router.refresh()
       } else {
-        alert(`⚠️ ${result.message}`)
+        toast.warning('Sync incomplete', {
+          description: result.message,
+        })
       }
     } catch (error) {
       console.error('Failed to sync to OMG:', error)
-      alert('Failed to sync to OMG. Check console for details.')
+      toast.error('Sync failed', {
+        description: 'Failed to sync to OMG. Check console for details.',
+      })
     } finally {
       setSyncingToOmgId(null)
     }
@@ -478,55 +484,58 @@ export default function ShipmentTable({
 
                         {/* Order Info */}
                         <TableCell>
-                          <div className="flex flex-col gap-0.5 min-w-0">
+                          <div className="flex flex-col gap-0.5 min-w-0" aria-label="Order details">
                             {shipment.omgData ? (
-                              // Synced OMG data - show order number linked to order, PO linked to PO page
+                              // Synced OMG data - show order + PO links with accessible focus treatment
                               <>
-                                <div className="flex items-center gap-1.5">
-                                  <a
-                                    href={shipment.omgData.orderUrl}
-                                    target="_blank"
-                                    rel="noreferrer noopener"
-                                    className="font-medium text-primary hover:underline"
-                                    title={shipment.omgData.orderName || `Order ${shipment.omgData.orderNumber}`}
-                                  >
-                                    Order {shipment.omgData.orderNumber}
-                                  </a>
+                                <a
+                                  href={shipment.omgData.orderUrl}
+                                  target="_blank"
+                                  rel="noreferrer noopener"
+                                  className={cn(
+                                    'inline-flex items-center gap-1.5 font-medium text-primary hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
+                                    'text-sm'
+                                  )}
+                                  title={shipment.omgData.orderName || `Order ${shipment.omgData.orderNumber}`}
+                                  aria-label={`Open order ${shipment.omgData.orderNumber} in OMG`}
+                                >
+                                  <span className="truncate">
+                                    {shipment.omgData.orderName || `Order ${shipment.omgData.orderNumber}`}
+                                  </span>
                                   <ExternalLink className="h-3 w-3 text-muted-foreground flex-shrink-0" aria-hidden="true" />
-                                </div>
+                                </a>
                                 {shipment.poNumber && (
                                   <a
                                     href={shipment.omgData.poUrl}
                                     target="_blank"
                                     rel="noreferrer noopener"
-                                    className="text-xs text-muted-foreground hover:text-primary hover:underline"
+                                    className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                                    aria-label={`View PO ${shipment.poNumber} in OMG`}
                                   >
-                                    PO {shipment.poNumber}
+                                    <span className="truncate">PO {shipment.poNumber}</span>
+                                    <ExternalLink className="h-3 w-3 text-muted-foreground flex-shrink-0" aria-hidden="true" />
                                   </a>
                                 )}
                               </>
                             ) : shipment.poNumber ? (
                               // No OMG data synced - show PO with fallback search link
-                              <div className="flex items-center gap-1.5">
-                                {omgUrl ? (
-                                  <a
-                                    href={omgUrl}
-                                    target="_blank"
-                                    rel="noreferrer noopener"
-                                    className="font-medium text-primary hover:underline truncate"
-                                    title={`Search Order ${parseOrderNumber(shipment.poNumber)} in OMG`}
-                                  >
-                                    PO {shipment.poNumber}
-                                  </a>
-                                ) : (
-                                  <span className="font-medium truncate">
-                                    PO {shipment.poNumber}
-                                  </span>
-                                )}
-                                {omgUrl && (
+                              omgUrl ? (
+                                <a
+                                  href={omgUrl}
+                                  target="_blank"
+                                  rel="noreferrer noopener"
+                                  className="inline-flex items-center gap-1.5 font-medium text-primary hover:text-primary hover:underline truncate focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                                  title={`Search Order ${parseOrderNumber(shipment.poNumber)} in OMG`}
+                                  aria-label={`Search for PO ${shipment.poNumber} in OMG`}
+                                >
+                                  <span className="truncate">PO {shipment.poNumber}</span>
                                   <ExternalLink className="h-3 w-3 text-muted-foreground flex-shrink-0" aria-hidden="true" />
-                                )}
-                              </div>
+                                </a>
+                              ) : (
+                                <span className="font-medium truncate">
+                                  PO {shipment.poNumber}
+                                </span>
+                              )
                             ) : (
                               <span className="text-muted-foreground text-sm">No PO</span>
                             )}
