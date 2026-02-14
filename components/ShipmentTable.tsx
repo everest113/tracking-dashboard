@@ -62,6 +62,13 @@ interface TrackingEvent {
   eventTime?: string | null
 }
 
+interface OmgData {
+  orderName?: string | null
+  customerName?: string | null
+  orderUrl: string
+  poUrl: string
+}
+
 interface Shipment {
   id: number
   trackingNumber: string
@@ -78,6 +85,7 @@ interface Shipment {
   createdAt: string
   lastError?: string | null
   trackingEvents?: TrackingEvent[]
+  omgData?: OmgData | null
 }
 
 interface PaginationData {
@@ -316,7 +324,17 @@ export default function ShipmentTable({
     try {
       const result = await api.shipments.syncToOmg({ shipmentId })
       if (result.success) {
-        alert(`✅ ${result.message}`)
+        // Show success with link to OMG if available
+        if (result.omgUrls) {
+          const viewInOmg = confirm(`✅ ${result.message}\n\nWould you like to open this PO in OMG?`)
+          if (viewInOmg) {
+            window.open(result.omgUrls.purchaseOrder, '_blank')
+          }
+        } else {
+          alert(`✅ ${result.message}`)
+        }
+        // Refresh to show the OMG link in the table
+        router.refresh()
       } else {
         alert(`⚠️ ${result.message}`)
       }
@@ -668,6 +686,18 @@ export default function ShipmentTable({
                                   <span className="ml-1 text-xs text-muted-foreground">(no PO)</span>
                                 )}
                               </DropdownMenuItem>
+                              {shipment.omgData && (
+                                <DropdownMenuItem asChild>
+                                  <a
+                                    href={shipment.omgData.poUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                  >
+                                    <ExternalLink className="h-4 w-4 mr-2" />
+                                    View in OMG
+                                  </a>
+                                </DropdownMenuItem>
+                              )}
                               <DropdownMenuSeparator />
                               <DropdownMenuItem
                                 onClick={() => handleDeleteShipment(shipment.id)}

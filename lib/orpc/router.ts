@@ -45,6 +45,13 @@ const ShipmentResponseSchema = z.object({
     message: z.string().nullish(),
     eventTime: z.string().nullish(),
   })).optional(),
+  // OMG Orders integration
+  omgData: z.object({
+    orderName: z.string().nullish(),
+    customerName: z.string().nullish(),
+    orderUrl: z.string(),
+    poUrl: z.string(),
+  }).nullish(),
 })
 const formatShipmentForApi = (shipment: ReturnType<typeof serializeShipment>) => ({
   ...shipment,
@@ -102,7 +109,7 @@ const shipmentsRouter = {
           context.prisma.shipments.count({ where: { ...searchFilter, status: 'exception' } }),
           context.prisma.shipments.count({ where: { ...searchFilter, last_error: { not: null } } }),
         ])
-        // Get paginated results with tracking events
+        // Get paginated results with tracking events and OMG data
         const shipments = await context.prisma.shipments.findMany({
           where,
           orderBy,
@@ -113,11 +120,34 @@ const shipmentsRouter = {
               orderBy: { event_time: 'desc' },
               take: 5,
             },
+            omg_purchase_order: true,
           },
         })
-        // Serialize to camelCase
+        
+        // Import OMG URL helper
+        const { getOmgUrls } = await import('@/lib/infrastructure/omg')
+        
+        // Serialize to camelCase and add OMG data
         const serialized = serializeShipments(shipments)
-        const formatted = serialized.map(formatShipmentForApi)
+        const formatted = serialized.map((shipment, index) => {
+          const omgPo = shipments[index].omg_purchase_order
+          const base = formatShipmentForApi(shipment)
+          
+          if (omgPo) {
+            const urls = getOmgUrls(omgPo.omg_order_uuid, omgPo.omg_po_uuid)
+            return {
+              ...base,
+              omgData: {
+                orderName: omgPo.order_name,
+                customerName: omgPo.customer_name,
+                orderUrl: urls.order,
+                poUrl: urls.purchaseOrder,
+              },
+            }
+          }
+          
+          return { ...base, omgData: null }
+        })
         const filteredTotal = await context.prisma.shipments.count({ where })
         const result = {
           items: formatted,
@@ -313,7 +343,7 @@ const shipmentsRouter = {
 
   /**
    * Sync shipment tracking to OMG Orders
-   * Pushes tracking number to the matching PO in OMG
+   * Pushes tracking number to the matching PO in OMG, then syncs OMG data back
    */
   syncToOmg: publicProcedure
       .input(z.object({
@@ -323,6 +353,10 @@ const shipmentsRouter = {
         success: z.boolean(),
         message: z.string(),
         poNumber: z.string().nullish(),
+        omgUrls: z.object({
+          order: z.string(),
+          purchaseOrder: z.string(),
+        }).nullish(),
       }))
       .handler(async ({ context, input }) => {
         const { shipmentId } = input
@@ -344,6 +378,7 @@ const shipmentsRouter = {
             success: false,
             message: 'Shipment has no PO number',
             poNumber: null,
+            omgUrls: null,
           }
         }
         
@@ -352,11 +387,12 @@ const shipmentsRouter = {
             success: false,
             message: 'Shipment has no carrier',
             poNumber: shipment.po_number,
+            omgUrls: null,
           }
         }
         
-        // Import OMG client dynamically to avoid issues if env vars not set
-        const { addTrackingToPurchaseOrder } = await import('@/lib/infrastructure/omg')
+        // Import OMG modules dynamically to avoid issues if env vars not set
+        const { addTrackingToPurchaseOrder, syncShipmentOmgData, getShipmentOmgData } = await import('@/lib/infrastructure/omg')
         
         try {
           const result = await addTrackingToPurchaseOrder(shipment.po_number, {
@@ -367,16 +403,25 @@ const shipmentsRouter = {
           
           if (result) {
             console.log(`✅ Synced shipment ${shipment.tracking_number} to OMG PO ${shipment.po_number}`)
+            
+            // Also sync OMG data back to our database
+            await syncShipmentOmgData(shipmentId)
+            
+            // Get the OMG URLs
+            const omgData = await getShipmentOmgData(shipmentId)
+            
             return {
               success: true,
               message: `Tracking synced to OMG PO ${shipment.po_number}`,
               poNumber: shipment.po_number,
+              omgUrls: omgData?.urls ?? null,
             }
           } else {
             return {
               success: false,
               message: `PO ${shipment.po_number} not found in OMG`,
               poNumber: shipment.po_number,
+              omgUrls: null,
             }
           }
         } catch (err) {
@@ -385,6 +430,7 @@ const shipmentsRouter = {
             success: false,
             message: err instanceof Error ? err.message : 'Unknown error syncing to OMG',
             poNumber: shipment.po_number,
+            omgUrls: null,
           }
         }
       }),
@@ -1328,6 +1374,114 @@ const frontRouter = {
         }
       }),
 }
+const omgRouter = {
+  /**
+   * Get OMG data for a shipment
+   */
+  getShipmentData: publicProcedure
+      .input(z.object({
+        shipmentId: z.number(),
+      }))
+      .output(z.object({
+        success: z.boolean(),
+        data: z.object({
+          poNumber: z.string(),
+          orderName: z.string().nullish(),
+          customerName: z.string().nullish(),
+          urls: z.object({
+            order: z.string(),
+            purchaseOrder: z.string(),
+          }),
+          syncedAt: z.string(),
+        }).nullish(),
+        error: z.string().optional(),
+      }))
+      .handler(async ({ input }) => {
+        const { getShipmentOmgData } = await import('@/lib/infrastructure/omg')
+        
+        try {
+          const data = await getShipmentOmgData(input.shipmentId)
+          
+          if (!data) {
+            return {
+              success: true,
+              data: null,
+            }
+          }
+          
+          return {
+            success: true,
+            data: {
+              poNumber: data.po_number,
+              orderName: data.order_name,
+              customerName: data.customer_name,
+              urls: data.urls,
+              syncedAt: data.synced_at.toISOString(),
+            },
+          }
+        } catch (err) {
+          return {
+            success: false,
+            data: null,
+            error: err instanceof Error ? err.message : 'Unknown error',
+          }
+        }
+      }),
+
+  /**
+   * Sync OMG data for a shipment
+   */
+  syncShipment: publicProcedure
+      .input(z.object({
+        shipmentId: z.number(),
+      }))
+      .output(z.object({
+        success: z.boolean(),
+        linked: z.boolean().optional(),
+        error: z.string().optional(),
+      }))
+      .handler(async ({ input }) => {
+        const { syncShipmentOmgData } = await import('@/lib/infrastructure/omg')
+        
+        const result = await syncShipmentOmgData(input.shipmentId)
+        
+        return {
+          success: result.success,
+          linked: result.success,
+          error: result.error,
+        }
+      }),
+
+  /**
+   * Batch sync all unlinked shipments with OMG data
+   */
+  batchSync: publicProcedure
+      .input(z.object({
+        limit: z.number().default(50),
+      }).default({ limit: 50 }))
+      .output(z.object({
+        success: z.boolean(),
+        synced: z.number(),
+        failed: z.number(),
+        errors: z.array(z.object({
+          poNumber: z.string(),
+          error: z.string(),
+        })),
+      }))
+      .handler(async ({ input }) => {
+        const { batchSyncOmgData } = await import('@/lib/infrastructure/omg')
+        
+        const result = await batchSyncOmgData({ limit: input.limit })
+        
+        return {
+          success: true,
+          synced: result.synced,
+          failed: result.failed,
+          errors: result.errors,
+        }
+      }),
+}
+
 // Plain nested object structure (recommended by oRPC docs)
 export const appRouter = {
   shipments: shipmentsRouter,
@@ -1336,5 +1490,6 @@ export const appRouter = {
   manualUpdateTracking: manualUpdateTrackingRouter,
   trackers: trackersRouter,
   front: frontRouter,
+  omg: omgRouter,
 }
 export type AppRouter = typeof appRouter

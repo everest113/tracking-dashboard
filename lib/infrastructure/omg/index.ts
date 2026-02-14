@@ -21,3 +21,14 @@ export {
   type OMGTracking,
   type AddTrackingInput,
 } from './client'
+
+export {
+  // Sync operations
+  syncPurchaseOrder,
+  syncShipmentOmgData,
+  getShipmentOmgData,
+  linkOmgPoToShipment,
+  batchSyncOmgData,
+  // URL helpers
+  getOmgUrls,
+} from './sync'
