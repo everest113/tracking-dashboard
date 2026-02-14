@@ -227,6 +227,16 @@ const shipmentsRouter = {
             },
           },
         })
+
+        // Auto-sync with OMG if shipment has a PO number (non-blocking)
+        if (input.poNumber) {
+          import('@/lib/infrastructure/omg').then(({ syncShipmentOmgData }) => {
+            syncShipmentOmgData(shipment.id).catch((err) => {
+              console.warn(`[OMG] Auto-sync failed for shipment ${shipment.id}:`, err)
+            })
+          })
+        }
+
         return formatShipmentForApi(serializeShipment(shipment))
       }),
   summary: publicProcedure
