@@ -6,7 +6,6 @@ on:
   push:
     branches: [main]
 
-# Cancel outdated runs when new commits are pushed
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -53,10 +52,8 @@ jobs:
       - name: Type check & Build
         run: npm run build
         env:
-          # Dummy DATABASE_URL for build-time type checking
           DATABASE_URL: postgresql://dummy:dummy@localhost:5432/dummy
 
-      # Share the build output with the test job to avoid rebuilding
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
@@ -65,9 +62,41 @@ jobs:
           include-hidden-files: true
           retention-days: 1
 
+  schema-check:
+    name: Schema Drift Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check for schema drift
+        run: |
+          # Ensure schema.prisma matches what migrations would produce
+          npx prisma migrate diff \
+            --from-migrations ./prisma/migrations \
+            --to-schema-datamodel ./prisma/schema.prisma \
+            --exit-code || {
+              echo "❌ Schema drift detected!"
+              echo ""
+              echo "Your schema.prisma has changes that aren't in migrations."
+              echo "Run: npx prisma migrate dev --name <migration_name>"
+              echo ""
+              exit 1
+            }
+          echo "✅ Schema is in sync with migrations"
+
   test:
     name: Unit Tests
-    needs: build
+    needs: [build, schema-check]
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -100,7 +129,6 @@ jobs:
       - name: Generate Prisma Client
         run: npx prisma generate
 
-      # Reuse the build from the build job instead of rebuilding
       - name: Download build artifact
         uses: actions/download-artifact@v4
         with:
