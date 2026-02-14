@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import React, { useState, useCallback } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { format, formatDistanceToNow } from 'date-fns'
 import { Badge } from '@/components/ui/badge'
@@ -45,11 +45,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@/components/ui/collapsible'
 import { cn } from '@/lib/utils'
 import { api } from '@/lib/orpc/client'
 import RefreshNow from '@/components/RefreshNow'
@@ -455,7 +450,7 @@ export default function ShipmentTable({
                 }
 
                 return (
-                  <Collapsible key={shipment.id} open={isExpanded} className="contents">
+                  <React.Fragment key={shipment.id}>
                     <TableRow
                         className={cn(
                           'group',
@@ -465,22 +460,20 @@ export default function ShipmentTable({
                       >
                         {/* Expand Toggle */}
                         <TableCell className="pr-0">
-                          <CollapsibleTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 w-8 p-0"
-                              onClick={() => toggleRowExpanded(shipment.id)}
-                              aria-label={isExpanded ? 'Collapse details' : 'Expand details'}
-                            >
-                              <ChevronDown
-                                className={cn(
-                                  'h-4 w-4 transition-transform',
-                                  isExpanded && 'rotate-180'
-                                )}
-                              />
-                            </Button>
-                          </CollapsibleTrigger>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0"
+                            onClick={() => toggleRowExpanded(shipment.id)}
+                            aria-label={isExpanded ? 'Collapse details' : 'Expand details'}
+                          >
+                            <ChevronDown
+                              className={cn(
+                                'h-4 w-4 transition-transform',
+                                isExpanded && 'rotate-180'
+                              )}
+                            />
+                          </Button>
                         </TableCell>
 
                         {/* Order Info */}
@@ -740,7 +733,7 @@ export default function ShipmentTable({
                       </TableRow>
 
                       {/* Expanded Details */}
-                      <CollapsibleContent asChild>
+                      {isExpanded && (
                         <TableRow className="bg-muted/30 hover:bg-muted/30">
                           <TableCell colSpan={6} className="py-3">
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm pl-10">
@@ -818,8 +811,8 @@ export default function ShipmentTable({
                             </div>
                           </TableCell>
                         </TableRow>
-                      </CollapsibleContent>
-                  </Collapsible>
+                      )}
+                  </React.Fragment>
                 )
               })
             )}
