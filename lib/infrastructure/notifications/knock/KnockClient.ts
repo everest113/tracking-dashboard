@@ -1,4 +1,4 @@
-import { Knock } from '@knocklabs/node'
+import Knock from '@knocklabs/node'
 
 let knockClient: Knock | null = null
 
@@ -12,7 +12,7 @@ export function getKnockClient(): Knock | null {
   const apiKey = process.env.KNOCK_API_KEY
   if (!apiKey) return null
 
-  knockClient = new Knock(apiKey)
+  knockClient = new Knock({ apiKey })
   return knockClient
 }
 

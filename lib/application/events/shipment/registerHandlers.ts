@@ -59,113 +59,103 @@ function buildTriggerOptions(
 /**
  * Handler for shipment.created events.
  */
-function handleCreated(event: QueuedEvent<ShipmentEventPayload>) {
-  return async () => {
-    const { payload } = event
-    console.log(`[event] ${ShipmentEventTopics.Created}`, JSON.stringify(payload))
+async function handleCreated(event: QueuedEvent<unknown>): Promise<void> {
+  const payload = event.payload as ShipmentEventPayload
+  console.log(`[event] ${ShipmentEventTopics.Created}`, JSON.stringify(payload))
 
-    if (!payload.current) return
+  if (!payload?.current) return
 
-    const shipmentId = payload.current.shipmentId.toString()
-    const service = getShipmentNotificationService()
+  const shipmentId = payload.current.shipmentId.toString()
+  const service = getShipmentNotificationService()
 
-    await service.syncShipment(shipmentId, toObjectData(payload.current))
-    await service.notifyCreated(
-      shipmentId,
-      toNotificationData(payload.current),
-      buildTriggerOptions(event.id, shipmentId)
-    )
-  }
+  await service.syncShipment(shipmentId, toObjectData(payload.current))
+  await service.notifyCreated(
+    shipmentId,
+    toNotificationData(payload.current),
+    buildTriggerOptions(event.id, shipmentId)
+  )
 }
 
 /**
  * Handler for shipment.status.changed events.
  */
-function handleStatusChanged(event: QueuedEvent<ShipmentEventPayload>) {
-  return async () => {
-    const { payload } = event
-    console.log(`[event] ${ShipmentEventTopics.StatusChanged}`, JSON.stringify(payload))
+async function handleStatusChanged(event: QueuedEvent<unknown>): Promise<void> {
+  const payload = event.payload as ShipmentEventPayload
+  console.log(`[event] ${ShipmentEventTopics.StatusChanged}`, JSON.stringify(payload))
 
-    if (!payload.current) return
+  if (!payload?.current) return
 
-    const shipmentId = payload.current.shipmentId.toString()
-    const service = getShipmentNotificationService()
+  const shipmentId = payload.current.shipmentId.toString()
+  const service = getShipmentNotificationService()
 
-    await service.syncShipment(shipmentId, toObjectData(payload.current))
-    await service.notifyStatusChanged(
-      shipmentId,
-      toNotificationData(payload.current, payload.previous),
-      buildTriggerOptions(event.id, shipmentId)
-    )
-  }
+  await service.syncShipment(shipmentId, toObjectData(payload.current))
+  await service.notifyStatusChanged(
+    shipmentId,
+    toNotificationData(payload.current, payload.previous),
+    buildTriggerOptions(event.id, shipmentId)
+  )
 }
 
 /**
  * Handler for shipment.delivered events.
  */
-function handleDelivered(event: QueuedEvent<ShipmentEventPayload>) {
-  return async () => {
-    const { payload } = event
-    console.log(`[event] ${ShipmentEventTopics.Delivered}`, JSON.stringify(payload))
+async function handleDelivered(event: QueuedEvent<unknown>): Promise<void> {
+  const payload = event.payload as ShipmentEventPayload
+  console.log(`[event] ${ShipmentEventTopics.Delivered}`, JSON.stringify(payload))
 
-    if (!payload.current) return
+  if (!payload?.current) return
 
-    const shipmentId = payload.current.shipmentId.toString()
-    const service = getShipmentNotificationService()
+  const shipmentId = payload.current.shipmentId.toString()
+  const service = getShipmentNotificationService()
 
-    await service.syncShipment(shipmentId, toObjectData(payload.current))
-    await service.notifyDelivered(
-      shipmentId,
-      toNotificationData(payload.current, payload.previous),
-      buildTriggerOptions(event.id, shipmentId)
-    )
-  }
+  await service.syncShipment(shipmentId, toObjectData(payload.current))
+  await service.notifyDelivered(
+    shipmentId,
+    toNotificationData(payload.current, payload.previous),
+    buildTriggerOptions(event.id, shipmentId)
+  )
 }
 
 /**
  * Handler for shipment.exception events.
  */
-function handleException(event: QueuedEvent<ShipmentEventPayload>) {
-  return async () => {
-    const { payload } = event
-    console.log(`[event] ${ShipmentEventTopics.Exception}`, JSON.stringify(payload))
+async function handleException(event: QueuedEvent<unknown>): Promise<void> {
+  const payload = event.payload as ShipmentEventPayload
+  console.log(`[event] ${ShipmentEventTopics.Exception}`, JSON.stringify(payload))
 
-    if (!payload.current) return
+  if (!payload?.current) return
 
-    const shipmentId = payload.current.shipmentId.toString()
-    const service = getShipmentNotificationService()
+  const shipmentId = payload.current.shipmentId.toString()
+  const service = getShipmentNotificationService()
 
-    await service.syncShipment(shipmentId, toObjectData(payload.current))
-    await service.notifyException(
-      shipmentId,
-      toNotificationData(payload.current, payload.previous),
-      buildTriggerOptions(event.id, shipmentId)
-    )
-  }
+  await service.syncShipment(shipmentId, toObjectData(payload.current))
+  await service.notifyException(
+    shipmentId,
+    toNotificationData(payload.current, payload.previous),
+    buildTriggerOptions(event.id, shipmentId)
+  )
 }
 
 /**
  * Handler for shipment.updated events.
  * Only syncs the object, doesn't trigger a workflow.
  */
-function handleUpdated(event: QueuedEvent<ShipmentEventPayload>) {
-  return async () => {
-    const { payload } = event
-    console.log(`[event] ${ShipmentEventTopics.Updated}`, JSON.stringify(payload))
+async function handleUpdated(event: QueuedEvent<unknown>): Promise<void> {
+  const payload = event.payload as ShipmentEventPayload
+  console.log(`[event] ${ShipmentEventTopics.Updated}`, JSON.stringify(payload))
 
-    if (!payload.current) return
+  if (!payload?.current) return
 
-    const shipmentId = payload.current.shipmentId.toString()
-    const service = getShipmentNotificationService()
+  const shipmentId = payload.current.shipmentId.toString()
+  const service = getShipmentNotificationService()
 
-    await service.syncShipment(shipmentId, toObjectData(payload.current))
-  }
+  await service.syncShipment(shipmentId, toObjectData(payload.current))
 }
 
 export function registerShipmentEventHandlers() {
-  registerEventHandler(ShipmentEventTopics.Created, (event) => handleCreated(event)())
-  registerEventHandler(ShipmentEventTopics.StatusChanged, (event) => handleStatusChanged(event)())
-  registerEventHandler(ShipmentEventTopics.Delivered, (event) => handleDelivered(event)())
-  registerEventHandler(ShipmentEventTopics.Exception, (event) => handleException(event)())
-  registerEventHandler(ShipmentEventTopics.Updated, (event) => handleUpdated(event)())
+  registerEventHandler(ShipmentEventTopics.Created, handleCreated)
+  registerEventHandler(ShipmentEventTopics.StatusChanged, handleStatusChanged)
+  registerEventHandler(ShipmentEventTopics.Delivered, handleDelivered)
+  registerEventHandler(ShipmentEventTopics.Exception, handleException)
+  registerEventHandler(ShipmentEventTopics.Updated, handleUpdated)
 }

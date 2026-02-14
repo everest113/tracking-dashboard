@@ -19,7 +19,8 @@ export function createKnockUserRepository(): UserRepository {
       }
 
       try {
-        await knock.users.identify(userId, properties)
+        // In SDK v1, users.update is used to identify/upsert users
+        await knock.users.update(userId, properties)
         console.log(`[knock] Identified user: ${userId}`)
         return { success: true }
       } catch (error) {
