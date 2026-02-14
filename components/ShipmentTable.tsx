@@ -662,9 +662,10 @@ export default function ShipmentTable({
                                 </span>
                               )}
                             </div>
-                          ) : shipment.ship24LastUpdate ? (
-                            <span className="text-xs text-muted-foreground">
-                              {formatDistanceToNow(new Date(shipment.ship24LastUpdate), { addSuffix: true })}
+                          ) : shipment.lastChecked ? (
+                            <span className="text-xs text-muted-foreground flex items-center gap-1">
+                              <Clock className="h-3 w-3" aria-hidden="true" />
+                              Checked {formatDistanceToNow(new Date(shipment.lastChecked), { addSuffix: true })}
                             </span>
                           ) : (
                             <span className="text-xs text-muted-foreground flex items-center gap-1">
