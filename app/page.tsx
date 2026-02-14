@@ -1,9 +1,9 @@
 import { Suspense } from 'react'
 import ShipmentTable from '@/components/ShipmentTable'
 import StatusTabs from '@/components/StatusTabs'
-import LastSyncDisplay from '@/components/LastSyncDisplay'
 import StaleDataBanner from '@/components/StaleDataBanner'
 import TableSkeleton from '@/components/TableSkeleton'
+import { DashboardHeader } from '@/components/DashboardHeader'
 import { getShipments, type ShipmentQueryParams } from '@/lib/data/shipments'
 
 interface PageProps {
@@ -36,20 +36,8 @@ export default async function Home({ searchParams }: PageProps) {
   return (
     <main className="min-h-screen bg-background">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Header */}
-        <div className="mb-8">
-          <div className="flex items-start justify-between">
-            <div>
-              <h1 className="text-3xl font-bold tracking-tight">
-                Shipment Tracking Dashboard
-              </h1>
-              <p className="mt-2 text-sm text-muted-foreground">
-                Monitor all shipments and tracking status
-              </p>
-            </div>
-            <LastSyncDisplay />
-          </div>
-        </div>
+        {/* Header with User Menu */}
+        <DashboardHeader />
 
         {/* Stale Data Warning */}
         <StaleDataBanner />
