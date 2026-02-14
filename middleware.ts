@@ -2,12 +2,19 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { auth0 } from './lib/auth0'
 
 /**
+ * Allowed email domains for access.
+ * Only users with emails from these domains can access the app.
+ */
+const ALLOWED_EMAIL_DOMAINS = ['stitchi.co']
+
+/**
  * Public routes that don't require authentication.
  * - /auth/* - Auth0 routes (login, logout, callback)
  * - /api/webhooks/* - Webhook endpoints
  * - /login - Login page for unauthenticated users
+ * - /unauthorized - Shown to users without access
  */
-const PUBLIC_ROUTES = ['/auth', '/api/webhooks', '/login']
+const PUBLIC_ROUTES = ['/auth', '/api/webhooks', '/login', '/unauthorized']
 
 /**
  * Check if a path is a public route.
@@ -17,10 +24,20 @@ function isPublicRoute(pathname: string): boolean {
 }
 
 /**
+ * Check if an email is from an allowed domain.
+ */
+function isAllowedEmail(email: string | undefined): boolean {
+  if (!email) return false
+  const domain = email.split('@')[1]?.toLowerCase()
+  return ALLOWED_EMAIL_DOMAINS.includes(domain)
+}
+
+/**
  * Auth0 middleware with route protection.
  *
  * - Public routes: Accessible without authentication
  * - Protected routes: Redirects to /login if not authenticated
+ * - Domain check: Only @stitchi.co emails can access
  */
 export async function middleware(request: NextRequest) {
   // Always run Auth0 middleware first (handles /auth/* routes, session management)
@@ -46,7 +63,12 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(loginUrl)
   }
 
-  // User is authenticated, return the auth response (preserves session cookies)
+  // Check if user's email is from an allowed domain
+  if (!isAllowedEmail(session.user.email)) {
+    return NextResponse.redirect(new URL('/unauthorized', request.url))
+  }
+
+  // User is authenticated and authorized, return the auth response
   return authResponse
 }
 
