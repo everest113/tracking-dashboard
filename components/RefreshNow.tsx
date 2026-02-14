@@ -117,6 +117,20 @@ export default function RefreshNow() {
         addProgress('found', `${updateResult.updated} status change${updateResult.updated !== 1 ? 's' : ''} detected`)
       }
 
+      // Step 4: Sync unlinked shipments with OMG Orders
+      addProgress('processing', 'Linking shipments to OMG Orders...')
+      const omgResult = await api.omg.batchSync({ limit: 50 })
+
+      if (omgResult.synced > 0) {
+        addProgress('found', `${omgResult.synced} shipment${omgResult.synced !== 1 ? 's' : ''} linked to OMG`)
+      } else {
+        addProgress('skipped', 'All shipments already linked to OMG')
+      }
+
+      if (omgResult.failed > 0) {
+        addProgress('skipped', `${omgResult.failed} shipment${omgResult.failed !== 1 ? 's' : ''} not found in OMG`)
+      }
+
       addProgress('complete', 'Refresh complete!')
 
       // Show summary toast
@@ -126,6 +140,9 @@ export default function RefreshNow() {
       }
       if (backfillResult.registered > 0) {
         messages.push(`${backfillResult.registered} enrolled`)
+      }
+      if (omgResult.synced > 0) {
+        messages.push(`${omgResult.synced} linked to OMG`)
       }
       messages.push(`${updateResult.checked} refreshed`)
 
