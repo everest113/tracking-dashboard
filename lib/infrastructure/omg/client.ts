@@ -420,31 +420,23 @@ export async function findPurchaseOrderByPoNumber(
   }
 
   // Find the order by order number
-  // We need to search through orders to find matching order number
-  let offset = 0
-  const limit = 50
-  let hasMore = true
+  // Note: OMG API pagination with offset > 0 returns empty results,
+  // so we fetch all orders in a single request (typically < 500 orders)
+  const { orders } = await listOrders(0, 500)
 
-  while (hasMore) {
-    const { orders, total } = await listOrders(offset, limit)
+  for (const order of orders) {
+    if (order.number === parsed.orderNumber) {
+      // Found the order, now find the PO
+      const pos = await getPurchaseOrders(order._id)
+      // Use normalized PO number for matching (OMG doesn't use leading zeros)
+      const matchingPo = pos.find((po) => po.poNumber === parsed.normalized)
 
-    for (const order of orders) {
-      if (order.number === parsed.orderNumber) {
-        // Found the order, now find the PO
-        const pos = await getPurchaseOrders(order._id)
-        // Use normalized PO number for matching (OMG doesn't use leading zeros)
-        const matchingPo = pos.find((po) => po.poNumber === parsed.normalized)
-
-        if (matchingPo) {
-          // Get full PO details
-          const fullPo = await getPurchaseOrder(order._id, matchingPo._id)
-          return { po: fullPo, order }
-        }
+      if (matchingPo) {
+        // Get full PO details
+        const fullPo = await getPurchaseOrder(order._id, matchingPo._id)
+        return { po: fullPo, order }
       }
     }
-
-    offset += limit
-    hasMore = offset < total
   }
 
   return null
