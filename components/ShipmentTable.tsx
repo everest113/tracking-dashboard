@@ -14,7 +14,29 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { Package, MapPin, ArrowUpDown, ArrowUp, ArrowDown, ChevronLeft, ChevronRight, CheckCircle2, AlertCircle, TruckIcon, Search, Copy, Check, RefreshCw, Loader2, MoreHorizontal, Trash2, ExternalLink, Upload } from 'lucide-react'
+import {
+  MapPin,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronDown,
+  CheckCircle2,
+  AlertCircle,
+  Clock,
+  Search,
+  Copy,
+  Check,
+  RefreshCw,
+  Loader2,
+  MoreHorizontal,
+  Trash2,
+  ExternalLink,
+  Upload,
+  Package,
+  Truck,
+} from 'lucide-react'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import {
   DropdownMenu,
@@ -23,6 +45,12 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible'
+import { cn } from '@/lib/utils'
 import { api } from '@/lib/orpc/client'
 import RefreshNow from '@/components/RefreshNow'
 
@@ -77,17 +105,121 @@ interface ShipmentTableProps {
 
 type SortField = 'shippedDate' | 'estimatedDelivery' | 'deliveredDate' | 'createdAt'
 
-export default function ShipmentTable({ 
-  shipments, 
-  pagination, 
-  activeStatus = 'all',
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+/**
+ * Parse PO number to extract order number for OMG link
+ * Format: "164-1" → orderNumber: "164"
+ */
+function parseOrderNumber(poNumber: string | null | undefined): string | null {
+  if (!poNumber) return null
+  const match = poNumber.match(/^(\d+)-\d+$/)
+  return match ? match[1] : null
+}
+
+/**
+ * Generate OMG order URL from PO number
+ */
+function getOmgOrderUrl(poNumber: string | null | undefined): string | null {
+  const orderNumber = parseOrderNumber(poNumber)
+  if (!orderNumber) return null
+  // OMG uses order number in the URL path
+  return `https://stitchi.omgorders.app/orders?search=${encodeURIComponent(orderNumber)}`
+}
+
+/**
+ * Generate carrier tracking URL
+ */
+function getCarrierTrackingUrl(carrier: string | null | undefined, trackingNumber: string): string | null {
+  if (!trackingNumber) return null
+  const normalized = (carrier || '').toLowerCase()
+
+  switch (normalized) {
+    case 'ups':
+      return `https://www.ups.com/track?loc=en_US&tracknum=${encodeURIComponent(trackingNumber)}`
+    case 'usps':
+    case 'us-post':
+      return `https://tools.usps.com/go/TrackConfirmAction?tLabels=${encodeURIComponent(trackingNumber)}`
+    case 'fedex':
+      return `https://www.fedex.com/fedextrack/?trknbr=${encodeURIComponent(trackingNumber)}`
+    case 'dhl':
+      return `https://www.dhl.com/global-en/home/tracking/tracking-express.html?submit=1&tracking-id=${encodeURIComponent(trackingNumber)}`
+    case 'lasership':
+      return `https://www.lasership.com/track/${encodeURIComponent(trackingNumber)}`
+    default:
+      return `https://www.google.com/search?q=${encodeURIComponent(trackingNumber)}+tracking`
+  }
+}
+
+/**
+ * Get status badge styling
+ */
+function getStatusStyle(status: string): { bg: string; text: string } {
+  switch (status) {
+    case 'delivered':
+      return { bg: 'bg-green-100 dark:bg-green-900/30', text: 'text-green-700 dark:text-green-400' }
+    case 'in_transit':
+      return { bg: 'bg-blue-100 dark:bg-blue-900/30', text: 'text-blue-700 dark:text-blue-400' }
+    case 'out_for_delivery':
+      return { bg: 'bg-purple-100 dark:bg-purple-900/30', text: 'text-purple-700 dark:text-purple-400' }
+    case 'exception':
+      return { bg: 'bg-red-100 dark:bg-red-900/30', text: 'text-red-700 dark:text-red-400' }
+    case 'pending':
+      return { bg: 'bg-gray-100 dark:bg-gray-800', text: 'text-gray-700 dark:text-gray-400' }
+    default:
+      return { bg: 'bg-yellow-100 dark:bg-yellow-900/30', text: 'text-yellow-700 dark:text-yellow-400' }
+  }
+}
+
+/**
+ * Format status for display
+ */
+function formatStatus(status: string): string {
+  return status.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+}
+
+/**
+ * Format date for display
+ */
+function formatDate(dateStr: string | null | undefined): string | null {
+  if (!dateStr) return null
+  try {
+    return format(new Date(dateStr), 'MMM d')
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Format date with time
+ */
+function formatDateTime(dateStr: string | null | undefined): string | null {
+  if (!dateStr) return null
+  try {
+    return format(new Date(dateStr), 'MMM d, h:mm a')
+  } catch {
+    return null
+  }
+}
+
+// ============================================================================
+// Component
+// ============================================================================
+
+export default function ShipmentTable({
+  shipments,
+  pagination,
+  // activeStatus reserved for future status-specific styling
 }: ShipmentTableProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
-  
-  // Local state for controlled inputs
+
+  // Local state
   const [searchInput, setSearchInput] = useState(searchParams.get('search') || '')
   const [copiedTracking, setCopiedTracking] = useState<string | null>(null)
+  const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set())
   const [refreshingShipmentId, setRefreshingShipmentId] = useState<number | null>(null)
   const [deletingShipmentId, setDeletingShipmentId] = useState<number | null>(null)
   const [syncingToOmgId, setSyncingToOmgId] = useState<number | null>(null)
@@ -99,7 +231,7 @@ export default function ShipmentTable({
   // URL update helper
   const updateUrl = useCallback((updates: Record<string, string | null>) => {
     const params = new URLSearchParams(searchParams.toString())
-    
+
     Object.entries(updates).forEach(([key, value]) => {
       if (value === null || value === '') {
         params.delete(key)
@@ -107,7 +239,7 @@ export default function ShipmentTable({
         params.set(key, value)
       }
     })
-    
+
     const query = params.toString()
     router.push(query ? `/?${query}` : '/')
   }, [router, searchParams])
@@ -120,17 +252,16 @@ export default function ShipmentTable({
 
   const handleSort = useCallback((field: SortField) => {
     let newDir: 'asc' | 'desc' = 'asc'
-    
+
     if (sortField === field) {
       if (sortDir === 'asc') {
         newDir = 'desc'
       } else {
-        // Third click clears sort
         updateUrl({ sortField: null, sortDir: null })
         return
       }
     }
-    
+
     updateUrl({ sortField: field, sortDir: newDir })
   }, [sortField, sortDir, updateUrl])
 
@@ -142,6 +273,18 @@ export default function ShipmentTable({
     setSearchInput('')
     updateUrl({ search: null, sortField: null, sortDir: null, page: null })
   }, [updateUrl])
+
+  const toggleRowExpanded = useCallback((id: number) => {
+    setExpandedRows(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+      }
+      return next
+    })
+  }, [])
 
   const handleRefreshShipment = async (shipmentId: number) => {
     setRefreshingShipmentId(shipmentId)
@@ -159,7 +302,7 @@ export default function ShipmentTable({
     if (!confirm('Are you sure you want to delete this shipment? This action cannot be undone.')) {
       return
     }
-    
+
     setDeletingShipmentId(shipmentId)
     try {
       await api.shipments.delete({ shipmentId })
@@ -176,7 +319,7 @@ export default function ShipmentTable({
       alert('This shipment has no PO number. Cannot sync to OMG.')
       return
     }
-    
+
     setSyncingToOmgId(shipmentId)
     try {
       const result = await api.shipments.syncToOmg({ shipmentId })
@@ -213,78 +356,11 @@ export default function ShipmentTable({
     }
   }, [])
 
-  // Helpers
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'delivered': return 'bg-green-500'
-      case 'in_transit': return 'bg-blue-500'
-      case 'out_for_delivery': return 'bg-purple-500'
-      case 'exception': return 'bg-red-500'
-      case 'pending': return 'bg-gray-500'
-      default: return 'bg-yellow-500'
-    }
-  }
-
-  const formatDate = (dateStr?: string | null) => {
-    if (!dateStr) return null
-    try {
-      return format(new Date(dateStr), 'MMM d, yyyy')
-    } catch {
-      return null
-    }
-  }
-
-  const formatDateTime = (dateStr?: string | null) => {
-    if (!dateStr) return null
-    try {
-      return format(new Date(dateStr), 'MMM d, h:mm a')
-    } catch {
-      return null
-    }
-  }
-
-  const getLatestEvent = (events?: TrackingEvent[]) => {
-    if (!events || events.length === 0) return null
-    return events[0]
-  }
-
-  const getExpectedDelivery = (shipment: Shipment) => {
-    if (!shipment.estimatedDelivery) {
-      return null
-    }
-    return {
-      date: formatDate(shipment.estimatedDelivery),
-      source: 'carrier' as const,
-    }
-  }
-
-
-  const getCarrierTrackingUrl = (carrier?: string | null, trackingNumber?: string) => {
-    if (!trackingNumber) return null
-    const normalized = (carrier || '').toLowerCase()
-
-    switch (normalized) {
-      case 'ups':
-        return `https://www.ups.com/track?loc=en_US&tracknum=${encodeURIComponent(trackingNumber)}`
-      case 'usps':
-      case 'us-post':
-        return `https://tools.usps.com/go/TrackConfirmAction?tLabels=${encodeURIComponent(trackingNumber)}`
-      case 'fedex':
-        return `https://www.fedex.com/fedextrack/?trknbr=${encodeURIComponent(trackingNumber)}`
-      case 'dhl':
-        return `https://www.dhl.com/global-en/home/tracking/tracking-express.html?submit=1&tracking-id=${encodeURIComponent(trackingNumber)}`
-      case 'lasership':
-        return `https://www.lasership.com/track/${encodeURIComponent(trackingNumber)}`
-      default:
-        return `https://www.google.com/search?q=${encodeURIComponent(trackingNumber)}+tracking`
-    }
-  }
-
   const getSortIcon = (field: SortField) => {
     if (sortField !== field) {
       return <ArrowUpDown className="h-4 w-4 text-muted-foreground" />
     }
-    return sortDir === 'asc' 
+    return sortDir === 'asc'
       ? <ArrowUp className="h-4 w-4" />
       : <ArrowDown className="h-4 w-4" />
   }
@@ -298,7 +374,7 @@ export default function ShipmentTable({
         <form onSubmit={handleSearch} className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Search tracking, PO, or supplier..."
+            placeholder="Search tracking, PO, or supplier…"
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             className="pl-9"
@@ -306,7 +382,7 @@ export default function ShipmentTable({
         </form>
         {hasActiveFilters && (
           <Button variant="ghost" size="sm" onClick={clearFilters}>
-            Clear filters
+            Clear Filters
           </Button>
         )}
         <div className="ml-auto">
@@ -319,282 +395,405 @@ export default function ShipmentTable({
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Tracking Number</TableHead>
-              <TableHead>PO / Supplier</TableHead>
-              <TableHead>Status</TableHead>
+              <TableHead className="w-[40px]"></TableHead>
+              <TableHead>Order</TableHead>
+              <TableHead>Tracking</TableHead>
               <TableHead>
-                <Button variant="ghost" size="sm" className="h-8 px-2" onClick={() => handleSort('shippedDate')}>
-                  Shipped
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 px-2 -ml-2"
+                  onClick={() => handleSort('shippedDate')}
+                >
+                  Status
                   {getSortIcon('shippedDate')}
                 </Button>
               </TableHead>
-              <TableHead>
-                <Button variant="ghost" size="sm" className="h-8 px-2" onClick={() => handleSort('estimatedDelivery')}>
-                  Expected
-                  {getSortIcon('estimatedDelivery')}
-                </Button>
-              </TableHead>
-              <TableHead>
-                <Button variant="ghost" size="sm" className="h-8 px-2" onClick={() => handleSort('deliveredDate')}>
-                  Delivered
-                  {getSortIcon('deliveredDate')}
-                </Button>
-              </TableHead>
-              <TableHead>Latest Update</TableHead>
+              <TableHead>Last Update</TableHead>
               <TableHead className="w-[50px]"></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {shipments.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={8} className="text-center text-muted-foreground">
+                <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
                   No shipments found
                 </TableCell>
               </TableRow>
             ) : (
               shipments.map((shipment) => {
-                const latestEvent = getLatestEvent(shipment.trackingEvents)
-                const shippedDate = formatDate(shipment.shippedDate)
-                const expectedInfo = getExpectedDelivery(shipment)
-                const deliveredDate = formatDateTime(shipment.deliveredDate)
+                const isExpanded = expandedRows.has(shipment.id)
+                const omgUrl = getOmgOrderUrl(shipment.poNumber)
                 const trackingUrl = getCarrierTrackingUrl(shipment.carrier, shipment.trackingNumber)
+                const statusStyle = getStatusStyle(shipment.status)
+                const latestEvent = shipment.trackingEvents?.[0]
+                const isLoading = refreshingShipmentId === shipment.id ||
+                  deletingShipmentId === shipment.id ||
+                  syncingToOmgId === shipment.id
+
+                // Determine which date to show based on status
+                let dateInfo: { label: string; value: string | null; icon: React.ReactNode } | null = null
+                if (shipment.status === 'delivered' && shipment.deliveredDate) {
+                  dateInfo = {
+                    label: 'Delivered',
+                    value: formatDate(shipment.deliveredDate),
+                    icon: <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />,
+                  }
+                } else if (shipment.estimatedDelivery) {
+                  dateInfo = {
+                    label: 'Expected',
+                    value: formatDate(shipment.estimatedDelivery),
+                    icon: <Truck className="h-3.5 w-3.5 text-orange-500" />,
+                  }
+                } else if (shipment.shippedDate) {
+                  dateInfo = {
+                    label: 'Shipped',
+                    value: formatDate(shipment.shippedDate),
+                    icon: <Package className="h-3.5 w-3.5 text-blue-500" />,
+                  }
+                }
 
                 return (
-                  <TableRow key={shipment.id}>
-                    {/* Tracking Number */}
-                    <TableCell>
-                      <div className="flex flex-col gap-1">
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono font-medium">{shipment.trackingNumber}</span>
-                          <button
-                            type="button"
-                            onClick={() => handleCopyTracking(shipment.trackingNumber)}
-                            className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-input text-muted-foreground hover:text-foreground hover:bg-muted"
-                            aria-label={`Copy tracking number ${shipment.trackingNumber}`}
-                          >
-                            {copiedTracking === shipment.trackingNumber ? (
-                              <Check className="h-3.5 w-3.5 text-green-600" />
-                            ) : (
-                              <Copy className="h-3.5 w-3.5" />
-                            )}
-                          </button>
-                          {trackingUrl && (
-                            <a
-                              href={trackingUrl}
-                              target="_blank"
-                              rel="noreferrer noopener"
-                              className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-input text-muted-foreground hover:text-foreground hover:bg-muted"
-                              aria-label={`Open ${shipment.carrier || 'carrier'} tracking page for ${shipment.trackingNumber}`}
-                            >
-                              <ExternalLink className="h-3.5 w-3.5" />
-                            </a>
-                          )}
-                        </div>
-                        <span className="text-xs text-muted-foreground uppercase">
-                          {shipment.carrier || 'Unknown'}
-                        </span>
-                      </div>
-                    </TableCell>
-
-                    {/* PO / Supplier */}
-                    <TableCell>
-                      <div className="flex flex-col gap-1">
-                        {shipment.supplier && <span className="text-sm">{shipment.supplier}</span>}
-                        {shipment.poNumber && <span className="text-xs text-muted-foreground">PO: {shipment.poNumber}</span>}
-                        {!shipment.supplier && !shipment.poNumber && <span className="text-muted-foreground">-</span>}
-                      </div>
-                    </TableCell>
-
-                    {/* Status */}
-                    <TableCell>
-                      <div className="flex flex-col gap-1">
-                        <Badge className={getStatusColor(shipment.status)}>
-                          {shipment.status.replace('_', ' ')}
-                        </Badge>
-                        {shipment.ship24Status && shipment.ship24Status !== shipment.status && (
-                          <span className="text-xs text-muted-foreground">{shipment.ship24Status}</span>
+                  <Collapsible key={shipment.id} asChild open={isExpanded}>
+                    <>
+                      <TableRow
+                        className={cn(
+                          'group',
+                          isExpanded && 'bg-muted/50',
+                          shipment.lastError && 'bg-red-50 dark:bg-red-950/20'
                         )}
-                      </div>
-                    </TableCell>
+                      >
+                        {/* Expand Toggle */}
+                        <TableCell className="pr-0">
+                          <CollapsibleTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0"
+                              onClick={() => toggleRowExpanded(shipment.id)}
+                              aria-label={isExpanded ? 'Collapse details' : 'Expand details'}
+                            >
+                              <ChevronDown
+                                className={cn(
+                                  'h-4 w-4 transition-transform',
+                                  isExpanded && 'rotate-180'
+                                )}
+                              />
+                            </Button>
+                          </CollapsibleTrigger>
+                        </TableCell>
 
-                    {/* Shipped */}
-                    <TableCell>
-                      {shippedDate ? (
-                        <span className="text-sm">{shippedDate}</span>
-                      ) : (
-                        <span className="text-muted-foreground">-</span>
-                      )}
-                    </TableCell>
-
-                    {/* Expected */}
-                    <TableCell>
-                      {expectedInfo ? (
-                        <div className="flex items-center gap-1.5 text-sm">
-                          <TruckIcon className="h-3.5 w-3.5 text-orange-500" />
-                          <span>{expectedInfo.date}</span>
-                        </div>
-                      ) : (
-                        <span className="text-muted-foreground">-</span>
-                      )}
-                    </TableCell>
-
-                    {/* Delivered */}
-                    <TableCell>
-                      {deliveredDate ? (
-                        <div className="flex items-center gap-1.5 text-sm font-medium text-green-600">
-                          <CheckCircle2 className="h-3.5 w-3.5" />
-                          <span>{deliveredDate}</span>
-                        </div>
-                      ) : (
-                        <span className="text-muted-foreground">-</span>
-                      )}
-                    </TableCell>
-
-                    {/* Latest Update */}
-                    <TableCell>
-                      {shipment.lastError ? (
-                        <div className="flex flex-col gap-1 max-w-[250px]">
-                          <Popover>
-                            <PopoverTrigger asChild>
-                              <button 
-                                type="button"
-                                className="flex items-center gap-1.5 text-sm text-red-600 hover:text-red-700 transition-colors"
-                                aria-label="View error details"
-                              >
-                                <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />
-                                <span className="font-medium">Tracking Error</span>
-                              </button>
-                            </PopoverTrigger>
-                            <PopoverContent className="w-80 text-sm">
-                              <div className="space-y-3">
-                                <p className="font-medium text-red-600">Error Details</p>
-                                <p className="text-muted-foreground break-words whitespace-pre-wrap text-xs">
-                                  {shipment.lastError}
-                                </p>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  className="w-full"
-                                  onClick={() => handleRefreshShipment(shipment.id)}
-                                  disabled={refreshingShipmentId === shipment.id}
-                                >
-                                  {refreshingShipmentId === shipment.id ? (
-                                    <>
-                                      <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                                      Retrying...
-                                    </>
-                                  ) : (
-                                    <>
-                                      <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
-                                      Retry Now
-                                    </>
-                                  )}
-                                </Button>
+                        {/* Order Info */}
+                        <TableCell>
+                          <div className="flex flex-col gap-0.5 min-w-0">
+                            {shipment.poNumber ? (
+                              <div className="flex items-center gap-1.5">
+                                {omgUrl ? (
+                                  <a
+                                    href={omgUrl}
+                                    target="_blank"
+                                    rel="noreferrer noopener"
+                                    className="font-medium text-primary hover:underline truncate"
+                                    title={`Open Order ${parseOrderNumber(shipment.poNumber)} in OMG`}
+                                  >
+                                    PO {shipment.poNumber}
+                                  </a>
+                                ) : (
+                                  <span className="font-medium truncate">
+                                    PO {shipment.poNumber}
+                                  </span>
+                                )}
+                                {omgUrl && (
+                                  <ExternalLink className="h-3 w-3 text-muted-foreground flex-shrink-0" aria-hidden="true" />
+                                )}
                               </div>
-                            </PopoverContent>
-                          </Popover>
-                          {shipment.lastChecked && (
-                            <span className="text-xs text-muted-foreground">
-                              {formatDistanceToNow(new Date(shipment.lastChecked), { addSuffix: true })}
-                            </span>
-                          )}
-                        </div>
-                      ) : latestEvent ? (
-                        <div className="flex flex-col gap-1 max-w-[250px]">
-                          {latestEvent.location && (
-                            <div className="flex items-center gap-1 text-sm">
-                              <MapPin className="h-3 w-3 text-muted-foreground flex-shrink-0" />
-                              <span className="truncate">{latestEvent.location}</span>
-                            </div>
-                          )}
-                          {latestEvent.message && (
-                            <span className="text-xs text-muted-foreground truncate">
-                              {latestEvent.message}
-                            </span>
-                          )}
-                          {latestEvent.eventTime && (
-                            <span className="text-xs text-muted-foreground">
-                              {formatDistanceToNow(new Date(latestEvent.eventTime), { addSuffix: true })}
-                            </span>
-                          )}
-                        </div>
-                      ) : shipment.ship24LastUpdate ? (
-                        <span className="text-xs text-muted-foreground">
-                          {formatDistanceToNow(new Date(shipment.ship24LastUpdate), { addSuffix: true })}
-                        </span>
-                      ) : shipment.lastChecked ? (
-                        <span className="text-xs text-muted-foreground">
-                          Checked {formatDistanceToNow(new Date(shipment.lastChecked), { addSuffix: true })}
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground">Never</span>
-                      )}
-                    </TableCell>
-
-                    {/* Actions */}
-                    <TableCell>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 w-8 p-0"
-                            disabled={refreshingShipmentId === shipment.id || deletingShipmentId === shipment.id || syncingToOmgId === shipment.id}
-                          >
-                            {(refreshingShipmentId === shipment.id || deletingShipmentId === shipment.id || syncingToOmgId === shipment.id) ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
                             ) : (
-                              <MoreHorizontal className="h-4 w-4" />
+                              <span className="text-muted-foreground text-sm">No PO</span>
                             )}
-                            <span className="sr-only">Open menu</span>
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          {shipment.lastError && (
-                            <>
+                            {shipment.supplier && (
+                              <span className="text-xs text-muted-foreground truncate">
+                                {shipment.supplier}
+                              </span>
+                            )}
+                          </div>
+                        </TableCell>
+
+                        {/* Tracking */}
+                        <TableCell>
+                          <div className="flex flex-col gap-0.5 min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-mono text-sm truncate" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                                {shipment.trackingNumber}
+                              </span>
+                              <div className="flex items-center gap-0.5 flex-shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => handleCopyTracking(shipment.trackingNumber)}
+                                  className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+                                  aria-label={`Copy tracking number ${shipment.trackingNumber}`}
+                                >
+                                  {copiedTracking === shipment.trackingNumber ? (
+                                    <Check className="h-3.5 w-3.5 text-green-600" />
+                                  ) : (
+                                    <Copy className="h-3.5 w-3.5" />
+                                  )}
+                                </button>
+                                {trackingUrl && (
+                                  <a
+                                    href={trackingUrl}
+                                    target="_blank"
+                                    rel="noreferrer noopener"
+                                    className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+                                    aria-label={`Track on ${shipment.carrier || 'carrier'} website`}
+                                  >
+                                    <ExternalLink className="h-3.5 w-3.5" />
+                                  </a>
+                                )}
+                              </div>
+                            </div>
+                            <span className="text-xs text-muted-foreground uppercase">
+                              {shipment.carrier || 'Unknown carrier'}
+                            </span>
+                          </div>
+                        </TableCell>
+
+                        {/* Status */}
+                        <TableCell>
+                          <div className="flex flex-col gap-1">
+                            <Badge
+                              variant="secondary"
+                              className={cn('w-fit', statusStyle.bg, statusStyle.text)}
+                            >
+                              {formatStatus(shipment.status)}
+                            </Badge>
+                            {dateInfo && (
+                              <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                                {dateInfo.icon}
+                                <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+                                  {dateInfo.value}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        </TableCell>
+
+                        {/* Last Update */}
+                        <TableCell>
+                          {shipment.lastError ? (
+                            <Popover>
+                              <PopoverTrigger asChild>
+                                <button
+                                  type="button"
+                                  className="flex items-center gap-1.5 text-sm text-red-600 hover:text-red-700"
+                                  aria-label="View error details"
+                                >
+                                  <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />
+                                  <span className="font-medium">Error</span>
+                                </button>
+                              </PopoverTrigger>
+                              <PopoverContent className="w-80 text-sm">
+                                <div className="space-y-3">
+                                  <p className="font-medium text-red-600">Tracking Error</p>
+                                  <p className="text-muted-foreground break-words whitespace-pre-wrap text-xs">
+                                    {shipment.lastError}
+                                  </p>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="w-full"
+                                    onClick={() => handleRefreshShipment(shipment.id)}
+                                    disabled={refreshingShipmentId === shipment.id}
+                                  >
+                                    {refreshingShipmentId === shipment.id ? (
+                                      <>
+                                        <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                                        Retrying…
+                                      </>
+                                    ) : (
+                                      <>
+                                        <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                                        Retry Now
+                                      </>
+                                    )}
+                                  </Button>
+                                </div>
+                              </PopoverContent>
+                            </Popover>
+                          ) : latestEvent ? (
+                            <div className="flex flex-col gap-0.5 max-w-[200px]">
+                              {latestEvent.location && (
+                                <div className="flex items-center gap-1 text-sm">
+                                  <MapPin className="h-3 w-3 text-muted-foreground flex-shrink-0" aria-hidden="true" />
+                                  <span className="truncate">{latestEvent.location}</span>
+                                </div>
+                              )}
+                              {latestEvent.eventTime && (
+                                <span className="text-xs text-muted-foreground">
+                                  {formatDistanceToNow(new Date(latestEvent.eventTime), { addSuffix: true })}
+                                </span>
+                              )}
+                            </div>
+                          ) : shipment.ship24LastUpdate ? (
+                            <span className="text-xs text-muted-foreground">
+                              {formatDistanceToNow(new Date(shipment.ship24LastUpdate), { addSuffix: true })}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-muted-foreground flex items-center gap-1">
+                              <Clock className="h-3 w-3" aria-hidden="true" />
+                              Never checked
+                            </span>
+                          )}
+                        </TableCell>
+
+                        {/* Actions */}
+                        <TableCell>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0"
+                                disabled={isLoading}
+                              >
+                                {isLoading ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <MoreHorizontal className="h-4 w-4" />
+                                )}
+                                <span className="sr-only">Open menu</span>
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              {shipment.lastError && (
+                                <>
+                                  <DropdownMenuItem
+                                    onClick={() => handleRefreshShipment(shipment.id)}
+                                    disabled={refreshingShipmentId === shipment.id}
+                                  >
+                                    <RefreshCw className="h-4 w-4 mr-2" />
+                                    Retry Tracking
+                                  </DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                </>
+                              )}
                               <DropdownMenuItem
-                                onClick={() => handleRefreshShipment(shipment.id)}
-                                disabled={refreshingShipmentId === shipment.id}
+                                onClick={() => handleSyncToOmg(shipment.id, shipment.poNumber)}
+                                disabled={syncingToOmgId === shipment.id || !shipment.poNumber}
                               >
-                                <RefreshCw className="h-4 w-4 mr-2" />
-                                Retry Tracking
+                                <Upload className="h-4 w-4 mr-2" />
+                                Sync to OMG
+                                {!shipment.poNumber && (
+                                  <span className="ml-1 text-xs text-muted-foreground">(no PO)</span>
+                                )}
                               </DropdownMenuItem>
+                              {shipment.omgData && (
+                                <DropdownMenuItem asChild>
+                                  <a
+                                    href={shipment.omgData.poUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                  >
+                                    <ExternalLink className="h-4 w-4 mr-2" />
+                                    View in OMG
+                                  </a>
+                                </DropdownMenuItem>
+                              )}
                               <DropdownMenuSeparator />
-                            </>
-                          )}
-                          <DropdownMenuItem
-                            onClick={() => handleSyncToOmg(shipment.id, shipment.poNumber)}
-                            disabled={syncingToOmgId === shipment.id || !shipment.poNumber}
-                          >
-                            <Upload className="h-4 w-4 mr-2" />
-                            Sync to OMG
-                            {!shipment.poNumber && <span className="ml-1 text-xs text-muted-foreground">(no PO)</span>}
-                          </DropdownMenuItem>
-                          {shipment.omgData && (
-                            <DropdownMenuItem asChild>
-                              <a
-                                href={shipment.omgData.poUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
+                              <DropdownMenuItem
+                                onClick={() => handleDeleteShipment(shipment.id)}
+                                disabled={deletingShipmentId === shipment.id}
+                                className="text-red-600 focus:text-red-600"
                               >
-                                <ExternalLink className="h-4 w-4 mr-2" />
-                                View in OMG
-                              </a>
-                            </DropdownMenuItem>
-                          )}
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            onClick={() => handleDeleteShipment(shipment.id)}
-                            disabled={deletingShipmentId === shipment.id}
-                            className="text-red-600 focus:text-red-600"
-                          >
-                            <Trash2 className="h-4 w-4 mr-2" />
-                            Delete
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </TableCell>
-                  </TableRow>
+                                <Trash2 className="h-4 w-4 mr-2" />
+                                Delete
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </TableCell>
+                      </TableRow>
+
+                      {/* Expanded Details */}
+                      <CollapsibleContent asChild>
+                        <TableRow className="bg-muted/30 hover:bg-muted/30">
+                          <TableCell colSpan={6} className="py-3">
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm pl-10">
+                              {/* Dates */}
+                              <div>
+                                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">
+                                  Shipped
+                                </p>
+                                <p style={{ fontVariantNumeric: 'tabular-nums' }}>
+                                  {formatDateTime(shipment.shippedDate) || '—'}
+                                </p>
+                              </div>
+                              <div>
+                                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">
+                                  Expected
+                                </p>
+                                <p style={{ fontVariantNumeric: 'tabular-nums' }}>
+                                  {formatDateTime(shipment.estimatedDelivery) || '—'}
+                                </p>
+                              </div>
+                              <div>
+                                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">
+                                  Delivered
+                                </p>
+                                <p style={{ fontVariantNumeric: 'tabular-nums' }}>
+                                  {formatDateTime(shipment.deliveredDate) || '—'}
+                                </p>
+                              </div>
+                              <div>
+                                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">
+                                  Last Checked
+                                </p>
+                                <p>
+                                  {shipment.lastChecked
+                                    ? formatDistanceToNow(new Date(shipment.lastChecked), { addSuffix: true })
+                                    : '—'}
+                                </p>
+                              </div>
+
+                              {/* Tracking Events */}
+                              {shipment.trackingEvents && shipment.trackingEvents.length > 0 && (
+                                <div className="col-span-2 md:col-span-4 mt-2">
+                                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
+                                    Recent Events
+                                  </p>
+                                  <div className="space-y-2">
+                                    {shipment.trackingEvents.slice(0, 5).map((event) => (
+                                      <div
+                                        key={event.id}
+                                        className="flex items-start gap-2 text-sm"
+                                      >
+                                        <div className="w-1.5 h-1.5 rounded-full bg-muted-foreground mt-1.5 flex-shrink-0" />
+                                        <div className="min-w-0 flex-1">
+                                          <div className="flex items-center gap-2">
+                                            {event.location && (
+                                              <span className="truncate">{event.location}</span>
+                                            )}
+                                            {event.eventTime && (
+                                              <span className="text-xs text-muted-foreground flex-shrink-0" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                                                {format(new Date(event.eventTime), 'MMM d, h:mm a')}
+                                              </span>
+                                            )}
+                                          </div>
+                                          {event.message && (
+                                            <p className="text-muted-foreground truncate">
+                                              {event.message}
+                                            </p>
+                                          )}
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      </CollapsibleContent>
+                    </>
+                  </Collapsible>
                 )
               })
             )}
@@ -605,10 +804,8 @@ export default function ShipmentTable({
       {/* Pagination */}
       {pagination.totalPages > 1 && (
         <div className="flex items-center justify-between">
-          <p className="text-sm text-muted-foreground">
-            Showing {((pagination.page - 1) * pagination.pageSize) + 1} to{' '}
-            {Math.min(pagination.page * pagination.pageSize, pagination.total)} of{' '}
-            {pagination.total} shipments
+          <p className="text-sm text-muted-foreground" style={{ fontVariantNumeric: 'tabular-nums' }}>
+            Showing {((pagination.page - 1) * pagination.pageSize) + 1}–{Math.min(pagination.page * pagination.pageSize, pagination.total)} of {pagination.total} shipments
           </p>
           <div className="flex items-center gap-2">
             <Button
@@ -618,8 +815,9 @@ export default function ShipmentTable({
               disabled={!pagination.hasPrev}
             >
               <ChevronLeft className="h-4 w-4" />
+              <span className="sr-only">Previous page</span>
             </Button>
-            <span className="text-sm">
+            <span className="text-sm" style={{ fontVariantNumeric: 'tabular-nums' }}>
               Page {pagination.page} of {pagination.totalPages}
             </span>
             <Button
@@ -629,6 +827,7 @@ export default function ShipmentTable({
               disabled={!pagination.hasNext}
             >
               <ChevronRight className="h-4 w-4" />
+              <span className="sr-only">Next page</span>
             </Button>
           </div>
         </div>
