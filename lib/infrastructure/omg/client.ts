@@ -366,6 +366,188 @@ export async function findByTrackingNumber(
   return allTracking.find((t) => t.trackingNumber === trackingNumber) || null
 }
 
+// ============================================================================
+// PO Number Lookup & Tracking Push
+// ============================================================================
+
+/**
+ * Parse PO number to extract order number
+ * PO format: "{orderNumber}-{sequence}" e.g., "189-1"
+ */
+function parsePoNumber(poNumber: string): { orderNumber: string; sequence: string } | null {
+  const match = poNumber.match(/^(\d+)-(\d+)$/)
+  if (!match) return null
+  return {
+    orderNumber: match[1],
+    sequence: match[2],
+  }
+}
+
+/**
+ * Find a purchase order by PO number (e.g., "189-1")
+ * Returns the PO with order context needed for API calls
+ */
+export async function findPurchaseOrderByPoNumber(
+  poNumber: string
+): Promise<{
+  po: OMGPurchaseOrder
+  order: OMGOrder
+} | null> {
+  const parsed = parsePoNumber(poNumber)
+  if (!parsed) {
+    console.warn(`[OMG] Invalid PO number format: ${poNumber}`)
+    return null
+  }
+
+  // Find the order by order number
+  // We need to search through orders to find matching order number
+  let offset = 0
+  const limit = 50
+  let hasMore = true
+
+  while (hasMore) {
+    const { orders, total } = await listOrders(offset, limit)
+
+    for (const order of orders) {
+      if (order.number === parsed.orderNumber) {
+        // Found the order, now find the PO
+        const pos = await getPurchaseOrders(order._id)
+        const matchingPo = pos.find((po) => po.poNumber === poNumber)
+
+        if (matchingPo) {
+          // Get full PO details
+          const fullPo = await getPurchaseOrder(order._id, matchingPo._id)
+          return { po: fullPo, order }
+        }
+      }
+    }
+
+    offset += limit
+    hasMore = offset < total
+  }
+
+  return null
+}
+
+/**
+ * Carrier ID mapping for OMG
+ */
+const CARRIER_MAP: Record<string, string> = {
+  'ups': 'UPS',
+  'fedex': 'FedEx',
+  'usps': 'USPS',
+  'dhl': 'DHL',
+  'ontrac': 'OnTrac',
+  // Add more as needed
+}
+
+/**
+ * Normalize carrier name to OMG format
+ */
+function normalizeCarrier(carrier: string): string {
+  const lower = carrier.toLowerCase()
+  return CARRIER_MAP[lower] || carrier
+}
+
+export interface AddTrackingInput {
+  trackingNumber: string
+  carrier: string
+  status?: string
+  comment?: string
+}
+
+/**
+ * Add tracking to a purchase order
+ * 
+ * @param poNumber - PO number (e.g., "189-1")
+ * @param tracking - Tracking details
+ * @returns The created tracking entry, or null if PO not found
+ */
+export async function addTrackingToPurchaseOrder(
+  poNumber: string,
+  tracking: AddTrackingInput
+): Promise<OMGTracking | null> {
+  // Find the PO
+  const result = await findPurchaseOrderByPoNumber(poNumber)
+  if (!result) {
+    console.warn(`[OMG] PO not found: ${poNumber}`)
+    return null
+  }
+
+  const { po, order } = result
+
+  // Check if tracking already exists
+  const existingTracking = po.tracking?.find(
+    (t) => t.number === tracking.trackingNumber
+  )
+  if (existingTracking) {
+    console.log(`[OMG] Tracking ${tracking.trackingNumber} already exists on PO ${poNumber}`)
+    return existingTracking
+  }
+
+  // Add tracking via API
+  const response = await omgFetch<{ data: OMGTracking }>(
+    `/orders/${order._id}/purchaseOrders/${po._id}/tracking`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        number: tracking.trackingNumber,
+        carrierId: normalizeCarrier(tracking.carrier),
+        status: tracking.status || 'Shipped',
+        comment: tracking.comment || '',
+      }),
+    }
+  )
+
+  console.log(`[OMG] Added tracking ${tracking.trackingNumber} to PO ${poNumber}`)
+  return response.data
+}
+
+/**
+ * Batch add tracking to multiple POs
+ * Useful for syncing multiple shipments at once
+ */
+export async function batchAddTracking(
+  items: Array<{
+    poNumber: string
+    trackingNumber: string
+    carrier: string
+  }>
+): Promise<{
+  success: Array<{ poNumber: string; trackingNumber: string }>
+  failed: Array<{ poNumber: string; trackingNumber: string; error: string }>
+}> {
+  const success: Array<{ poNumber: string; trackingNumber: string }> = []
+  const failed: Array<{ poNumber: string; trackingNumber: string; error: string }> = []
+
+  for (const item of items) {
+    try {
+      const result = await addTrackingToPurchaseOrder(item.poNumber, {
+        trackingNumber: item.trackingNumber,
+        carrier: item.carrier,
+      })
+
+      if (result) {
+        success.push({ poNumber: item.poNumber, trackingNumber: item.trackingNumber })
+      } else {
+        failed.push({
+          poNumber: item.poNumber,
+          trackingNumber: item.trackingNumber,
+          error: 'PO not found',
+        })
+      }
+    } catch (err) {
+      failed.push({
+        poNumber: item.poNumber,
+        trackingNumber: item.trackingNumber,
+        error: err instanceof Error ? err.message : 'Unknown error',
+      })
+    }
+  }
+
+  return { success, failed }
+}
+
 // Export for testing/debugging
 export const _internal = {
   login,
