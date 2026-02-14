@@ -13,32 +13,33 @@ model scanned_conversations {
   subject         String?
   shipments_found Int       @default(0)
   scanned_at      DateTime  @default(now())
-  last_message_at DateTime? // Timestamp of the most recent message in the conversation
+  last_message_at DateTime?
 
   @@index([conversation_id], map: "idx_conversation_id")
 }
 
 model shipments {
-  id                    Int               @id @default(autoincrement())
-  po_number             String?           @db.VarChar(255)
-  tracking_number       String            @unique @db.VarChar(255)
-  carrier               String?           @db.VarChar(100)
-  status                String            @default("pending") @db.VarChar(50)
+  id                    Int                   @id @default(autoincrement())
+  po_number             String?               @db.VarChar(255)
+  tracking_number       String                @unique @db.VarChar(255)
+  carrier               String?               @db.VarChar(100)
+  status                String                @default("pending") @db.VarChar(50)
   origin                String?
   destination           String?
-  shipped_date          DateTime?         // Date shipped (from extraction or Ship24)
-  estimated_delivery    DateTime?         // Expected delivery from Ship24
-  delivered_date        DateTime?         // Actual delivery date from Ship24
+  shipped_date          DateTime?
+  estimated_delivery    DateTime?
+  delivered_date        DateTime?
   last_checked          DateTime?
-  created_at            DateTime          @default(now())
+  created_at            DateTime              @default(now())
   updated_at            DateTime
-  supplier              String?           @db.VarChar(255)
-  front_conversation_id String?           @db.VarChar(255)
-  ship24_tracker_id     String?           @unique @db.VarChar(255)
-  ship24_status         String?           @db.VarChar(100)  // Detailed Ship24 status
-  ship24_last_update    DateTime?         // Last update from Ship24
-  last_error            String?           // Last error (for debugging)
+  supplier              String?               @db.VarChar(255)
+  front_conversation_id String?               @db.VarChar(255)
+  ship24_tracker_id     String?               @unique @db.VarChar(255)
+  last_error            String?
+  ship24_status         String?               @db.VarChar(100)
+  ship24_last_update    DateTime?
   tracking_events       tracking_events[]
+  omg_purchase_order    omg_purchase_orders?
 
   @@index([front_conversation_id], map: "idx_front_conversation")
   @@index([po_number], map: "idx_po_number")
@@ -46,9 +47,38 @@ model shipments {
   @@index([ship24_tracker_id], map: "idx_ship24_tracker")
 }
 
+// OMG Orders data - separate from shipments to avoid polluting the shipment model
+model omg_purchase_orders {
+  id             Int       @id @default(autoincrement())
+  shipment_id    Int?      @unique // Nullable - PO may exist before shipment arrives
+  po_number      String    @db.VarChar(50) // Normalized format (e.g., "189-1")
+
+  // OMG identifiers
+  omg_order_id   Int       // OMG's numeric order ID
+  omg_order_uuid String    @db.VarChar(36) // UUID for URLs
+  omg_po_id      Int       @unique // OMG's numeric PO ID (unique constraint)
+  omg_po_uuid    String    @db.VarChar(36) // UUID for URLs
+
+  // Denormalized order data
+  order_name     String?   @db.VarChar(255) // e.g., "Sample Order"
+  customer_name  String?   @db.VarChar(255)
+
+  // Recipients as JSONB array
+  recipients     Json?     @default("[]") // Array of { name, address, city, state, zip, country }
+
+  // Sync metadata
+  synced_at      DateTime  @default(now())
+  raw_data       Json?     // Full OMG response for debugging
+
+  // Relations
+  shipment       shipments? @relation(fields: [shipment_id], references: [id], onDelete: SetNull)
+
+  @@index([po_number], map: "idx_omg_po_number")
+  @@index([omg_order_id], map: "idx_omg_order_id")
+}
+
 model sync_history {
   id                             Int       @id @default(autoincrement())
-  source                         String    @default("manual") @db.VarChar(50)  // "manual" or "automatic"
   conversations_processed        Int       @default(0)
   conversations_already_scanned  Int       @default(0)
   shipments_added                Int       @default(0)
@@ -61,6 +91,7 @@ model sync_history {
   status                         String    @default("success") @db.VarChar(50)
   started_at                     DateTime  @default(now())
   completed_at                   DateTime?
+  source                         String    @default("manual") @db.VarChar(50)
 
   @@index([started_at], map: "idx_started_at")
   @@index([source], map: "idx_source")
@@ -105,9 +136,106 @@ model event_consumer_offsets {
   @@unique([consumer, topic])
 }
 
+model notification_log {
+  id          String              @id
+  queue_id    String?
+  channel     NotificationChannel
+  recipient   String
+  subject     String?
+  body        String
+  status      NotificationStatus
+  provider_id String?
+  metadata    Json?
+  sent_at     DateTime            @default(now())
+
+  @@index([channel])
+  @@index([recipient])
+  @@index([sent_at])
+}
+
+model notification_queue {
+  id           String              @id
+  rule_id      String?
+  event_id     String?
+  channel      NotificationChannel
+  recipient    String
+  subject      String?
+  body         String
+  metadata     Json?
+  status       NotificationStatus  @default(PENDING)
+  attempts     Int                 @default(0)
+  max_attempts Int                 @default(5)
+  available_at DateTime            @default(now())
+  locked_at    DateTime?
+  sent_at      DateTime?
+  last_error   String?
+  created_at   DateTime            @default(now())
+  updated_at   DateTime
+
+  @@index([available_at])
+  @@index([channel, status])
+}
+
+model notification_recipients {
+  id                 String              @id
+  rule_id            String
+  channel            NotificationChannel
+  target             String
+  metadata           Json?
+  created_at         DateTime            @default(now())
+  updated_at         DateTime
+  notification_rules notification_rules  @relation(fields: [rule_id], references: [id], onDelete: Cascade)
+
+  @@index([rule_id])
+}
+
+model notification_rules {
+  id                      String                    @id
+  name                    String
+  description             String?
+  trigger_event           String
+  filter                  Json?
+  template_id             String
+  enabled                 Boolean                   @default(true)
+  created_at              DateTime                  @default(now())
+  updated_at              DateTime
+  notification_recipients notification_recipients[]
+  notification_templates  notification_templates    @relation(fields: [template_id], references: [id], onDelete: Cascade)
+
+  @@index([enabled])
+  @@index([trigger_event])
+}
+
+model notification_templates {
+  id                 String               @id
+  name               String               @unique
+  channel            NotificationChannel
+  subject            String?
+  body               String
+  metadata           Json?
+  enabled            Boolean              @default(true)
+  created_at         DateTime             @default(now())
+  updated_at         DateTime
+  notification_rules notification_rules[]
+}
+
 enum EventStatus {
   PENDING
   PROCESSING
   COMPLETED
+  FAILED
+}
+
+enum NotificationChannel {
+  EMAIL
+  SLACK
+  WEBHOOK
+  SMS
+}
+
+enum NotificationStatus {
+  PENDING
+  PROCESSING
+  SENT
   FAILED
 }
