@@ -22,15 +22,29 @@ function getBaseUrl(): string {
     return `${process.env.NEXT_PUBLIC_APP_URL}/api/orpc`
   }
   
-  // Fallback for build time
+  // Fallback for build time - use relative URL
   return '/api/orpc'
 }
 
-const link = new RPCLink({
-  url: getBaseUrl(),
-})
+// Lazy-initialize the client to ensure window.location is available
+let _api: RouterClient<AppRouter> | null = null
 
-export const api = createORPCClient<RouterClient<AppRouter>>(link)
+function getApi(): RouterClient<AppRouter> {
+  if (!_api) {
+    const link = new RPCLink({
+      url: getBaseUrl(),
+    })
+    _api = createORPCClient<RouterClient<AppRouter>>(link)
+  }
+  return _api
+}
+
+// Proxy that lazily initializes the client on first access
+export const api = new Proxy({} as RouterClient<AppRouter>, {
+  get(_target, prop) {
+    return getApi()[prop as keyof RouterClient<AppRouter>]
+  },
+})
 
 // Re-export types for consumers
 export type { AppRouter }
