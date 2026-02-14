@@ -47,6 +47,7 @@ const ShipmentResponseSchema = z.object({
   })).optional(),
   // OMG Orders integration
   omgData: z.object({
+    orderNumber: z.string(), // Human-readable order number (e.g., "164")
     orderName: z.string().nullish(),
     customerName: z.string().nullish(),
     orderUrl: z.string(),
@@ -138,6 +139,7 @@ const shipmentsRouter = {
             return {
               ...base,
               omgData: {
+                orderNumber: omgPo.order_number,
                 orderName: omgPo.order_name,
                 customerName: omgPo.customer_name,
                 orderUrl: urls.order,
