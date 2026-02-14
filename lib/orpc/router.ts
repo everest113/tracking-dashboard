@@ -1072,7 +1072,8 @@ const frontRouter = {
             }
           }
           // Developer Mode: Allow rescanning already analyzed conversations
-          const isDevMode = process.env.DEV_ALLOW_RESCAN === 'true'
+          // Uses NEXT_PUBLIC_ prefix so the same env var controls both UI visibility and backend behavior
+          const isDevMode = process.env.NEXT_PUBLIC_ENABLE_FORCE_RESCAN === 'true'
           const shouldRescan = forceRescan && isDevMode
           if (shouldRescan) {
             console.log('🔄 DEV MODE: Force rescanning ALL conversations')
