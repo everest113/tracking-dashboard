@@ -8,7 +8,6 @@
 import { PrismaClient } from '@prisma/client'
 import {
   findPurchaseOrderByPoNumber,
-  type OMGOrder,
   type OMGPurchaseOrder,
 } from './client'
 
@@ -42,7 +41,7 @@ export function getOmgUrls(omgOrderUuid: string, omgPoUuid: string) {
  * Extract recipient data from OMG PO
  * OMG POs may have shipTo or similar fields - we'll adapt as we learn the schema
  */
-function extractRecipients(po: OMGPurchaseOrder): Array<{
+function extractRecipients(_po: OMGPurchaseOrder): Array<{
   name?: string
   address?: string
   city?: string

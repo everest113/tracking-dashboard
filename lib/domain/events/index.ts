@@ -40,7 +40,7 @@ type EventName = keyof EventPayloads
 type EventHandler<T extends EventName> = (payload: EventPayloads[T]) => Promise<void> | void
 
 class DomainEventEmitter {
-  private handlers: Map<EventName, Set<EventHandler<any>>> = new Map()
+  private handlers: Map<EventName, Set<EventHandler<EventName>>> = new Map()
   private asyncMode: boolean = true // Non-blocking by default
 
   /**
