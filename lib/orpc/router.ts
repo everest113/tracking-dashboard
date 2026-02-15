@@ -5,6 +5,10 @@ import { shipmentSchema } from '@/lib/validations'
 import { getShipmentTrackingService } from '@/lib/application/ShipmentTrackingService'
 import { Prisma } from '@prisma/client'
 import { getErrorMessage } from '@/lib/utils/fetch-helpers'
+
+// Register domain event handlers (side effects like OMG sync)
+import '@/lib/domain/events/handlers'
+import { domainEvents } from '@/lib/domain/events'
 import {
   ShipmentListQuerySchema,
   ShipmentSummarySchema,
@@ -110,7 +114,7 @@ const shipmentsRouter = {
           context.prisma.shipments.count({ where: { ...searchFilter, status: 'exception' } }),
           context.prisma.shipments.count({ where: { ...searchFilter, last_error: { not: null } } }),
         ])
-        // Get paginated results with tracking events and OMG data
+        // Get paginated results with tracking events
         const shipments = await context.prisma.shipments.findMany({
           where,
           orderBy,
@@ -121,20 +125,47 @@ const shipmentsRouter = {
               orderBy: { event_time: 'desc' },
               take: 5,
             },
-            omg_purchase_order: true,
           },
         })
+        
+        // Normalize PO number helper (strips leading zeros: "102-01" → "102-1")
+        const normalizePoNumber = (po: string): string => {
+          const match = po.match(/^(\d+)-(\d+)$/)
+          return match ? `${match[1]}-${parseInt(match[2], 10)}` : po
+        }
+        
+        // Get unique normalized PO numbers and fetch OMG data by PO
+        // OMG records use normalized format, so we need to normalize shipment POs for the lookup
+        const rawPoNumbers = shipments.map(s => s.po_number).filter(Boolean) as string[]
+        const normalizedPoNumbers = [...new Set(rawPoNumbers.map(normalizePoNumber))]
+        console.log('🔍 OMG lookup - raw POs:', rawPoNumbers.slice(0, 5))
+        console.log('🔍 OMG lookup - normalized POs:', normalizedPoNumbers.slice(0, 5))
+        
+        const omgRecords = normalizedPoNumbers.length > 0 
+          ? await context.prisma.omg_purchase_orders.findMany({
+              where: { po_number: { in: normalizedPoNumbers } },
+            })
+          : []
+        console.log('🔍 OMG records found:', omgRecords.length, omgRecords.map(r => r.po_number))
+        
+        // Build a map of normalized PO number -> OMG data for O(1) lookups
+        const omgByPo = new Map(omgRecords.map(r => [r.po_number, r]))
         
         // Import OMG URL helper
         const { getOmgUrls } = await import('@/lib/infrastructure/omg')
         
         // Serialize to camelCase and add OMG data
         const serialized = serializeShipments(shipments)
+        let omgMatches = 0
         const formatted = serialized.map((shipment, index) => {
-          const omgPo = shipments[index].omg_purchase_order
+          const poNumber = shipments[index].po_number
+          // Normalize the PO number for OMG lookup
+          const normalizedPo = poNumber ? normalizePoNumber(poNumber) : null
+          const omgPo = normalizedPo ? omgByPo.get(normalizedPo) : null
           const base = formatShipmentForApi(shipment)
           
           if (omgPo) {
+            omgMatches++
             const urls = getOmgUrls(omgPo.omg_order_id, omgPo.omg_po_id)
             return {
               ...base,
@@ -150,6 +181,7 @@ const shipmentsRouter = {
           
           return { ...base, omgData: null }
         })
+        console.log('🔍 OMG matches:', omgMatches, 'out of', serialized.length, 'shipments')
         const filteredTotal = await context.prisma.shipments.count({ where })
         const result = {
           items: formatted,
@@ -227,6 +259,14 @@ const shipmentsRouter = {
             },
           },
         })
+
+        // Emit domain event - handlers will take care of side effects (OMG sync, etc.)
+        domainEvents.emit('ShipmentCreated', {
+          shipmentId: shipment.id,
+          trackingNumber: shipment.tracking_number,
+          poNumber: input.poNumber,
+        })
+
         return formatShipmentForApi(serializeShipment(shipment))
       }),
   summary: publicProcedure
@@ -1210,6 +1250,15 @@ const frontRouter = {
                         })
                         shipmentsToRegister.push(updatedShipment)
                         results.updated++
+
+                        // Emit event if PO was linked/changed
+                        if (shipment.poNumber && shipment.poNumber !== existing.po_number) {
+                          domainEvents.emit('ShipmentPOLinked', {
+                            shipmentId: updatedShipment.id,
+                            poNumber: shipment.poNumber,
+                            previousPoNumber: existing.po_number,
+                          })
+                        }
                       } else {
                         results.skipped++
                         if (!existing.front_conversation_id) {
@@ -1240,6 +1289,13 @@ const frontRouter = {
                     })
                     shipmentsToRegister.push(newShipment)
                     results.added++
+
+                    // Emit domain event for side effects (OMG sync, etc.)
+                    domainEvents.emit('ShipmentCreated', {
+                      shipmentId: newShipment.id,
+                      trackingNumber: newShipment.tracking_number,
+                      poNumber: newShipment.po_number,
+                    })
                   }
                   if (shipmentsToRegister.length > 0) {
                     try {

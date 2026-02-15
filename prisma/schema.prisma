@@ -39,7 +39,7 @@ model shipments {
   ship24_status         String?               @db.VarChar(100)
   ship24_last_update    DateTime?
   tracking_events       tracking_events[]
-  omg_purchase_order    omg_purchase_orders?
+  // Note: OMG data is now joined by po_number, not by relation
 
   @@index([front_conversation_id], map: "idx_front_conversation")
   @@index([po_number], map: "idx_po_number")
@@ -50,8 +50,8 @@ model shipments {
 // OMG Orders data - separate from shipments to avoid polluting the shipment model
 model omg_purchase_orders {
   id             Int       @id @default(autoincrement())
-  shipment_id    Int?      @unique // Nullable - PO may exist before shipment arrives
-  po_number      String    @db.VarChar(50) // Normalized format (e.g., "189-1")
+  shipment_id    Int?      // Nullable - kept for backwards compat but not used for joins
+  po_number      String    @unique @db.VarChar(50) // Normalized format (e.g., "189-1") - used for joining
 
   // OMG identifiers
   order_number   String    @db.VarChar(50) // Human-readable order number (e.g., "164")
@@ -69,8 +69,7 @@ model omg_purchase_orders {
   synced_at      DateTime  @default(now())
   raw_data       Json?     // Full OMG response for debugging
 
-  // Relations
-  shipment       shipments? @relation(fields: [shipment_id], references: [id], onDelete: SetNull)
+  // Note: shipment_id kept for backwards compat but join is now by po_number
 
   @@unique([omg_po_id]) // Each OMG PO should only appear once
   @@index([po_number], map: "idx_omg_po_number")

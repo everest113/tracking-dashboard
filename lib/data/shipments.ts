@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/prisma'
 import { serializeShipments } from '@/lib/infrastructure/repositories/serializers'
+import { getOmgUrls, normalizePoNumber } from '@/lib/infrastructure/omg'
 
 export interface ShipmentQueryParams {
   tab?: string
@@ -132,31 +133,56 @@ export async function getShipments(params: ShipmentQueryParams) {
 
   const serialized = serializeShipments(shipments)
 
+  // Fetch OMG data for shipments with PO numbers
+  const rawPoNumbers = shipments.map(s => s.po_number).filter(Boolean) as string[]
+  const normalizedPoNumbers = [...new Set(rawPoNumbers.map(normalizePoNumber))]
+  const omgRecords = normalizedPoNumbers.length > 0
+    ? await prisma.omg_purchase_orders.findMany({
+        where: { po_number: { in: normalizedPoNumbers } },
+      })
+    : []
+  const omgByPo = new Map(omgRecords.map(r => [r.po_number, r]))
+
   // Format for API response
-  const items = serialized.map((s) => ({
-    id: s.id,
-    trackingNumber: s.trackingNumber,
-    carrier: s.carrier,
-    status: s.status,
-    poNumber: s.poNumber,
-    supplier: s.supplier,
-    shippedDate: s.shippedDate?.toISOString() ?? null,
-    estimatedDelivery: s.estimatedDelivery?.toISOString() ?? null,
-    deliveredDate: s.deliveredDate?.toISOString() ?? null,
-    ship24Status: s.ship24Status,
-    ship24LastUpdate: s.ship24LastUpdate?.toISOString() ?? null,
-    lastChecked: s.lastChecked?.toISOString() ?? null,
-    lastError: s.lastError,
-    createdAt: s.createdAt.toISOString(),
-    updatedAt: s.updatedAt.toISOString(),
-    trackingEvents: s.trackingEvents?.map((e) => ({
-      id: e.id,
-      status: e.status,
-      location: e.location,
-      message: e.message,
-      eventTime: e.eventTime?.toISOString() ?? null,
-    })),
-  }))
+  const items = serialized.map((s, index) => {
+    const poNumber = shipments[index].po_number
+    const normalizedPo = poNumber ? normalizePoNumber(poNumber) : null
+    const omgPo = normalizedPo ? omgByPo.get(normalizedPo) : null
+
+    return {
+      id: s.id,
+      trackingNumber: s.trackingNumber,
+      carrier: s.carrier,
+      status: s.status,
+      poNumber: s.poNumber,
+      supplier: s.supplier,
+      shippedDate: s.shippedDate?.toISOString() ?? null,
+      estimatedDelivery: s.estimatedDelivery?.toISOString() ?? null,
+      deliveredDate: s.deliveredDate?.toISOString() ?? null,
+      ship24Status: s.ship24Status,
+      ship24LastUpdate: s.ship24LastUpdate?.toISOString() ?? null,
+      lastChecked: s.lastChecked?.toISOString() ?? null,
+      lastError: s.lastError,
+      createdAt: s.createdAt.toISOString(),
+      updatedAt: s.updatedAt.toISOString(),
+      trackingEvents: s.trackingEvents?.map((e) => ({
+        id: e.id,
+        status: e.status,
+        location: e.location,
+        message: e.message,
+        eventTime: e.eventTime?.toISOString() ?? null,
+      })),
+      omgData: omgPo
+        ? {
+            orderNumber: omgPo.order_number,
+            orderName: omgPo.order_name,
+            customerName: omgPo.customer_name,
+            orderUrl: getOmgUrls(omgPo.omg_order_id, omgPo.omg_po_id).order,
+            poUrl: getOmgUrls(omgPo.omg_order_id, omgPo.omg_po_id).purchaseOrder,
+          }
+        : null,
+    }
+  })
 
   return {
     items,
