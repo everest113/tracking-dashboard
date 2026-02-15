@@ -128,16 +128,27 @@ const shipmentsRouter = {
           },
         })
         
-        // Get unique PO numbers and fetch OMG data by PO (not by shipment_id)
-        // This allows multiple shipments to share the same OMG PO data
-        const poNumbers = [...new Set(shipments.map(s => s.po_number).filter(Boolean))] as string[]
-        const omgRecords = poNumbers.length > 0 
+        // Normalize PO number helper (strips leading zeros: "102-01" → "102-1")
+        const normalizePoNumber = (po: string): string => {
+          const match = po.match(/^(\d+)-(\d+)$/)
+          return match ? `${match[1]}-${parseInt(match[2], 10)}` : po
+        }
+        
+        // Get unique normalized PO numbers and fetch OMG data by PO
+        // OMG records use normalized format, so we need to normalize shipment POs for the lookup
+        const rawPoNumbers = shipments.map(s => s.po_number).filter(Boolean) as string[]
+        const normalizedPoNumbers = [...new Set(rawPoNumbers.map(normalizePoNumber))]
+        console.log('🔍 OMG lookup - raw POs:', rawPoNumbers.slice(0, 5))
+        console.log('🔍 OMG lookup - normalized POs:', normalizedPoNumbers.slice(0, 5))
+        
+        const omgRecords = normalizedPoNumbers.length > 0 
           ? await context.prisma.omg_purchase_orders.findMany({
-              where: { po_number: { in: poNumbers } },
+              where: { po_number: { in: normalizedPoNumbers } },
             })
           : []
+        console.log('🔍 OMG records found:', omgRecords.length, omgRecords.map(r => r.po_number))
         
-        // Build a map of PO number -> OMG data for O(1) lookups
+        // Build a map of normalized PO number -> OMG data for O(1) lookups
         const omgByPo = new Map(omgRecords.map(r => [r.po_number, r]))
         
         // Import OMG URL helper
@@ -145,12 +156,16 @@ const shipmentsRouter = {
         
         // Serialize to camelCase and add OMG data
         const serialized = serializeShipments(shipments)
+        let omgMatches = 0
         const formatted = serialized.map((shipment, index) => {
           const poNumber = shipments[index].po_number
-          const omgPo = poNumber ? omgByPo.get(poNumber) : null
+          // Normalize the PO number for OMG lookup
+          const normalizedPo = poNumber ? normalizePoNumber(poNumber) : null
+          const omgPo = normalizedPo ? omgByPo.get(normalizedPo) : null
           const base = formatShipmentForApi(shipment)
           
           if (omgPo) {
+            omgMatches++
             const urls = getOmgUrls(omgPo.omg_order_id, omgPo.omg_po_id)
             return {
               ...base,
@@ -166,6 +181,7 @@ const shipmentsRouter = {
           
           return { ...base, omgData: null }
         })
+        console.log('🔍 OMG matches:', omgMatches, 'out of', serialized.length, 'shipments')
         const filteredTotal = await context.prisma.shipments.count({ where })
         const result = {
           items: formatted,

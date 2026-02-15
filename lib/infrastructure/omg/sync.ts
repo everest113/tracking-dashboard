@@ -14,6 +14,17 @@ import {
 
 const prisma = new PrismaClient()
 
+/**
+ * Normalize PO number to consistent format
+ * Strips leading zeros from sequence: "102-01" → "102-1"
+ * This matches OMG's internal format
+ */
+export function normalizePoNumber(poNumber: string): string {
+  const match = poNumber.match(/^(\d+)-(\d+)$/)
+  if (!match) return poNumber
+  return `${match[1]}-${parseInt(match[2], 10)}`
+}
+
 // OMG webapp base URL
 const OMG_WEBAPP_BASE = 'https://stitchi.omgorders.app'
 
@@ -22,7 +33,7 @@ const OMG_WEBAPP_BASE = 'https://stitchi.omgorders.app'
  */
 export function getOmgUrls(omgOrderUuid: string, omgPoUuid: string) {
   return {
-    order: `${OMG_WEBAPP_BASE}/orders/${omgOrderUuid}`,
+    order: `${OMG_WEBAPP_BASE}/orders/${omgOrderUuid}/order`,
     purchaseOrder: `${OMG_WEBAPP_BASE}/orders/${omgOrderUuid}/purchase-orders/${omgPoUuid}`,
   }
 }
@@ -57,26 +68,34 @@ export async function syncPurchaseOrder(
   error?: string
 }> {
   try {
+    // Normalize PO number to match OMG's format (no leading zeros in sequence)
+    const normalizedPo = normalizePoNumber(poNumber)
+    
     // Find the PO in OMG
-    const result = await findPurchaseOrderByPoNumber(poNumber)
+    const result = await findPurchaseOrderByPoNumber(normalizedPo)
     if (!result) {
       return { success: false, error: 'PO not found in OMG' }
     }
 
     const { po, order } = result
 
-    // Find matching shipment by PO number (if any)
+    // Find matching shipment by PO number (check both original and normalized)
     const shipment = await prisma.shipments.findFirst({
-      where: { po_number: poNumber },
+      where: {
+        OR: [
+          { po_number: poNumber },
+          { po_number: normalizedPo },
+        ],
+      },
     })
 
-    // Upsert the OMG purchase order record by po_number (shipment's format)
-    // This ensures the join works correctly with shipments
+    // Upsert the OMG purchase order record using normalized PO number
+    // The router will also normalize shipment PO numbers for the join
     const omgPo = await prisma.omg_purchase_orders.upsert({
-      where: { po_number: poNumber },
+      where: { po_number: normalizedPo },
       create: {
         shipment_id: shipment?.id ?? null,
-        po_number: poNumber, // Use shipment's PO format for joins
+        po_number: normalizedPo, // Normalized format for consistent joins
         order_number: order.number, // Human-readable order number (e.g., "164")
         omg_order_id: order._id, // MongoDB ObjectID for URLs
         omg_po_id: po._id, // MongoDB ObjectID for URLs
@@ -168,9 +187,12 @@ export async function getShipmentOmgData(shipmentId: number) {
 
   if (!shipment?.po_number) return null
 
-  // Then find the OMG record by PO number
+  // Normalize PO number for lookup (OMG records use normalized format)
+  const normalizedPo = normalizePoNumber(shipment.po_number)
+
+  // Then find the OMG record by normalized PO number
   const omgPo = await prisma.omg_purchase_orders.findUnique({
-    where: { po_number: shipment.po_number },
+    where: { po_number: normalizedPo },
   })
 
   if (!omgPo) return null
@@ -218,7 +240,7 @@ export async function batchSyncOmgData(options?: {
   const limit = options?.limit ?? 100
 
   // Find shipments with PO numbers that don't have OMG data yet
-  // First get all synced PO numbers, then find shipments not in that list
+  // First get all synced PO numbers (already normalized), then find shipments not in that list
   const syncedPoNumbers = await prisma.omg_purchase_orders.findMany({
     select: { po_number: true },
   })
@@ -229,9 +251,9 @@ export async function batchSyncOmgData(options?: {
     select: { id: true, po_number: true },
   })
 
-  // Filter to shipments whose PO hasn't been synced yet
+  // Filter to shipments whose normalized PO hasn't been synced yet
   const shipments = allShipmentsWithPo
-    .filter(s => s.po_number && !syncedPoSet.has(s.po_number))
+    .filter(s => s.po_number && !syncedPoSet.has(normalizePoNumber(s.po_number)))
     .slice(0, limit)
 
   let synced = 0

@@ -486,7 +486,7 @@ export default function ShipmentTable({
                         <TableCell>
                           <div className="flex flex-col gap-0.5 min-w-0" aria-label="Order details">
                             {shipment.omgData ? (
-                              // Synced OMG data - show order + PO links with accessible focus treatment
+                              // Synced OMG data - show order name + customer (PO details available via click-through)
                               <>
                                 <a
                                   href={shipment.omgData.orderUrl}
@@ -496,26 +496,17 @@ export default function ShipmentTable({
                                     'inline-flex items-center gap-1.5 font-medium text-primary hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
                                     'text-sm'
                                   )}
-                                  title={shipment.omgData.orderName || `Order ${shipment.omgData.orderNumber}`}
+                                  title={`${shipment.omgData.orderName || 'Order'} (${shipment.omgData.orderNumber}) — PO ${shipment.poNumber}`}
                                   aria-label={`Open order ${shipment.omgData.orderNumber} in OMG`}
                                 >
                                   <span className="truncate">
-                                    {shipment.omgData.orderName || `Order ${shipment.omgData.orderNumber}`}
+                                    {shipment.omgData.orderName || 'Order'} (#{shipment.omgData.orderNumber})
                                   </span>
                                   <ExternalLink className="h-3 w-3 text-muted-foreground flex-shrink-0" aria-hidden="true" />
                                 </a>
-                                {shipment.poNumber && (
-                                  <a
-                                    href={shipment.omgData.poUrl}
-                                    target="_blank"
-                                    rel="noreferrer noopener"
-                                    className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-                                    aria-label={`View PO ${shipment.poNumber} in OMG`}
-                                  >
-                                    <span className="truncate">PO {shipment.poNumber}</span>
-                                    <ExternalLink className="h-3 w-3 text-muted-foreground flex-shrink-0" aria-hidden="true" />
-                                  </a>
-                                )}
+                                <span className="text-xs text-muted-foreground truncate">
+                                  for {shipment.omgData.customerName || shipment.supplier || 'Unknown'}
+                                </span>
                               </>
                             ) : shipment.poNumber ? (
                               // No OMG data synced - show PO with fallback search link
@@ -746,7 +737,7 @@ export default function ShipmentTable({
                       {isExpanded && (
                         <TableRow className="bg-muted/30 hover:bg-muted/30">
                           <TableCell colSpan={6} className="py-3">
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm pl-10">
+                            <div className="grid grid-cols-3 gap-4 text-sm pl-10">
                               {/* Dates */}
                               <div>
                                 <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">
@@ -772,20 +763,10 @@ export default function ShipmentTable({
                                   {formatDateTime(shipment.deliveredDate) || '—'}
                                 </p>
                               </div>
-                              <div>
-                                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">
-                                  Last Checked
-                                </p>
-                                <p>
-                                  {shipment.lastChecked
-                                    ? formatDistanceToNow(new Date(shipment.lastChecked), { addSuffix: true })
-                                    : '—'}
-                                </p>
-                              </div>
 
                               {/* Tracking Events */}
                               {shipment.trackingEvents && shipment.trackingEvents.length > 0 && (
-                                <div className="col-span-2 md:col-span-4 mt-2">
+                                <div className="col-span-3 mt-2">
                                   <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
                                     Recent Events
                                   </p>
