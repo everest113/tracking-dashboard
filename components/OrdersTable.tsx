@@ -75,6 +75,12 @@ interface Order {
   computedStatus: ApiOrderStatus
   threadStatus: 'linked' | 'pending' | 'not_found' | 'none'
   frontConversationId: string | null
+  // OMG status fields
+  omgApprovalStatus: string | null
+  omgOperationsStatus: string | null
+  poCount: number
+  lastSyncedAt: string | null
+  // Shipments
   shipments: Shipment[]
   stats: {
     total: number
@@ -410,6 +416,16 @@ export default function OrdersTable() {
                             <span className="flex items-center gap-1">
                               <Mail className="h-3 w-3" />
                               {order.customerEmail}
+                            </span>
+                          )}
+                          {order.omgOperationsStatus && (
+                            <Badge variant="outline" className="text-xs">
+                              {order.omgOperationsStatus}
+                            </Badge>
+                          )}
+                          {order.poCount > 0 && order.stats.total === 0 && (
+                            <span className="text-xs text-yellow-600">
+                              {order.poCount} PO{order.poCount !== 1 ? 's' : ''} · No shipments yet
                             </span>
                           )}
                         </div>
