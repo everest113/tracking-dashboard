@@ -56,7 +56,13 @@ beforeEach(async () => {
   }
   
   try {
-    await prisma.omg_purchase_orders.deleteMany()
+    await prisma.purchase_orders.deleteMany()
+  } catch {
+    // Table might not exist
+  }
+  
+  try {
+    await prisma.orders.deleteMany()
   } catch {
     // Table might not exist
   }

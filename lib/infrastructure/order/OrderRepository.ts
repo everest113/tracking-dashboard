@@ -2,7 +2,7 @@
  * Order Repository
  * 
  * Handles persistence for the orders aggregate.
- * Orders are derived from omg_purchase_orders grouped by order_number.
+ * Orders are synced directly from OMG and linked to purchase_orders.
  */
 
 import type { PrismaClient, OrderComputedStatus, Prisma } from '@prisma/client'

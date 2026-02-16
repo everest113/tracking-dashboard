@@ -141,15 +141,17 @@ const shipmentsRouter = {
         console.log('🔍 OMG lookup - raw POs:', rawPoNumbers.slice(0, 5))
         console.log('🔍 OMG lookup - normalized POs:', normalizedPoNumbers.slice(0, 5))
         
-        const omgRecords = normalizedPoNumbers.length > 0 
-          ? await context.prisma.omg_purchase_orders.findMany({
+        // Get PO records with order data joined
+        const poRecords = normalizedPoNumbers.length > 0 
+          ? await context.prisma.purchase_orders.findMany({
               where: { po_number: { in: normalizedPoNumbers } },
+              include: { order: { select: { order_name: true, customer_name: true } } },
             })
           : []
-        console.log('🔍 OMG records found:', omgRecords.length, omgRecords.map(r => r.po_number))
+        console.log('🔍 PO records found:', poRecords.length, poRecords.map(r => r.po_number))
         
-        // Build a map of normalized PO number -> OMG data for O(1) lookups
-        const omgByPo = new Map(omgRecords.map(r => [r.po_number, r]))
+        // Build a map of normalized PO number -> PO+Order data for O(1) lookups
+        const poByNumber = new Map(poRecords.map(r => [r.po_number, r]))
         
         // Import OMG URL helper
         const { getOmgUrls } = await import('@/lib/infrastructure/omg')
@@ -159,20 +161,20 @@ const shipmentsRouter = {
         let omgMatches = 0
         const formatted = serialized.map((shipment, index) => {
           const poNumber = shipments[index].po_number
-          // Normalize the PO number for OMG lookup
+          // Normalize the PO number for lookup
           const normalizedPo = poNumber ? normalizePoNumber(poNumber) : null
-          const omgPo = normalizedPo ? omgByPo.get(normalizedPo) : null
+          const poRecord = normalizedPo ? poByNumber.get(normalizedPo) : null
           const base = formatShipmentForApi(shipment)
           
-          if (omgPo) {
+          if (poRecord) {
             omgMatches++
-            const urls = getOmgUrls(omgPo.omg_order_id, omgPo.omg_po_id)
+            const urls = getOmgUrls(poRecord.omg_order_id, poRecord.omg_po_id)
             return {
               ...base,
               omgData: {
-                orderNumber: omgPo.order_number,
-                orderName: omgPo.order_name,
-                customerName: omgPo.customer_name,
+                orderNumber: poRecord.order_number,
+                orderName: poRecord.order?.order_name ?? null,
+                customerName: poRecord.order?.customer_name ?? null,
                 orderUrl: urls.order,
                 poUrl: urls.purchaseOrder,
               },
@@ -181,7 +183,7 @@ const shipmentsRouter = {
           
           return { ...base, omgData: null }
         })
-        console.log('🔍 OMG matches:', omgMatches, 'out of', serialized.length, 'shipments')
+        console.log('🔍 PO matches:', omgMatches, 'out of', serialized.length, 'shipments')
         const filteredTotal = await context.prisma.shipments.count({ where })
         const result = {
           items: formatted,
@@ -456,7 +458,7 @@ const shipmentsRouter = {
               success: true,
               message: `Tracking synced to OMG PO ${shipment.po_number}`,
               poNumber: shipment.po_number,
-              omgUrls: omgData?.urls ?? null,
+              omgUrls: omgData ? { order: omgData.orderUrl, purchaseOrder: omgData.poUrl } : null,
             }
           } else {
             return {
@@ -1444,14 +1446,13 @@ const omgRouter = {
       .output(z.object({
         success: z.boolean(),
         data: z.object({
-          poNumber: z.string(),
+          orderNumber: z.string(),
           orderName: z.string().nullish(),
           customerName: z.string().nullish(),
           urls: z.object({
             order: z.string(),
             purchaseOrder: z.string(),
           }),
-          syncedAt: z.string(),
         }).nullish(),
         error: z.string().optional(),
       }))
@@ -1471,11 +1472,13 @@ const omgRouter = {
           return {
             success: true,
             data: {
-              poNumber: data.po_number,
-              orderName: data.order_name,
-              customerName: data.customer_name,
-              urls: data.urls,
-              syncedAt: data.synced_at.toISOString(),
+              orderNumber: data.orderNumber,
+              orderName: data.orderName,
+              customerName: data.customerName,
+              urls: {
+                order: data.orderUrl,
+                purchaseOrder: data.poUrl,
+              },
             },
           }
         } catch (err) {
@@ -1760,14 +1763,14 @@ const ordersRouter = {
       // First, get all PO numbers for these orders
       const orderNumbers = domainOrders.map(o => o.orderNumber)
       
-      const omgRecords = await context.prisma.omg_purchase_orders.findMany({
+      const poRecords = await context.prisma.purchase_orders.findMany({
         where: { order_number: { in: orderNumbers } },
         select: { order_number: true, po_number: true },
       })
       
       // Group PO numbers by order
       const orderPoMap = new Map<string, string[]>()
-      for (const record of omgRecords) {
+      for (const record of poRecords) {
         if (!orderPoMap.has(record.order_number)) {
           orderPoMap.set(record.order_number, [])
         }

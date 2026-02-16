@@ -596,24 +596,34 @@ export default function ShipmentTable({
                                 </span>
                               </>
                             ) : shipment.poNumber ? (
-                              // No OMG data synced - show PO with fallback search link
-                              omgUrl ? (
-                                <a
-                                  href={omgUrl}
-                                  target="_blank"
-                                  rel="noreferrer noopener"
-                                  className="inline-flex items-center gap-1.5 font-medium text-primary hover:text-primary hover:underline truncate focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-                                  title={`Search Order ${parseOrderNumber(shipment.poNumber)} in OMG`}
-                                  aria-label={`Search for PO ${shipment.poNumber} in OMG`}
-                                >
-                                  <span className="truncate">PO {shipment.poNumber}</span>
-                                  <ExternalLink className="h-3 w-3 text-muted-foreground flex-shrink-0" aria-hidden="true" />
-                                </a>
-                              ) : (
-                                <span className="font-medium truncate">
-                                  PO {shipment.poNumber}
+                              // No OMG data synced - ORPHAN shipment (has PO but not linked to order)
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-2">
+                                  {omgUrl ? (
+                                    <a
+                                      href={omgUrl}
+                                      target="_blank"
+                                      rel="noreferrer noopener"
+                                      className="inline-flex items-center gap-1.5 font-medium text-primary hover:text-primary hover:underline truncate focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                                      title={`Search Order ${parseOrderNumber(shipment.poNumber)} in OMG`}
+                                      aria-label={`Search for PO ${shipment.poNumber} in OMG`}
+                                    >
+                                      <span className="truncate">PO {shipment.poNumber}</span>
+                                      <ExternalLink className="h-3 w-3 text-muted-foreground flex-shrink-0" aria-hidden="true" />
+                                    </a>
+                                  ) : (
+                                    <span className="font-medium truncate">
+                                      PO {shipment.poNumber}
+                                    </span>
+                                  )}
+                                  <Badge variant="outline" className="text-xs bg-yellow-50 text-yellow-700 border-yellow-300">
+                                    Orphan
+                                  </Badge>
+                                </div>
+                                <span className="text-xs text-yellow-600">
+                                  Not linked to an order
                                 </span>
-                              )
+                              </div>
                             ) : (
                               <span className="text-muted-foreground text-sm">No PO</span>
                             )}

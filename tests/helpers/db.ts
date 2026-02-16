@@ -91,7 +91,8 @@ export async function getShipmentByTracking(trackingNumber: string) {
  */
 export async function cleanDatabase() {
   await prisma.tracking_events.deleteMany()
-  await prisma.omg_purchase_orders.deleteMany()
+  await prisma.purchase_orders.deleteMany()
+  await prisma.orders.deleteMany()
   await prisma.shipments.deleteMany()
   await prisma.scanned_conversations.deleteMany()
   await prisma.sync_history.deleteMany()

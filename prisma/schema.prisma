@@ -48,41 +48,9 @@ model shipments {
   @@index([ship24_tracker_id], map: "idx_ship24_tracker")
 }
 
-// OMG Orders data - separate from shipments to avoid polluting the shipment model
-model omg_purchase_orders {
-  id             Int       @id @default(autoincrement())
-  shipment_id    Int?      // Nullable - kept for backwards compat but not used for joins
-  po_number      String    @unique @db.VarChar(50) // Normalized format (e.g., "189-1") - used for joining
-
-  // OMG identifiers
-  order_number   String    @db.VarChar(50) // Human-readable order number (e.g., "164")
-  omg_order_id   String    @db.VarChar(50) // MongoDB ObjectID for URLs
-  omg_po_id      String    @db.VarChar(50) // MongoDB ObjectID for URLs
-
-  // Denormalized order data
-  order_name     String?   @db.VarChar(255) // e.g., "Sample Order"
-  customer_name  String?   @db.VarChar(255)
-  customer_email String?   @db.VarChar(255) // Primary email for Front thread matching
-
-  // Recipients as JSONB array
-  recipients     Json?     @default("[]") // Array of { name, address, city, state, zip, country }
-
-  // Sync metadata
-  synced_at      DateTime  @default(now())
-  raw_data       Json?     // Full OMG response for debugging
-
-  // Note: shipment_id kept for backwards compat but join is now by po_number
-
-  @@unique([omg_po_id]) // Each OMG PO should only appear once
-  @@index([po_number], map: "idx_omg_po_number")
-  @@index([order_number], map: "idx_omg_order_number")
-  @@index([customer_email], map: "idx_omg_customer_email")
-}
-
 // =============================================================================
 // ORDERS
-// Aggregate view of orders with denormalized status for server-side filtering.
-// Computed from shipments grouped by order_number via omg_purchase_orders.
+// Orders synced directly from OMG API. Contains order-level data and thread info.
 // =============================================================================
 
 enum OrderComputedStatus {

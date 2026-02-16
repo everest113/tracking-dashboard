@@ -82,26 +82,27 @@ export class TrackingNotificationService {
     const { normalizePoNumber } = await import('@/lib/infrastructure/omg/sync')
     const normalizedPo = normalizePoNumber(shipment.po_number)
     
-    const omgRecord = await prisma.omg_purchase_orders.findUnique({
+    // Find PO record to get order number
+    const poRecord = await prisma.purchase_orders.findUnique({
       where: { po_number: normalizedPo },
     })
 
-    if (!omgRecord) {
+    if (!poRecord) {
       return {
         success: false,
-        skippedReason: `No OMG record for PO ${normalizedPo}`,
+        skippedReason: `No PO record for ${normalizedPo}`,
       }
     }
 
     // 3. Get order with thread
     const order = await prisma.orders.findUnique({
-      where: { order_number: omgRecord.order_number },
+      where: { order_number: poRecord.order_number },
     })
 
     if (!order) {
       return {
         success: false,
-        skippedReason: `Order ${omgRecord.order_number} not found`,
+        skippedReason: `Order ${poRecord.order_number} not found`,
       }
     }
 

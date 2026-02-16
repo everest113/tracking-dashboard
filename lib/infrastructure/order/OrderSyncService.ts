@@ -53,15 +53,6 @@ export function createOrderSyncService(prisma: PrismaClient): OrderSyncService {
     
     const poNumbers = pos.map(p => p.po_number)
     
-    if (poNumbers.length === 0) {
-      // Also check old omg_purchase_orders table for backwards compat
-      const oldPos = await prisma.omg_purchase_orders.findMany({
-        where: { order_number: orderNumber },
-        select: { po_number: true },
-      })
-      poNumbers.push(...oldPos.map(p => p.po_number))
-    }
-    
     // Get shipments matching these POs
     const shipments = await prisma.shipments.findMany({
       where: { po_number: { not: null } },
@@ -187,23 +178,12 @@ export function createOrderSyncService(prisma: PrismaClient): OrderSyncService {
 
       const normalizedPo = normalizePoNumber(shipment.po_number)
 
-      // Find the order via purchase_orders table first
-      let orderRecord = await prisma.purchase_orders.findUnique({
+      // Find the order via purchase_orders table
+      const orderRecord = await prisma.purchase_orders.findUnique({
         where: { po_number: normalizedPo },
         select: { order_number: true },
       })
       
-      // Fallback to old omg_purchase_orders table
-      if (!orderRecord) {
-        const oldRecord = await prisma.omg_purchase_orders.findUnique({
-          where: { po_number: normalizedPo },
-          select: { order_number: true },
-        })
-        if (oldRecord) {
-          orderRecord = { order_number: oldRecord.order_number }
-        }
-      }
-
       if (!orderRecord) {
         return
       }
