@@ -78,4 +78,10 @@ beforeEach(async () => {
   } catch {
     // Table might not exist
   }
+  
+  try {
+    await prisma.audit_history.deleteMany()
+  } catch {
+    // Table might not exist
+  }
 })
