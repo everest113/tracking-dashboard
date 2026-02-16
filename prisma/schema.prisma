@@ -141,3 +141,36 @@ enum EventStatus {
   COMPLETED
   FAILED
 }
+
+// =============================================================================
+// AUDIT HISTORY
+// Generic append-only audit log for tracking actions on any entity.
+// Follows W3C Activity Streams concepts: actor performs action on entity.
+// =============================================================================
+
+model audit_history {
+  id          String   @id @default(cuid())
+  
+  // Polymorphic entity reference
+  entity_type String   @db.VarChar(50)   // 'shipment', 'order', 'customer_thread', etc.
+  entity_id   String   @db.VarChar(100)  // The ID of the entity
+  
+  // Action metadata
+  action      String   @db.VarChar(100)  // 'tracking_email_sent', 'thread_matched', 'status_changed', etc.
+  actor       String   @default("system") @db.VarChar(100)  // 'system', 'user:123', 'cron:update-tracking'
+  
+  // Flexible payload for action-specific data
+  metadata    Json     @default("{}")
+  
+  // Outcome
+  status      String   @db.VarChar(50)   // 'success', 'failed', 'skipped'
+  error       String?                     // Error message if failed
+  
+  created_at  DateTime @default(now())
+  
+  // Indexes for common query patterns
+  @@index([entity_type, entity_id], map: "idx_audit_entity")
+  @@index([action], map: "idx_audit_action")
+  @@index([created_at(sort: Desc)], map: "idx_audit_created")
+  @@index([entity_type, action], map: "idx_audit_type_action")
+}
