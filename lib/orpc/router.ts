@@ -2223,6 +2223,179 @@ const customerThreadRouter = {
     }),
 }
 
+// =============================================================================
+// ORDERS ROUTER
+// =============================================================================
+
+const OrderSchema = z.object({
+  orderNumber: z.string(),
+  orderName: z.string().nullable(),
+  customerName: z.string().nullable(),
+  customerEmail: z.string().nullable(),
+  omgOrderUrl: z.string(),
+  shipments: z.array(z.object({
+    id: z.number(),
+    poNumber: z.string().nullable(),
+    trackingNumber: z.string(),
+    carrier: z.string().nullable(),
+    status: z.string(),
+    shippedDate: z.string().nullable(),
+    deliveredDate: z.string().nullable(),
+    lastChecked: z.string().nullable(),
+    threadStatus: z.enum(['linked', 'pending', 'not_found', 'none']),
+  })),
+  stats: z.object({
+    total: z.number(),
+    delivered: z.number(),
+    inTransit: z.number(),
+    pending: z.number(),
+    exception: z.number(),
+  }),
+})
+
+const ordersRouter = {
+  /**
+   * List all orders with their shipments
+   */
+  list: publicProcedure
+    .input(z.object({
+      search: z.string().optional(),
+      limit: z.number().min(1).max(200).default(100),
+    }).optional())
+    .output(z.object({
+      orders: z.array(OrderSchema),
+      total: z.number(),
+    }))
+    .handler(async ({ context, input }) => {
+      const { normalizePoNumber, getOmgUrls } = await import('@/lib/infrastructure/omg/sync')
+      
+      // Get all OMG purchase orders grouped by order number
+      const omgRecords = await context.prisma.omg_purchase_orders.findMany({
+        orderBy: { order_number: 'desc' },
+      })
+      
+      // Group by order number
+      const orderMap = new Map<string, {
+        orderNumber: string
+        orderName: string | null
+        customerName: string | null
+        customerEmail: string | null
+        omgOrderId: string
+        poNumbers: string[]
+      }>()
+      
+      for (const record of omgRecords) {
+        if (!orderMap.has(record.order_number)) {
+          orderMap.set(record.order_number, {
+            orderNumber: record.order_number,
+            orderName: record.order_name,
+            customerName: record.customer_name,
+            customerEmail: record.customer_email,
+            omgOrderId: record.omg_order_id,
+            poNumbers: [],
+          })
+        }
+        orderMap.get(record.order_number)!.poNumbers.push(record.po_number)
+      }
+      
+      // Get all shipments with their thread status
+      const allShipments = await context.prisma.shipments.findMany({
+        where: { po_number: { not: null } },
+        select: {
+          id: true,
+          po_number: true,
+          tracking_number: true,
+          carrier: true,
+          status: true,
+          shipped_date: true,
+          delivered_date: true,
+          last_checked: true,
+        },
+      })
+      
+      // Get thread statuses for all shipments
+      const threadStatuses = await context.prisma.shipment_customer_threads.findMany({
+        select: {
+          shipment_id: true,
+          match_status: true,
+        },
+      })
+      const threadStatusMap = new Map(threadStatuses.map(t => [t.shipment_id, t.match_status]))
+      
+      // Build orders with shipments
+      const orders: z.infer<typeof OrderSchema>[] = []
+      
+      for (const [orderNumber, orderData] of orderMap) {
+        // Find shipments for this order (match by normalized PO)
+        const orderShipments = allShipments.filter(s => {
+          if (!s.po_number) return false
+          const normalized = normalizePoNumber(s.po_number)
+          return orderData.poNumbers.includes(normalized)
+        })
+        
+        if (orderShipments.length === 0) continue
+        
+        // Calculate stats
+        const stats = {
+          total: orderShipments.length,
+          delivered: orderShipments.filter(s => s.status === 'delivered').length,
+          inTransit: orderShipments.filter(s => ['in_transit', 'out_for_delivery'].includes(s.status)).length,
+          pending: orderShipments.filter(s => ['pending', 'info_received'].includes(s.status)).length,
+          exception: orderShipments.filter(s => s.status === 'exception').length,
+        }
+        
+        // Map thread status
+        const getThreadStatus = (shipmentId: number): 'linked' | 'pending' | 'not_found' | 'none' => {
+          const status = threadStatusMap.get(shipmentId)
+          if (!status) return 'none'
+          if (status === 'auto_matched' || status === 'manually_linked') return 'linked'
+          if (status === 'pending_review') return 'pending'
+          return 'not_found'
+        }
+        
+        orders.push({
+          orderNumber: orderData.orderNumber,
+          orderName: orderData.orderName,
+          customerName: orderData.customerName,
+          customerEmail: orderData.customerEmail,
+          omgOrderUrl: `https://stitchi.omgorders.app/orders/${orderData.omgOrderId}/order`,
+          shipments: orderShipments.map(s => ({
+            id: s.id,
+            poNumber: s.po_number,
+            trackingNumber: s.tracking_number,
+            carrier: s.carrier,
+            status: s.status,
+            shippedDate: s.shipped_date?.toISOString() ?? null,
+            deliveredDate: s.delivered_date?.toISOString() ?? null,
+            lastChecked: s.last_checked?.toISOString() ?? null,
+            threadStatus: getThreadStatus(s.id),
+          })),
+          stats,
+        })
+      }
+      
+      // Apply search filter
+      let filteredOrders = orders
+      if (input?.search) {
+        const query = input.search.toLowerCase()
+        filteredOrders = orders.filter(o => 
+          o.orderNumber.toLowerCase().includes(query) ||
+          o.orderName?.toLowerCase().includes(query) ||
+          o.customerName?.toLowerCase().includes(query) ||
+          o.customerEmail?.toLowerCase().includes(query)
+        )
+      }
+      
+      // Sort by order number descending (newest first)
+      filteredOrders.sort((a, b) => parseInt(b.orderNumber) - parseInt(a.orderNumber))
+      
+      return {
+        orders: filteredOrders.slice(0, input?.limit ?? 100),
+        total: filteredOrders.length,
+      }
+    }),
+}
+
 // Plain nested object structure (recommended by oRPC docs)
 export const appRouter = {
   shipments: shipmentsRouter,
@@ -2234,5 +2407,6 @@ export const appRouter = {
   omg: omgRouter,
   audit: auditRouter,
   customerThread: customerThreadRouter,
+  orders: ordersRouter,
 }
 export type AppRouter = typeof appRouter

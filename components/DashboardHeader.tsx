@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { UserMenu } from '@/components/auth'
 import LastSyncDisplay from '@/components/LastSyncDisplay'
 import { Button } from '@/components/ui/button'
-import { MessageSquare } from 'lucide-react'
+import { MessageSquare, Package } from 'lucide-react'
 
 /**
  * Dashboard header with title, last sync time, and user menu.
@@ -20,6 +20,12 @@ export function DashboardHeader() {
           </p>
         </div>
         <div className="flex items-center gap-4">
+          <Button variant="outline" size="sm" asChild>
+            <Link href="/orders">
+              <Package className="h-4 w-4 mr-2" />
+              Orders
+            </Link>
+          </Button>
           <Button variant="outline" size="sm" asChild>
             <Link href="/threads">
               <MessageSquare className="h-4 w-4 mr-2" />
