@@ -39,6 +39,7 @@ model shipments {
   ship24_status         String?               @db.VarChar(100)
   ship24_last_update    DateTime?
   tracking_events       tracking_events[]
+  customer_thread       shipment_customer_threads?
   // Note: OMG data is now joined by po_number, not by relation
 
   @@index([front_conversation_id], map: "idx_front_conversation")
@@ -175,4 +176,51 @@ model audit_history {
   @@index([action], map: "idx_audit_action")
   @@index([created_at(sort: Desc)], map: "idx_audit_created")
   @@index([entity_type, action], map: "idx_audit_type_action")
+}
+
+// =============================================================================
+// CUSTOMER THREAD MATCHING
+// Links shipments to Front customer conversations for tracking notifications.
+// Uses confidence scoring to auto-match or queue for manual review.
+// =============================================================================
+
+enum ThreadMatchStatus {
+  auto_matched     // High confidence, linked automatically
+  pending_review   // Medium confidence, needs manual verification
+  manually_linked  // Human confirmed the match
+  rejected         // Human rejected this match
+  not_found        // No matching thread found
+}
+
+model shipment_customer_threads {
+  id                    Int               @id @default(autoincrement())
+  shipment_id           Int               @unique // One thread link per shipment
+  front_conversation_id String            @db.VarChar(100)
+  
+  // Confidence scoring
+  confidence_score      Float
+  match_status          ThreadMatchStatus @default(pending_review)
+  
+  // Scoring breakdown (for debugging/audit)
+  email_matched           Boolean           @default(false)
+  order_in_subject        Boolean           @default(false)
+  order_in_body           Boolean           @default(false)
+  days_since_last_message Int?
+  
+  // Metadata
+  matched_email         String?           @db.VarChar(255)
+  conversation_subject  String?
+  
+  // Timestamps
+  created_at            DateTime          @default(now())
+  updated_at            DateTime          @default(now()) @updatedAt
+  reviewed_at           DateTime?
+  reviewed_by           String?           @db.VarChar(100)
+  
+  // Relations
+  shipment              shipments         @relation(fields: [shipment_id], references: [id], onDelete: Cascade)
+  
+  @@index([front_conversation_id], map: "idx_sct_conversation")
+  @@index([match_status], map: "idx_sct_status")
+  @@index([confidence_score(sort: Desc)], map: "idx_sct_confidence")
 }
