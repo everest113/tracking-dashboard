@@ -15,6 +15,12 @@ import {
   MessageSquare,
   PackageCheck,
   CircleDot,
+  RefreshCw,
+  Pencil,
+  Link2,
+  Search,
+  X,
+  Loader2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -33,8 +39,14 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover'
 import { api } from '@/lib/orpc/client'
 import { cn } from '@/lib/utils'
+import { toast } from 'sonner'
 import RefreshNow from '@/components/RefreshNow'
 
 // Order-level status (matches server-side enum)
@@ -99,6 +111,11 @@ export default function OrdersTable() {
     exception: 0,
   })
   const [total, setTotal] = useState(0)
+  
+  // Thread management state
+  const [threadPopoverOpen, setThreadPopoverOpen] = useState<string | null>(null)
+  const [threadLoading, setThreadLoading] = useState<string | null>(null)
+  const [manualConversationId, setManualConversationId] = useState('')
 
   // Debounce search input
   useEffect(() => {
@@ -176,6 +193,83 @@ export default function OrdersTable() {
         return <Badge variant="secondary">Pending</Badge>
       default:
         return <Badge variant="outline">{computedStatus}</Badge>
+    }
+  }
+
+  // Thread management functions
+  const handleRefreshThread = async (orderNumber: string) => {
+    setThreadLoading(orderNumber)
+    try {
+      const result = await api.customerThread.triggerDiscovery({ orderNumber })
+      
+      if (result.status === 'linked' || result.status === 'already_linked') {
+        toast.success('Thread linked!', {
+          description: result.threadLink?.conversationSubject || `Matched with ${Math.round((result.topScore ?? 0) * 100)}% confidence`,
+          action: result.threadLink?.frontConversationId ? {
+            label: 'Open in Front',
+            onClick: () => window.open(`https://app.frontapp.com/open/${result.threadLink!.frontConversationId}`, '_blank'),
+          } : undefined,
+        })
+        fetchOrders() // Refresh to show updated thread status
+        setThreadPopoverOpen(null)
+      } else if (result.status === 'pending_review') {
+        toast.info('Needs review', {
+          description: `Found ${result.candidatesFound} candidate(s) - review or enter ID manually`,
+        })
+        fetchOrders()
+      } else {
+        toast.warning('No thread found', {
+          description: result.reason || 'Enter a conversation ID manually',
+        })
+      }
+    } catch (err) {
+      toast.error('Discovery failed', {
+        description: err instanceof Error ? err.message : 'Unknown error',
+      })
+    } finally {
+      setThreadLoading(null)
+    }
+  }
+
+  const handleLinkThread = async (orderNumber: string, conversationId: string) => {
+    if (!conversationId.trim()) return
+    
+    // Clean up the conversation ID
+    let cleanId = conversationId.trim()
+    // Extract cnv_ ID if user pasted a Front URL
+    const urlMatch = cleanId.match(/cnv_[a-z0-9]+/i)
+    if (urlMatch) {
+      cleanId = urlMatch[0]
+    }
+    
+    if (!cleanId.startsWith('cnv_')) {
+      toast.error('Invalid conversation ID', {
+        description: 'ID should start with "cnv_" (e.g., cnv_abc123)',
+      })
+      return
+    }
+    
+    setThreadLoading(orderNumber)
+    try {
+      await api.customerThread.linkDifferent({
+        orderNumber,
+        newConversationId: cleanId,
+      })
+      toast.success('Thread linked!', {
+        action: {
+          label: 'Open in Front',
+          onClick: () => window.open(`https://app.frontapp.com/open/${cleanId}`, '_blank'),
+        },
+      })
+      fetchOrders()
+      setThreadPopoverOpen(null)
+      setManualConversationId('')
+    } catch (err) {
+      toast.error('Failed to link thread', {
+        description: err instanceof Error ? err.message : 'Unknown error',
+      })
+    } finally {
+      setThreadLoading(null)
     }
   }
 
@@ -352,27 +446,122 @@ export default function OrdersTable() {
                           </div>
                         )}
                         
-                        {/* Thread indicator */}
-                        {order.threadStatus === 'linked' && order.frontConversationId ? (
-                          <a
-                            href={`https://app.frontapp.com/open/${order.frontConversationId}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex items-center gap-1 text-green-600 hover:text-green-700"
-                            title="Customer thread linked - click to open in Front"
+                        {/* Thread indicator with popover */}
+                        <Popover 
+                          open={threadPopoverOpen === order.orderNumber} 
+                          onOpenChange={(open) => {
+                            setThreadPopoverOpen(open ? order.orderNumber : null)
+                            if (!open) setManualConversationId('')
+                          }}
+                        >
+                          <PopoverTrigger asChild>
+                            <button
+                              className={cn(
+                                "flex items-center gap-1 p-1 rounded hover:bg-muted transition-colors",
+                                order.threadStatus === 'linked' && "text-green-600",
+                                order.threadStatus === 'pending' && "text-yellow-600",
+                                (order.threadStatus === 'not_found' || order.threadStatus === 'none') && "text-muted-foreground"
+                              )}
+                              onClick={(e) => e.stopPropagation()}
+                              title={
+                                order.threadStatus === 'linked' ? 'Thread linked' :
+                                order.threadStatus === 'pending' ? 'Pending review' :
+                                'No thread - click to link'
+                              }
+                            >
+                              <MessageSquare className="h-4 w-4" />
+                            </button>
+                          </PopoverTrigger>
+                          <PopoverContent 
+                            className="w-80" 
+                            align="end"
                             onClick={(e) => e.stopPropagation()}
                           >
-                            <MessageSquare className="h-4 w-4" />
-                          </a>
-                        ) : order.threadStatus === 'pending' ? (
-                          <span className="flex items-center gap-1 text-yellow-600" title="Thread pending review">
-                            <MessageSquare className="h-4 w-4" />
-                          </span>
-                        ) : order.threadStatus === 'not_found' ? (
-                          <span className="flex items-center gap-1 text-muted-foreground" title="No thread found">
-                            <MessageSquare className="h-4 w-4" />
-                          </span>
-                        ) : null}
+                            <div className="space-y-3">
+                              <div className="font-medium text-sm">Customer Thread</div>
+                              
+                              {/* Current status */}
+                              {order.threadStatus === 'linked' && order.frontConversationId ? (
+                                <div className="space-y-2">
+                                  <div className="flex items-center gap-2 text-sm text-green-600">
+                                    <CheckCircle2 className="h-4 w-4" />
+                                    <span>Linked to Front</span>
+                                  </div>
+                                  <a
+                                    href={`https://app.frontapp.com/open/${order.frontConversationId}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="flex items-center gap-2 text-sm text-primary hover:underline"
+                                  >
+                                    <ExternalLink className="h-3 w-3" />
+                                    Open conversation
+                                  </a>
+                                  <div className="text-xs text-muted-foreground font-mono">
+                                    {order.frontConversationId}
+                                  </div>
+                                </div>
+                              ) : order.threadStatus === 'pending' ? (
+                                <div className="flex items-center gap-2 text-sm text-yellow-600">
+                                  <AlertCircle className="h-4 w-4" />
+                                  <span>Pending review - approve or change below</span>
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                  <MessageSquare className="h-4 w-4" />
+                                  <span>No thread linked</span>
+                                </div>
+                              )}
+                              
+                              <div className="border-t pt-3 space-y-2">
+                                {/* Refresh/discover button */}
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="w-full justify-start"
+                                  onClick={() => handleRefreshThread(order.orderNumber)}
+                                  disabled={threadLoading === order.orderNumber}
+                                >
+                                  {threadLoading === order.orderNumber ? (
+                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                  ) : (
+                                    <RefreshCw className="h-4 w-4 mr-2" />
+                                  )}
+                                  {order.threadStatus === 'none' || order.threadStatus === 'not_found' 
+                                    ? 'Search for thread' 
+                                    : 'Re-discover thread'}
+                                </Button>
+                                
+                                {/* Manual link input */}
+                                <div className="space-y-1">
+                                  <label className="text-xs text-muted-foreground">
+                                    Or enter conversation ID manually:
+                                  </label>
+                                  <div className="flex gap-2">
+                                    <Input
+                                      placeholder="cnv_abc123..."
+                                      value={manualConversationId}
+                                      onChange={(e) => setManualConversationId(e.target.value)}
+                                      className="h-8 text-sm font-mono"
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter') {
+                                          handleLinkThread(order.orderNumber, manualConversationId)
+                                        }
+                                      }}
+                                    />
+                                    <Button
+                                      size="sm"
+                                      className="h-8 px-2"
+                                      onClick={() => handleLinkThread(order.orderNumber, manualConversationId)}
+                                      disabled={!manualConversationId.trim() || threadLoading === order.orderNumber}
+                                    >
+                                      <Link2 className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </PopoverContent>
+                        </Popover>
                       </div>
                     </button>
                   </CollapsibleTrigger>
