@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { formatDistanceToNow } from 'date-fns'
 import {
   ChevronDown,
@@ -11,9 +11,10 @@ import {
   CheckCircle2,
   AlertCircle,
   Clock,
-  RefreshCw,
   Mail,
   MessageSquare,
+  PackageCheck,
+  CircleDot,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -34,6 +35,26 @@ import {
 } from '@/components/ui/collapsible'
 import { api } from '@/lib/orpc/client'
 import { cn } from '@/lib/utils'
+import RefreshNow from '@/components/RefreshNow'
+
+// Order-level status derived from shipment stats
+type OrderStatus = 'all' | 'delivered' | 'partially_delivered' | 'in_transit' | 'exception' | 'pending'
+
+/**
+ * Derive order-level status from shipment stats
+ */
+function getOrderStatus(stats: Order['stats']): Exclude<OrderStatus, 'all'> {
+  // Exception takes priority - needs attention
+  if (stats.exception > 0) return 'exception'
+  // All delivered
+  if (stats.delivered === stats.total && stats.total > 0) return 'delivered'
+  // Some delivered
+  if (stats.delivered > 0) return 'partially_delivered'
+  // Any in transit
+  if (stats.inTransit > 0) return 'in_transit'
+  // Default to pending
+  return 'pending'
+}
 
 interface Shipment {
   id: number
@@ -69,6 +90,7 @@ export default function OrdersTable() {
   const [error, setError] = useState<string | null>(null)
   const [expandedOrders, setExpandedOrders] = useState<Set<string>>(new Set())
   const [searchQuery, setSearchQuery] = useState('')
+  const [activeStatus, setActiveStatus] = useState<OrderStatus>('all')
 
   useEffect(() => {
     fetchOrders()
@@ -86,6 +108,25 @@ export default function OrdersTable() {
       setLoading(false)
     }
   }
+
+  // Compute status counts for tabs
+  const statusCounts = useMemo(() => {
+    const counts = {
+      all: orders.length,
+      delivered: 0,
+      partially_delivered: 0,
+      in_transit: 0,
+      exception: 0,
+      pending: 0,
+    }
+    
+    for (const order of orders) {
+      const status = getOrderStatus(order.stats)
+      counts[status]++
+    }
+    
+    return counts
+  }, [orders])
 
   const toggleExpanded = (orderNumber: string) => {
     setExpandedOrders((prev) => {
@@ -116,6 +157,22 @@ export default function OrdersTable() {
     }
   }
 
+  const getOrderStatusBadge = (stats: Order['stats']) => {
+    const status = getOrderStatus(stats)
+    switch (status) {
+      case 'delivered':
+        return <Badge className="bg-green-100 text-green-700">Delivered</Badge>
+      case 'partially_delivered':
+        return <Badge className="bg-blue-100 text-blue-700">{stats.delivered}/{stats.total} Delivered</Badge>
+      case 'in_transit':
+        return <Badge className="bg-purple-100 text-purple-700">In Transit</Badge>
+      case 'exception':
+        return <Badge className="bg-red-100 text-red-700">Exception</Badge>
+      case 'pending':
+        return <Badge variant="secondary">Pending</Badge>
+    }
+  }
+
   const getThreadStatusIcon = (status: string) => {
     switch (status) {
       case 'linked':
@@ -129,16 +186,39 @@ export default function OrdersTable() {
     }
   }
 
-  const filteredOrders = orders.filter((order) => {
-    if (!searchQuery) return true
-    const query = searchQuery.toLowerCase()
-    return (
-      order.orderNumber.toLowerCase().includes(query) ||
-      order.orderName?.toLowerCase().includes(query) ||
-      order.customerName?.toLowerCase().includes(query) ||
-      order.customerEmail?.toLowerCase().includes(query)
-    )
-  })
+  // Filter orders by search query and status
+  const filteredOrders = useMemo(() => {
+    return orders.filter((order) => {
+      // Status filter
+      if (activeStatus !== 'all') {
+        const orderStatus = getOrderStatus(order.stats)
+        if (orderStatus !== activeStatus) return false
+      }
+      
+      // Search filter
+      if (searchQuery) {
+        const query = searchQuery.toLowerCase()
+        return (
+          order.orderNumber.toLowerCase().includes(query) ||
+          order.orderName?.toLowerCase().includes(query) ||
+          order.customerName?.toLowerCase().includes(query) ||
+          order.customerEmail?.toLowerCase().includes(query)
+        )
+      }
+      
+      return true
+    })
+  }, [orders, activeStatus, searchQuery])
+
+  // Status tab configuration
+  const statusTabs: Array<{ key: OrderStatus; label: string; icon?: React.ReactNode }> = [
+    { key: 'all', label: 'All' },
+    { key: 'pending', label: 'Pending', icon: <Clock className="h-3.5 w-3.5" /> },
+    { key: 'in_transit', label: 'In Transit', icon: <Truck className="h-3.5 w-3.5" /> },
+    { key: 'partially_delivered', label: 'Partial', icon: <CircleDot className="h-3.5 w-3.5" /> },
+    { key: 'delivered', label: 'Delivered', icon: <PackageCheck className="h-3.5 w-3.5" /> },
+    { key: 'exception', label: 'Exception', icon: <AlertCircle className="h-3.5 w-3.5" /> },
+  ]
 
   if (loading) {
     return (
@@ -166,7 +246,37 @@ export default function OrdersTable() {
 
   return (
     <div className="space-y-4">
-      {/* Search */}
+      {/* Status Tabs */}
+      <div className="flex items-center gap-1 border-b overflow-x-auto pb-px">
+        {statusTabs.map((tab) => {
+          const count = statusCounts[tab.key]
+          const isActive = activeStatus === tab.key
+          
+          return (
+            <button
+              key={tab.key}
+              onClick={() => setActiveStatus(tab.key)}
+              className={cn(
+                'flex items-center gap-1.5 px-3 py-2 text-sm font-medium whitespace-nowrap transition-colors border-b-2 -mb-px',
+                isActive
+                  ? 'border-primary text-primary'
+                  : 'border-transparent text-muted-foreground hover:text-foreground hover:border-muted-foreground/30'
+              )}
+            >
+              {tab.icon}
+              <span>{tab.label}</span>
+              <span className={cn(
+                'ml-1 text-xs',
+                isActive ? 'text-primary' : 'text-muted-foreground'
+              )}>
+                ({count})
+              </span>
+            </button>
+          )
+        })}
+      </div>
+
+      {/* Search & Refresh */}
       <div className="flex items-center gap-4">
         <Input
           placeholder="Search orders, customers..."
@@ -174,10 +284,7 @@ export default function OrdersTable() {
           onChange={(e) => setSearchQuery(e.target.value)}
           className="max-w-sm"
         />
-        <Button variant="outline" size="sm" onClick={fetchOrders}>
-          <RefreshCw className="h-4 w-4 mr-1" />
-          Refresh
-        </Button>
+        <RefreshNow />
         <div className="ml-auto text-sm text-muted-foreground">
           {filteredOrders.length} order{filteredOrders.length !== 1 ? 's' : ''}
         </div>
@@ -221,6 +328,7 @@ export default function OrdersTable() {
                           <span className="text-muted-foreground">
                             #{order.orderNumber}
                           </span>
+                          {getOrderStatusBadge(order.stats)}
                           <a
                             href={order.omgOrderUrl}
                             target="_blank"
