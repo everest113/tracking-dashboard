@@ -1676,8 +1676,8 @@ const CustomerThreadLinkSchema = z.object({
   confidenceScore: z.number(),
   matchStatus: z.enum(['auto_matched', 'pending_review', 'manually_linked', 'rejected', 'not_found']),
   emailMatched: z.boolean(),
-  poInSubject: z.boolean(),
-  poInBody: z.boolean(),
+  orderInSubject: z.boolean(),
+  orderInBody: z.boolean(),
   daysSinceLastMessage: z.number().nullable(),
   matchedEmail: z.string().nullable(),
   conversationSubject: z.string().nullable(),
@@ -1943,22 +1943,24 @@ const customerThreadRouter = {
         throw new Error('Shipment not found')
       }
       
-      // Get customer email from OMG
+      // Get customer email and order number from OMG
       let customerEmail: string | null = null
+      let orderNumber: string = ''
       if (shipment.po_number) {
         const normalizedPo = normalizePoNumber(shipment.po_number)
         const omgPo = await context.prisma.omg_purchase_orders.findUnique({
           where: { po_number: normalizedPo },
-          select: { customer_email: true },
+          select: { customer_email: true, order_number: true },
         })
         customerEmail = omgPo?.customer_email ?? null
+        orderNumber = omgPo?.order_number ?? ''
       }
       
       const discoveryService = await getThreadDiscoveryService()
       const result = await discoveryService.discoverThread({
         shipmentId: input.shipmentId,
         customerEmail,
-        poNumber: shipment.po_number ?? '',
+        orderNumber, // Customer-facing order number, not internal PO
       })
       
       return {

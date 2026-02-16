@@ -63,50 +63,61 @@ describe('calculateConfidenceScore', () => {
     })
   })
 
-  describe('PO number in subject', () => {
-    it('should match exact PO number in subject', () => {
+  describe('order number in subject', () => {
+    it('should match exact order number in subject', () => {
       const candidate: ConversationCandidate = {
         ...baseCandidate,
-        subject: 'Re: Order 164-1 - Shipping Update',
+        subject: 'Re: Order 164 - Shipping Update',
       }
 
-      const result = calculateConfidenceScore(candidate, null, '164-1')
+      const result = calculateConfidenceScore(candidate, null, '164')
 
-      expect(result.breakdown.poInSubject).toBe(true)
-      expect(result.score).toBeGreaterThanOrEqual(ScoringWeights.PO_IN_SUBJECT)
+      expect(result.breakdown.orderInSubject).toBe(true)
+      expect(result.score).toBeGreaterThanOrEqual(ScoringWeights.ORDER_IN_SUBJECT)
     })
 
-    it('should match PO with prefix', () => {
+    it('should match order with "order" prefix', () => {
       const candidate: ConversationCandidate = {
         ...baseCandidate,
-        subject: 'PO 164-1 Ready for Shipment',
+        subject: 'Order 164 Ready for Shipment',
       }
 
-      const result = calculateConfidenceScore(candidate, null, '164-1')
+      const result = calculateConfidenceScore(candidate, null, '164')
 
-      expect(result.breakdown.poInSubject).toBe(true)
+      expect(result.breakdown.orderInSubject).toBe(true)
     })
 
-    it('should match PO# prefix', () => {
+    it('should match order# prefix', () => {
       const candidate: ConversationCandidate = {
         ...baseCandidate,
-        subject: 'PO#164-1 Tracking',
+        subject: 'Order#164 Tracking',
       }
 
-      const result = calculateConfidenceScore(candidate, null, '164-1')
+      const result = calculateConfidenceScore(candidate, null, '164')
 
-      expect(result.breakdown.poInSubject).toBe(true)
+      expect(result.breakdown.orderInSubject).toBe(true)
     })
 
-    it('should not match if PO not in subject', () => {
+    it('should match #number format', () => {
+      const candidate: ConversationCandidate = {
+        ...baseCandidate,
+        subject: 'Your #164 has shipped!',
+      }
+
+      const result = calculateConfidenceScore(candidate, null, '164')
+
+      expect(result.breakdown.orderInSubject).toBe(true)
+    })
+
+    it('should not match if order number not in subject', () => {
       const candidate: ConversationCandidate = {
         ...baseCandidate,
         subject: 'General Inquiry',
       }
 
-      const result = calculateConfidenceScore(candidate, null, '164-1')
+      const result = calculateConfidenceScore(candidate, null, '164')
 
-      expect(result.breakdown.poInSubject).toBe(false)
+      expect(result.breakdown.orderInSubject).toBe(false)
     })
 
     it('should handle null subject', () => {
@@ -115,9 +126,9 @@ describe('calculateConfidenceScore', () => {
         subject: null,
       }
 
-      const result = calculateConfidenceScore(candidate, null, '164-1')
+      const result = calculateConfidenceScore(candidate, null, '164')
 
-      expect(result.breakdown.poInSubject).toBe(false)
+      expect(result.breakdown.orderInSubject).toBe(false)
     })
   })
 
@@ -182,10 +193,10 @@ describe('calculateConfidenceScore', () => {
   })
 
   describe('combined scoring', () => {
-    it('should combine email match + PO in subject for high score', () => {
+    it('should combine email match + order in subject for high score', () => {
       const candidate: ConversationCandidate = {
         conversationId: 'cnv_123',
-        subject: 'Re: PO 164-1 - Tracking Update',
+        subject: 'Re: Order 164 - Tracking Update',
         lastMessageAt: new Date(),
         participants: ['customer@example.com'],
       }
@@ -193,19 +204,19 @@ describe('calculateConfidenceScore', () => {
       const result = calculateConfidenceScore(
         candidate,
         'customer@example.com',
-        '164-1'
+        '164'
       )
 
       // 0.4 (email) + 0.4 (subject) + ~0.1 (recency) = ~0.9
       expect(result.score).toBeGreaterThanOrEqual(0.8)
       expect(result.breakdown.emailMatched).toBe(true)
-      expect(result.breakdown.poInSubject).toBe(true)
+      expect(result.breakdown.orderInSubject).toBe(true)
     })
 
     it('should cap score at 1.0', () => {
       const candidate: ConversationCandidate = {
         conversationId: 'cnv_123',
-        subject: 'PO 164-1 PO 164-1 PO 164-1', // Repeated
+        subject: 'Order 164 Order 164 Order 164', // Repeated
         lastMessageAt: new Date(),
         participants: ['customer@example.com'],
       }
@@ -213,7 +224,7 @@ describe('calculateConfidenceScore', () => {
       const result = calculateConfidenceScore(
         candidate,
         'customer@example.com',
-        '164-1'
+        '164'
       )
 
       expect(result.score).toBeLessThanOrEqual(1)

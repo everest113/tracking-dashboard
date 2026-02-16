@@ -20,8 +20,8 @@ function toDomain(record: {
   confidence_score: number
   match_status: string
   email_matched: boolean
-  po_in_subject: boolean
-  po_in_body: boolean
+  order_in_subject: boolean
+  order_in_body: boolean
   days_since_last_message: number | null
   matched_email: string | null
   conversation_subject: string | null
@@ -37,8 +37,8 @@ function toDomain(record: {
     confidenceScore: record.confidence_score,
     matchStatus: record.match_status as ThreadMatchStatusType,
     emailMatched: record.email_matched,
-    poInSubject: record.po_in_subject,
-    poInBody: record.po_in_body,
+    orderInSubject: record.order_in_subject,
+    orderInBody: record.order_in_body,
     daysSinceLastMessage: record.days_since_last_message,
     matchedEmail: record.matched_email,
     conversationSubject: record.conversation_subject,
@@ -75,8 +75,8 @@ export function createPrismaCustomerThreadRepository(
           confidence_score: input.confidenceScore,
           match_status: toPrismaStatus(input.matchStatus),
           email_matched: input.emailMatched,
-          po_in_subject: input.poInSubject,
-          po_in_body: input.poInBody,
+          order_in_subject: input.orderInSubject,
+          order_in_body: input.orderInBody,
           days_since_last_message: input.daysSinceLastMessage,
           matched_email: input.matchedEmail,
           conversation_subject: input.conversationSubject,

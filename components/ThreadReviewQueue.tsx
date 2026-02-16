@@ -50,8 +50,8 @@ interface PendingReviewItem {
     confidenceScore: number
     matchStatus: string
     emailMatched: boolean
-    poInSubject: boolean
-    poInBody: boolean
+    orderInSubject: boolean
+    orderInBody: boolean
     daysSinceLastMessage: number | null
     matchedEmail: string | null
     conversationSubject: string | null
@@ -363,16 +363,16 @@ export default function ThreadReviewQueue() {
                               )}
                             </div>
                             <div>
-                              <span className="text-muted-foreground">PO in Subject:</span>{' '}
-                              {item.threadLink.poInSubject ? (
+                              <span className="text-muted-foreground">Order in Subject:</span>{' '}
+                              {item.threadLink.orderInSubject ? (
                                 <Badge variant="default" className="bg-green-500 ml-1">Yes</Badge>
                               ) : (
                                 <Badge variant="secondary" className="ml-1">No</Badge>
                               )}
                             </div>
                             <div>
-                              <span className="text-muted-foreground">PO in Body:</span>{' '}
-                              {item.threadLink.poInBody ? (
+                              <span className="text-muted-foreground">Order in Body:</span>{' '}
+                              {item.threadLink.orderInBody ? (
                                 <Badge variant="default" className="bg-green-500 ml-1">Yes</Badge>
                               ) : (
                                 <Badge variant="secondary" className="ml-1">No</Badge>

@@ -29,11 +29,12 @@ export const ConfidenceThresholds = {
 
 /**
  * Scoring weights for confidence calculation.
+ * Note: We match ORDER number (customer-facing), not PO number (supplier-facing)
  */
 export const ScoringWeights = {
   EMAIL_MATCH: 0.4,
-  PO_IN_SUBJECT: 0.4,
-  PO_IN_BODY: 0.2,
+  ORDER_IN_SUBJECT: 0.4,
+  ORDER_IN_BODY: 0.2,
   RECENCY_BONUS_MAX: 0.1, // Bonus for recent conversations
   RECENCY_DAYS_THRESHOLD: 30, // Days within which recency bonus applies
 } as const
@@ -56,8 +57,8 @@ export interface ScoringResult {
   score: number
   breakdown: {
     emailMatched: boolean
-    poInSubject: boolean
-    poInBody: boolean
+    orderInSubject: boolean
+    orderInBody: boolean
     daysSinceLastMessage: number | null
     recencyBonus: number
   }
@@ -72,8 +73,8 @@ export interface CreateCustomerThreadInput {
   confidenceScore: number
   matchStatus: ThreadMatchStatusType
   emailMatched: boolean
-  poInSubject: boolean
-  poInBody: boolean
+  orderInSubject: boolean
+  orderInBody: boolean
   daysSinceLastMessage: number | null
   matchedEmail: string | null
   conversationSubject: string | null
@@ -89,8 +90,8 @@ export interface CustomerThreadLink {
   confidenceScore: number
   matchStatus: ThreadMatchStatusType
   emailMatched: boolean
-  poInSubject: boolean
-  poInBody: boolean
+  orderInSubject: boolean
+  orderInBody: boolean
   daysSinceLastMessage: number | null
   matchedEmail: string | null
   conversationSubject: string | null
@@ -123,17 +124,18 @@ export interface ReviewAction {
 
 /**
  * Calculate confidence score for a conversation candidate.
+ * Note: We match against the ORDER number (customer-facing), not PO number (supplier-facing).
  */
 export function calculateConfidenceScore(
   candidate: ConversationCandidate,
   customerEmail: string | null,
-  poNumber: string
+  orderNumber: string
 ): ScoringResult {
   let score = 0
   const breakdown = {
     emailMatched: false,
-    poInSubject: false,
-    poInBody: false, // We'll check this separately if we have body access
+    orderInSubject: false,
+    orderInBody: false, // We'll check this separately if we have body access
     daysSinceLastMessage: null as number | null,
     recencyBonus: 0,
   }
@@ -148,20 +150,21 @@ export function calculateConfidenceScore(
     }
   }
 
-  // PO in subject (40%)
+  // Order number in subject (40%)
   if (candidate.subject) {
-    // Check for PO number in various formats
+    // Check for order number in various formats
     const subjectLower = candidate.subject.toLowerCase()
-    const poLower = poNumber.toLowerCase()
-    // Match exact PO or with common prefixes
+    const orderLower = orderNumber.toLowerCase()
+    // Match exact order number or with common prefixes
     if (
-      subjectLower.includes(poLower) ||
-      subjectLower.includes(`po ${poLower}`) ||
-      subjectLower.includes(`po# ${poLower}`) ||
-      subjectLower.includes(`po#${poLower}`)
+      subjectLower.includes(orderLower) ||
+      subjectLower.includes(`order ${orderLower}`) ||
+      subjectLower.includes(`order# ${orderLower}`) ||
+      subjectLower.includes(`order#${orderLower}`) ||
+      subjectLower.includes(`#${orderLower}`)
     ) {
-      breakdown.poInSubject = true
-      score += ScoringWeights.PO_IN_SUBJECT
+      breakdown.orderInSubject = true
+      score += ScoringWeights.ORDER_IN_SUBJECT
     }
   }
 
