@@ -79,16 +79,11 @@ async function backfillCustomerEmails(dryRun: boolean = false) {
    Total processed: ${records.length}
 `)
 
-  // Also check records without raw_data that might need re-sync
-  const noRawData = await prisma.omg_purchase_orders.count({
-    where: {
-      customer_email: null,
-      raw_data: null,
-    },
-  })
+  // Check for records without raw_data that might need re-sync
+  const noRawDataCount = allRecords.filter((r) => r.raw_data === null).length
 
-  if (noRawData > 0) {
-    console.log(`⚠️  ${noRawData} records have no raw_data and need re-sync from OMG`)
+  if (noRawDataCount > 0) {
+    console.log(`⚠️  ${noRawDataCount} records have no raw_data and need re-sync from OMG`)
     console.log(`   Run: npx tsx scripts/resync-omg-orders.ts`)
   }
 }
