@@ -123,6 +123,39 @@ export class FrontClient extends BaseSdkClient {
 
     return response._results
   }
+
+  /**
+   * Search conversations by email address.
+   * Uses Front's search API with contact email filter.
+   */
+  async searchConversationsByEmail(
+    email: string,
+    options: {
+      inboxId?: string
+      limit?: number
+    } = {}
+  ): Promise<FrontConversation[]> {
+    const limit = options.limit || 25
+    
+    // Build search query using Front's search syntax
+    // Format: contact:email@example.com [inbox:ID]
+    const parts: string[] = [`contact:${email}`]
+    
+    if (options.inboxId) {
+      parts.push(`inbox:${options.inboxId}`)
+    }
+    
+    const query = parts.join(' ')
+    
+    const endpoint = `/conversations/search/${encodeURIComponent(query)}?limit=${limit}`
+    
+    const response = await this.get<FrontListResponse<FrontConversation>>(
+      endpoint,
+      FrontListResponseSchema(FrontConversationSchema)
+    )
+
+    return response._results
+  }
 }
 
 /**
@@ -136,4 +169,15 @@ export function getFrontClient(): FrontClient {
   }
 
   return new FrontClient(apiKey)
+}
+
+/**
+ * Search conversations by email (convenience function).
+ */
+export async function searchConversationsByEmail(
+  email: string,
+  options?: { inboxId?: string; limit?: number }
+): Promise<FrontConversation[]> {
+  const client = getFrontClient()
+  return client.searchConversationsByEmail(email, options)
 }
