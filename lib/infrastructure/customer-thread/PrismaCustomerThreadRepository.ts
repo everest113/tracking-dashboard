@@ -134,8 +134,17 @@ export function createPrismaCustomerThreadRepository(
 
     async getPendingReview(limit = 50): Promise<CustomerThreadLink[]> {
       const records = await prisma.shipment_customer_threads.findMany({
-        where: { match_status: 'pending_review' },
-        orderBy: { confidence_score: 'desc' },
+        where: { 
+          match_status: { 
+            in: ['pending_review', 'not_found'] 
+          } 
+        },
+        orderBy: [
+          // Show pending_review first (they have candidates to review)
+          // Then not_found (need manual search)
+          { match_status: 'asc' }, // 'not_found' > 'pending_review' alphabetically, so this puts pending first
+          { confidence_score: 'desc' },
+        ],
         take: limit,
       })
       return records.map(toDomain)

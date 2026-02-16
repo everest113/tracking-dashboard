@@ -306,42 +306,57 @@ export default function ThreadReviewQueue() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <div className="max-w-[200px] truncate" title={item.threadLink.conversationSubject ?? ''}>
-                        {item.threadLink.conversationSubject ?? 'No subject'}
-                      </div>
+                      {item.threadLink.matchStatus === 'not_found' ? (
+                        <span className="text-muted-foreground italic">No thread found</span>
+                      ) : (
+                        <div className="max-w-[200px] truncate" title={item.threadLink.conversationSubject ?? ''}>
+                          {item.threadLink.conversationSubject ?? 'No subject'}
+                        </div>
+                      )}
                     </TableCell>
                     <TableCell>
-                      {getConfidenceBadge(item.threadLink.confidenceScore)}
+                      {item.threadLink.matchStatus === 'not_found' ? (
+                        <Badge variant="outline" className="text-orange-600 border-orange-300">
+                          Not Found
+                        </Badge>
+                      ) : (
+                        getConfidenceBadge(item.threadLink.confidenceScore)
+                      )}
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 w-8 p-0 text-green-600 hover:text-green-700 hover:bg-green-50"
-                          onClick={() => handleApprove(item)}
-                          disabled={isLoading}
-                          title="Approve"
-                        >
-                          <CheckCircle2 className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
-                          onClick={() => handleReject(item)}
-                          disabled={isLoading}
-                          title="Reject"
-                        >
-                          <XCircle className="h-4 w-4" />
-                        </Button>
+                        {/* Only show Approve/Reject if there's a candidate to review */}
+                        {item.threadLink.matchStatus !== 'not_found' && (
+                          <>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0 text-green-600 hover:text-green-700 hover:bg-green-50"
+                              onClick={() => handleApprove(item)}
+                              disabled={isLoading}
+                              title="Approve"
+                            >
+                              <CheckCircle2 className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
+                              onClick={() => handleReject(item)}
+                              disabled={isLoading}
+                              title="Reject"
+                            >
+                              <XCircle className="h-4 w-4" />
+                            </Button>
+                          </>
+                        )}
                         <Button
                           variant="ghost"
                           size="sm"
                           className="h-8 w-8 p-0 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
                           onClick={() => openLinkDialog(item)}
                           disabled={isLoading}
-                          title="Link Different"
+                          title={item.threadLink.matchStatus === 'not_found' ? 'Find & Link Thread' : 'Link Different'}
                         >
                           <Link2 className="h-4 w-4" />
                         </Button>
