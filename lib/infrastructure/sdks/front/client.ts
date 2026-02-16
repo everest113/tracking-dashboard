@@ -9,9 +9,12 @@ import {
   FrontConversationSchema,
   FrontMessageSchema,
   FrontListResponseSchema,
+  FrontSendReplyResponseSchema,
   type FrontConversation,
   type FrontMessage,
   type FrontListResponse,
+  type FrontSendReplyRequest,
+  type FrontSendReplyResponse,
 } from './schemas'
 
 export class FrontClient extends BaseSdkClient {
@@ -188,6 +191,44 @@ export class FrontClient extends BaseSdkClient {
 
     return response._results
   }
+
+  /**
+   * Send a reply to a conversation.
+   * This appends a new outbound message to an existing conversation thread.
+   * 
+   * @param conversationId - The conversation ID (cnv_xxx format)
+   * @param body - HTML content of the message
+   * @param options - Optional settings (author_id, archive after send, etc.)
+   * @returns The created message
+   */
+  async sendReply(
+    conversationId: string,
+    body: string,
+    options: Omit<FrontSendReplyRequest, 'body'> = {}
+  ): Promise<FrontSendReplyResponse> {
+    const payload: FrontSendReplyRequest = {
+      body,
+      ...options,
+    }
+
+    const response = await this.post<FrontSendReplyResponse>(
+      `/conversations/${conversationId}/messages`,
+      payload,
+      FrontSendReplyResponseSchema
+    )
+
+    return response
+  }
+
+  /**
+   * Get a single conversation by ID.
+   */
+  async getConversation(conversationId: string): Promise<FrontConversation> {
+    return this.get<FrontConversation>(
+      `/conversations/${conversationId}`,
+      FrontConversationSchema
+    )
+  }
 }
 
 /**
@@ -224,4 +265,31 @@ export async function searchConversationsByQuery(
 ): Promise<FrontConversation[]> {
   const client = getFrontClient()
   return client.searchConversationsByQuery(query, options)
+}
+
+/**
+ * Send a reply to a conversation (convenience function).
+ * 
+ * @param conversationId - The conversation ID (cnv_xxx format)
+ * @param body - HTML content of the message
+ * @param options - Optional settings (author_id, etc.)
+ * @returns The created message
+ */
+export async function sendReply(
+  conversationId: string,
+  body: string,
+  options?: Omit<FrontSendReplyRequest, 'body'>
+): Promise<FrontSendReplyResponse> {
+  const client = getFrontClient()
+  return client.sendReply(conversationId, body, options)
+}
+
+/**
+ * Get a conversation by ID (convenience function).
+ */
+export async function getConversation(
+  conversationId: string
+): Promise<FrontConversation> {
+  const client = getFrontClient()
+  return client.getConversation(conversationId)
 }

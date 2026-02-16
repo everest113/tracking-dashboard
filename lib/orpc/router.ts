@@ -2221,6 +2221,41 @@ const customerThreadRouter = {
         })),
       }
     }),
+
+  /**
+   * Send a tracking notification to the customer via Front
+   */
+  sendNotification: publicProcedure
+    .input(z.object({
+      shipmentId: z.number(),
+      notificationType: z.enum(['shipped', 'out_for_delivery', 'delivered', 'exception']),
+      exceptionReason: z.string().optional(),
+    }))
+    .output(z.object({
+      success: z.boolean(),
+      messageId: z.string().nullable(),
+      conversationId: z.string().nullable(),
+      error: z.string().nullable(),
+      skippedReason: z.string().nullable(),
+    }))
+    .handler(async ({ context, input }) => {
+      const { getTrackingNotificationService } = await import('@/lib/infrastructure/customer-thread')
+      
+      const service = getTrackingNotificationService()
+      const result = await service.sendNotification({
+        shipmentId: input.shipmentId,
+        notificationType: input.notificationType,
+        exceptionReason: input.exceptionReason,
+      })
+      
+      return {
+        success: result.success,
+        messageId: result.messageId ?? null,
+        conversationId: result.conversationId ?? null,
+        error: result.error ?? null,
+        skippedReason: result.skippedReason ?? null,
+      }
+    }),
 }
 
 // =============================================================================

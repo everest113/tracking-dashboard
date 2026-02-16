@@ -12,6 +12,15 @@ import type { CustomerThreadRepository } from '@/lib/domain/customer-thread'
 export { createPrismaCustomerThreadRepository } from './PrismaCustomerThreadRepository'
 export { createThreadDiscoveryService, type ThreadDiscoveryService } from './ThreadDiscoveryService'
 
+// Notification templates and service
+export * from './TrackingNotificationTemplates'
+export { 
+  TrackingNotificationService, 
+  getTrackingNotificationService,
+  type ShipmentNotificationContext,
+  type NotificationResult,
+} from './TrackingNotificationService'
+
 // Singleton instances
 let customerThreadRepository: CustomerThreadRepository | null = null
 let threadDiscoveryService: ThreadDiscoveryService | null = null

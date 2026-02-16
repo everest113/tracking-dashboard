@@ -86,10 +86,55 @@ export const FrontListResponseSchema = <T extends z.ZodType>(itemSchema: T) =>
   })
 
 /**
+ * Front Send Reply Request schema
+ */
+export const FrontSendReplyRequestSchema = z.object({
+  body: z.string(), // HTML content of the message
+  author_id: z.string().optional(), // Teammate ID to send from (uses default if not specified)
+  subject: z.string().optional(), // Override subject (rarely needed for replies)
+  options: z.object({
+    archive: z.boolean().optional(), // Archive conversation after sending
+    tag_ids: z.array(z.string()).optional(), // Tags to add
+  }).optional(),
+})
+
+/**
+ * Front Send Reply Response schema
+ * The API returns the created message
+ */
+export const FrontSendReplyResponseSchema = z.object({
+  id: z.string(), // Message ID (msg_xxx)
+  type: z.string(),
+  is_inbound: z.boolean(),
+  created_at: z.number(),
+  blurb: z.string(),
+  body: z.string(),
+  text: z.string(),
+  author: z.object({
+    id: z.string().optional(),
+    email: z.string().optional(),
+    username: z.string().optional(),
+  }).nullable(),
+  recipients: z.array(z.object({
+    handle: z.string(),
+    name: z.string().nullish(),
+    role: z.string().optional(),
+  })),
+  _links: z.object({
+    self: z.string(),
+    related: z.object({
+      conversation: z.string(),
+    }),
+  }),
+})
+
+/**
  * Type inference
  */
 export type FrontConversation = z.infer<typeof FrontConversationSchema>
 export type FrontMessage = z.infer<typeof FrontMessageSchema>
+export type FrontSendReplyRequest = z.infer<typeof FrontSendReplyRequestSchema>
+export type FrontSendReplyResponse = z.infer<typeof FrontSendReplyResponseSchema>
 export type FrontListResponse<T> = {
   _pagination: {
     next?: string | null
