@@ -9,7 +9,7 @@
  *   npx tsx scripts/backfill-customer-emails.ts --dry-run
  */
 
-import { PrismaClient } from '@prisma/client'
+import { PrismaClient, Prisma } from '@prisma/client'
 
 const prisma = new PrismaClient()
 
@@ -25,10 +25,13 @@ async function backfillCustomerEmails(dryRun: boolean = false) {
   console.log(`\n🔄 Backfilling customer_email${dryRun ? ' (DRY RUN)' : ''}...\n`)
 
   // Find all records that have raw_data but no customer_email
+  // Use NOT: JsonNull to check for non-null JSON values
   const records = await prisma.omg_purchase_orders.findMany({
     where: {
       customer_email: null,
-      raw_data: { not: null },
+      NOT: {
+        raw_data: Prisma.JsonNull,
+      },
     },
     select: {
       id: true,
