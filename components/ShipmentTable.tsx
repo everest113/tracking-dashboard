@@ -360,19 +360,26 @@ export default function ShipmentTable({
     }
   }
 
-  const handleFindCustomerThread = async (shipmentId: number) => {
+  const handleFindCustomerThread = async (shipmentId: number, orderNumber?: string) => {
+    if (!orderNumber) {
+      toast.error('Cannot find thread', {
+        description: 'Shipment is not linked to an order. Sync with OMG first.',
+      })
+      return
+    }
+    
     setFindingThreadId(shipmentId)
     try {
-      const result = await api.customerThread.triggerDiscovery({ shipmentId })
+      const result = await api.customerThread.triggerDiscovery({ orderNumber })
       
       if (result.threadLink) {
-        // Store the thread link in local state
+        // Store the thread link in local state (keyed by shipmentId for UI)
         setThreadLinks(prev => ({
           ...prev,
           [shipmentId]: {
-            id: result.threadLink!.id,
-            frontConversationId: result.threadLink!.frontConversationId,
-            confidenceScore: result.threadLink!.confidenceScore,
+            id: 0, // Not used in new API
+            frontConversationId: result.threadLink!.frontConversationId || '',
+            confidenceScore: result.threadLink!.confidenceScore || 0,
             matchStatus: result.threadLink!.matchStatus as ThreadLink['matchStatus'],
             conversationSubject: result.threadLink!.conversationSubject,
           }
@@ -412,10 +419,6 @@ export default function ShipmentTable({
           toast.warning('No matching thread found', {
             description: result.reason || 'Could not find a Front conversation for this customer',
           })
-          // Log debug info to console for troubleshooting
-          if (result.debug) {
-            console.log('[Thread Discovery Debug]', result.debug)
-          }
           break
       }
     } catch (error) {
@@ -805,8 +808,8 @@ export default function ShipmentTable({
                               )}
                               <DropdownMenuSeparator />
                               <DropdownMenuItem
-                                onClick={() => handleFindCustomerThread(shipment.id)}
-                                disabled={findingThreadId === shipment.id}
+                                onClick={() => handleFindCustomerThread(shipment.id, shipment.omgData?.orderNumber)}
+                                disabled={findingThreadId === shipment.id || !shipment.omgData?.orderNumber}
                               >
                                 <MessageSquare className="h-4 w-4 mr-2" />
                                 Find Customer Thread

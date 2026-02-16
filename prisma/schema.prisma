@@ -39,8 +39,8 @@ model shipments {
   ship24_status         String?               @db.VarChar(100)
   ship24_last_update    DateTime?
   tracking_events       tracking_events[]
-  customer_thread       shipment_customer_threads?
   // Note: OMG data is now joined by po_number, not by relation
+  // Note: Customer thread is now stored at the order level, not shipment level
 
   @@index([front_conversation_id], map: "idx_front_conversation")
   @@index([po_number], map: "idx_po_number")
@@ -113,6 +113,23 @@ model orders {
   pending_count    Int                @default(0)
   exception_count  Int                @default(0)
   
+  // Customer thread linking (for tracking notifications)
+  front_conversation_id   String?           @db.VarChar(100)
+  thread_match_status     ThreadMatchStatus @default(not_found)
+  thread_confidence_score Float?
+  
+  // Thread scoring breakdown (for debugging/audit)
+  thread_email_matched      Boolean @default(false)
+  thread_order_in_subject   Boolean @default(false)
+  thread_order_in_body      Boolean @default(false)
+  thread_days_since_message Int?
+  thread_matched_email      String? @db.VarChar(255)
+  thread_conversation_subject String?
+  
+  // Thread review tracking
+  thread_reviewed_at DateTime?
+  thread_reviewed_by String?    @db.VarChar(100)
+  
   // Timestamps
   created_at     DateTime             @default(now())
   updated_at     DateTime             @default(now()) @updatedAt
@@ -120,6 +137,8 @@ model orders {
   @@index([computed_status], map: "idx_order_status")
   @@index([customer_email], map: "idx_order_customer_email")
   @@index([created_at(sort: Desc)], map: "idx_order_created")
+  @@index([front_conversation_id], map: "idx_order_conversation")
+  @@index([thread_match_status], map: "idx_order_thread_status")
 }
 
 model sync_history {
@@ -223,8 +242,8 @@ model audit_history {
 
 // =============================================================================
 // CUSTOMER THREAD MATCHING
-// Links shipments to Front customer conversations for tracking notifications.
-// Uses confidence scoring to auto-match or queue for manual review.
+// Thread matching is now stored on the orders table (front_conversation_id, thread_match_status, etc.)
+// The old shipment_customer_threads table has been removed - threads are per-order, not per-shipment.
 // =============================================================================
 
 enum ThreadMatchStatus {
@@ -233,37 +252,4 @@ enum ThreadMatchStatus {
   manually_linked  // Human confirmed the match
   rejected         // Human rejected this match
   not_found        // No matching thread found
-}
-
-model shipment_customer_threads {
-  id                    Int               @id @default(autoincrement())
-  shipment_id           Int               @unique // One thread link per shipment
-  front_conversation_id String            @db.VarChar(100)
-  
-  // Confidence scoring
-  confidence_score      Float
-  match_status          ThreadMatchStatus @default(pending_review)
-  
-  // Scoring breakdown (for debugging/audit)
-  email_matched           Boolean           @default(false)
-  order_in_subject        Boolean           @default(false)
-  order_in_body           Boolean           @default(false)
-  days_since_last_message Int?
-  
-  // Metadata
-  matched_email         String?           @db.VarChar(255)
-  conversation_subject  String?
-  
-  // Timestamps
-  created_at            DateTime          @default(now())
-  updated_at            DateTime          @default(now()) @updatedAt
-  reviewed_at           DateTime?
-  reviewed_by           String?           @db.VarChar(100)
-  
-  // Relations
-  shipment              shipments         @relation(fields: [shipment_id], references: [id], onDelete: Cascade)
-  
-  @@index([front_conversation_id], map: "idx_sct_conversation")
-  @@index([match_status], map: "idx_sct_status")
-  @@index([confidence_score(sort: Desc)], map: "idx_sct_confidence")
 }

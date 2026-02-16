@@ -1,12 +1,12 @@
 /**
- * Thread Discovery Service
+ * Order Thread Discovery Service
  *
- * Discovers and links Front customer conversations to shipments.
+ * Discovers and links Front customer conversations to orders.
  * Uses email lookup and confidence scoring to match threads.
  * Can also search by order name/number when no customer email is available.
  */
 
-import type { CustomerThreadRepository } from '@/lib/domain/customer-thread'
+import type { OrderThreadRepository } from './PrismaOrderThreadRepository'
 import {
   ThreadMatchStatus,
   calculateConfidenceScore,
@@ -18,17 +18,14 @@ import {
 import { getAuditService } from '@/lib/infrastructure/audit'
 import { AuditEntityTypes, AuditActions } from '@/lib/domain/audit'
 
-export interface ThreadDiscoveryService {
+export interface OrderThreadDiscoveryService {
   /**
-   * Discover and link a customer thread for a shipment.
+   * Discover and link a customer thread for an order.
    * Idempotent - returns existing link if already matched.
-   * Note: orderNumber is customer-facing, not the internal PO number.
-   * Can search by email, or by orderName/orderNumber if no email available.
    */
   discoverThread(params: {
-    shipmentId: number
-    customerEmail: string | null
     orderNumber: string
+    customerEmail: string | null
     orderName?: string | null
   }): Promise<ThreadDiscoveryResult>
 
@@ -54,7 +51,7 @@ export interface ThreadDiscoveryService {
 }
 
 interface Dependencies {
-  repository: CustomerThreadRepository
+  repository: OrderThreadRepository
   frontClient: {
     searchConversationsByEmail(email: string): Promise<Array<{
       id: string
@@ -71,31 +68,31 @@ interface Dependencies {
   }
 }
 
-export function createThreadDiscoveryService(
+export function createOrderThreadDiscoveryService(
   deps: Dependencies
-): ThreadDiscoveryService {
+): OrderThreadDiscoveryService {
   const { repository, frontClient } = deps
 
   return {
-    async discoverThread({ shipmentId, customerEmail, orderNumber, orderName }) {
+    async discoverThread({ orderNumber, customerEmail, orderName }) {
       const audit = getAuditService()
 
       // Check if already linked (but allow re-discovery for not_found items)
-      const existing = await repository.getByShipmentId(shipmentId)
+      const existing = await repository.getByOrderNumber(orderNumber)
       if (existing) {
         // Only skip re-discovery for successfully linked records
         if (existing.matchStatus === 'auto_matched' || 
             existing.matchStatus === 'manually_linked') {
           return {
-            shipmentId,
+            orderNumber,
             status: 'already_linked' as const,
             threadLink: existing,
             candidatesFound: 0,
             topScore: existing.confidenceScore,
           }
         }
-        // For not_found or pending_review, delete old record and re-discover
-        await repository.delete(shipmentId)
+        // For not_found or pending_review, clear and re-discover
+        await repository.clearThread(orderNumber)
       }
 
       // Determine search strategy
@@ -127,14 +124,14 @@ export function createThreadDiscoveryService(
       // If we still have no way to search, return not_found
       if (!customerEmail && !orderName && !orderNumber) {
         await audit.recordSkipped({
-          entityType: AuditEntityTypes.Shipment,
-          entityId: String(shipmentId),
+          entityType: AuditEntityTypes.Order,
+          entityId: orderNumber,
           action: AuditActions.ThreadSearched,
           reason: 'No customer email or order info available',
         })
 
         return {
-          shipmentId,
+          orderNumber,
           status: 'not_found' as const,
           candidatesFound: 0,
           topScore: null,
@@ -143,8 +140,8 @@ export function createThreadDiscoveryService(
 
       // Record search in audit
       await audit.recordSuccess({
-        entityType: AuditEntityTypes.Shipment,
-        entityId: String(shipmentId),
+        entityType: AuditEntityTypes.Order,
+        entityId: orderNumber,
         action: AuditActions.ThreadSearched,
         metadata: {
           searchMethod,
@@ -157,9 +154,9 @@ export function createThreadDiscoveryService(
       })
 
       if (candidates.length === 0) {
-        // Create not_found record
-        const link = await repository.create({
-          shipmentId,
+        // Update order with not_found status
+        const link = await repository.updateThread({
+          orderNumber,
           frontConversationId: '',
           confidenceScore: 0,
           matchStatus: ThreadMatchStatus.NotFound,
@@ -172,14 +169,14 @@ export function createThreadDiscoveryService(
         })
 
         await audit.recordSuccess({
-          entityType: AuditEntityTypes.Shipment,
-          entityId: String(shipmentId),
+          entityType: AuditEntityTypes.Order,
+          entityId: orderNumber,
           action: AuditActions.ThreadNoMatch,
           metadata: { searchMethod, searchTerm },
         })
 
         return {
-          shipmentId,
+          orderNumber,
           status: 'not_found' as const,
           threadLink: link,
           candidatesFound: 0,
@@ -194,9 +191,9 @@ export function createThreadDiscoveryService(
       // Determine match status
       const matchStatus = getMatchStatus(topCandidate.score)
 
-      // Create thread link
-      const link = await repository.create({
-        shipmentId,
+      // Update order with thread link
+      const link = await repository.updateThread({
+        orderNumber,
         frontConversationId: topCandidate.conversationId,
         confidenceScore: topCandidate.score,
         matchStatus,
@@ -211,8 +208,8 @@ export function createThreadDiscoveryService(
       // Record match in audit
       if (matchStatus === ThreadMatchStatus.AutoMatched) {
         await audit.recordSuccess({
-          entityType: AuditEntityTypes.Shipment,
-          entityId: String(shipmentId),
+          entityType: AuditEntityTypes.Order,
+          entityId: orderNumber,
           action: AuditActions.ThreadAutoMatched,
           metadata: {
             conversationId: topCandidate.conversationId,
@@ -224,7 +221,7 @@ export function createThreadDiscoveryService(
       }
 
       return {
-        shipmentId,
+        orderNumber,
         status: matchStatus === ThreadMatchStatus.AutoMatched
           ? 'linked' as const
           : matchStatus === ThreadMatchStatus.PendingReview

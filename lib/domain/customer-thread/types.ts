@@ -1,8 +1,11 @@
 /**
  * Domain types for Customer Thread Matching.
  *
- * Handles matching shipments to Front customer conversations
+ * Handles matching ORDERS to Front customer conversations
  * for automated tracking notifications.
+ * 
+ * Note: Threads are linked at the order level, not shipment level,
+ * because customer conversations are typically per-order.
  */
 
 /**
@@ -65,10 +68,10 @@ export interface ScoringResult {
 }
 
 /**
- * Input for creating a customer thread link.
+ * Input for creating/updating a customer thread link on an order.
  */
-export interface CreateCustomerThreadInput {
-  shipmentId: number
+export interface UpdateOrderThreadInput {
+  orderNumber: string
   frontConversationId: string
   confidenceScore: number
   matchStatus: ThreadMatchStatusType
@@ -81,33 +84,30 @@ export interface CreateCustomerThreadInput {
 }
 
 /**
- * A customer thread link record.
+ * Thread link data from an order.
  */
-export interface CustomerThreadLink {
-  id: number
-  shipmentId: number
-  frontConversationId: string
-  confidenceScore: number
+export interface OrderThreadLink {
+  orderNumber: string
+  frontConversationId: string | null
   matchStatus: ThreadMatchStatusType
+  confidenceScore: number | null
   emailMatched: boolean
   orderInSubject: boolean
   orderInBody: boolean
   daysSinceLastMessage: number | null
   matchedEmail: string | null
   conversationSubject: string | null
-  createdAt: Date
-  updatedAt: Date
   reviewedAt: Date | null
   reviewedBy: string | null
 }
 
 /**
- * Discovery result for a shipment.
+ * Discovery result for an order.
  */
 export interface ThreadDiscoveryResult {
-  shipmentId: number
+  orderNumber: string
   status: 'linked' | 'pending_review' | 'not_found' | 'already_linked'
-  threadLink?: CustomerThreadLink
+  threadLink?: OrderThreadLink
   candidatesFound: number
   topScore: number | null
 }
@@ -116,11 +116,18 @@ export interface ThreadDiscoveryResult {
  * Manual review action.
  */
 export interface ReviewAction {
-  shipmentId: number
+  orderNumber: string
   action: 'approve' | 'reject' | 'link_different'
   newConversationId?: string // Only for 'link_different'
   reviewedBy: string
 }
+
+// Legacy type alias for backwards compatibility during migration
+/** @deprecated Use OrderThreadLink instead */
+export type CustomerThreadLink = OrderThreadLink & { id: number; shipmentId: number; createdAt: Date; updatedAt: Date }
+
+/** @deprecated Use UpdateOrderThreadInput instead */
+export type CreateCustomerThreadInput = UpdateOrderThreadInput & { shipmentId: number }
 
 /**
  * Calculate confidence score for a conversation candidate.

@@ -2,15 +2,18 @@
  * Customer Thread Infrastructure Module
  *
  * Provides repository and service implementations for customer thread matching.
+ * 
+ * NOTE: Thread matching is now done at the ORDER level, not shipment level.
+ * The old shipment-based APIs are deprecated.
  */
 
 import { prisma } from '@/lib/prisma'
-import { createPrismaCustomerThreadRepository } from './PrismaCustomerThreadRepository'
-import { createThreadDiscoveryService, type ThreadDiscoveryService } from './ThreadDiscoveryService'
-import type { CustomerThreadRepository } from '@/lib/domain/customer-thread'
+import { createOrderThreadRepository, type OrderThreadRepository } from './PrismaOrderThreadRepository'
+import { createOrderThreadDiscoveryService, type OrderThreadDiscoveryService } from './OrderThreadDiscoveryService'
 
-export { createPrismaCustomerThreadRepository } from './PrismaCustomerThreadRepository'
-export { createThreadDiscoveryService, type ThreadDiscoveryService } from './ThreadDiscoveryService'
+// New order-based exports
+export { createOrderThreadRepository, type OrderThreadRepository } from './PrismaOrderThreadRepository'
+export { createOrderThreadDiscoveryService, type OrderThreadDiscoveryService } from './OrderThreadDiscoveryService'
 
 // Notification templates and service
 export * from './TrackingNotificationTemplates'
@@ -22,29 +25,28 @@ export {
 } from './TrackingNotificationService'
 
 // Singleton instances
-let customerThreadRepository: CustomerThreadRepository | null = null
-let threadDiscoveryService: ThreadDiscoveryService | null = null
+let orderThreadRepository: OrderThreadRepository | null = null
+let orderThreadDiscoveryService: OrderThreadDiscoveryService | null = null
 
 /**
- * Get the customer thread repository singleton.
+ * Get the order thread repository singleton.
  */
-export function getCustomerThreadRepository(): CustomerThreadRepository {
-  if (!customerThreadRepository) {
-    customerThreadRepository = createPrismaCustomerThreadRepository(prisma)
+export function getOrderThreadRepository(): OrderThreadRepository {
+  if (!orderThreadRepository) {
+    orderThreadRepository = createOrderThreadRepository(prisma)
   }
-  return customerThreadRepository
+  return orderThreadRepository
 }
 
 /**
- * Get the thread discovery service singleton.
- * Requires Front client to be available.
+ * Get the order thread discovery service singleton.
  */
-export async function getThreadDiscoveryService(): Promise<ThreadDiscoveryService> {
-  if (!threadDiscoveryService) {
+export async function getOrderThreadDiscoveryService(): Promise<OrderThreadDiscoveryService> {
+  if (!orderThreadDiscoveryService) {
     // Lazy import Front client to avoid circular deps
     const { searchConversationsByEmail, searchConversationsByQuery } = await import('@/lib/infrastructure/sdks/front/client')
 
-    const repository = getCustomerThreadRepository()
+    const repository = getOrderThreadRepository()
 
     // Helper to map Front conversation to our format
     const mapConversation = (conv: Awaited<ReturnType<typeof searchConversationsByEmail>>[0], fallbackEmail?: string) => ({
@@ -58,7 +60,7 @@ export async function getThreadDiscoveryService(): Promise<ThreadDiscoveryServic
         : fallbackEmail ? [{ handle: fallbackEmail }] : [],
     })
 
-    threadDiscoveryService = createThreadDiscoveryService({
+    orderThreadDiscoveryService = createOrderThreadDiscoveryService({
       repository,
       frontClient: {
         async searchConversationsByEmail(email: string) {
@@ -72,13 +74,29 @@ export async function getThreadDiscoveryService(): Promise<ThreadDiscoveryServic
       },
     })
   }
-  return threadDiscoveryService
+  return orderThreadDiscoveryService
 }
 
 /**
  * Reset singletons (for testing).
  */
 export function resetCustomerThreadServices(): void {
-  customerThreadRepository = null
-  threadDiscoveryService = null
+  orderThreadRepository = null
+  orderThreadDiscoveryService = null
+}
+
+// =============================================================================
+// DEPRECATED: Shipment-based APIs (kept for backwards compatibility during migration)
+// =============================================================================
+
+/** @deprecated Use getOrderThreadRepository instead */
+export function getCustomerThreadRepository() {
+  console.warn('getCustomerThreadRepository is deprecated. Use getOrderThreadRepository instead.')
+  return getOrderThreadRepository() as any
+}
+
+/** @deprecated Use getOrderThreadDiscoveryService instead */
+export async function getThreadDiscoveryService() {
+  console.warn('getThreadDiscoveryService is deprecated. Use getOrderThreadDiscoveryService instead.')
+  return getOrderThreadDiscoveryService() as any
 }

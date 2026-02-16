@@ -48,7 +48,7 @@ export class TrackingNotificationService {
    * Send a tracking notification for a shipment.
    * 
    * Flow:
-   * 1. Look up shipment and linked customer thread
+   * 1. Look up shipment and order (thread is stored on order)
    * 2. Build notification data from shipment/order info
    * 3. Render appropriate template
    * 4. Send reply via Front API
@@ -59,17 +59,9 @@ export class TrackingNotificationService {
   async sendNotification(context: ShipmentNotificationContext): Promise<NotificationResult> {
     const { shipmentId, notificationType, exceptionReason } = context
 
-    // 1. Get shipment with linked thread
+    // 1. Get shipment
     const shipment = await prisma.shipments.findUnique({
       where: { id: shipmentId },
-      include: {
-        customer_thread: {
-          select: {
-            front_conversation_id: true,
-            match_status: true,
-          },
-        },
-      },
     })
 
     if (!shipment) {
@@ -79,44 +71,61 @@ export class TrackingNotificationService {
       }
     }
 
-    // 2. Check for linked thread
-    const thread = shipment.customer_thread
-    if (!thread || !thread.front_conversation_id) {
+    // 2. Get order with thread info (via PO number -> OMG -> order)
+    if (!shipment.po_number) {
       return {
         success: false,
-        skippedReason: 'No linked customer thread',
+        skippedReason: 'Shipment has no PO number',
+      }
+    }
+
+    const { normalizePoNumber } = await import('@/lib/infrastructure/omg/sync')
+    const normalizedPo = normalizePoNumber(shipment.po_number)
+    
+    const omgRecord = await prisma.omg_purchase_orders.findUnique({
+      where: { po_number: normalizedPo },
+    })
+
+    if (!omgRecord) {
+      return {
+        success: false,
+        skippedReason: `No OMG record for PO ${normalizedPo}`,
+      }
+    }
+
+    // 3. Get order with thread
+    const order = await prisma.orders.findUnique({
+      where: { order_number: omgRecord.order_number },
+    })
+
+    if (!order) {
+      return {
+        success: false,
+        skippedReason: `Order ${omgRecord.order_number} not found`,
+      }
+    }
+
+    // 4. Check for linked thread on order
+    if (!order.front_conversation_id) {
+      return {
+        success: false,
+        skippedReason: 'No linked customer thread on order',
       }
     }
 
     // Only send to confirmed threads (auto_matched or manually_linked)
-    if (!['auto_matched', 'manually_linked'].includes(thread.match_status)) {
+    if (!['auto_matched', 'manually_linked'].includes(order.thread_match_status)) {
       return {
         success: false,
-        skippedReason: `Thread status is ${thread.match_status}, not confirmed`,
+        skippedReason: `Thread status is ${order.thread_match_status}, not confirmed`,
       }
     }
 
-    // 3. Get OMG data for customer info (joined by po_number)
-    let omgData: Record<string, unknown> | null = null
-    if (shipment.po_number) {
-      const { normalizePoNumber } = await import('@/lib/infrastructure/omg/sync')
-      const normalizedPo = normalizePoNumber(shipment.po_number)
-      const omgRecord = await prisma.omg_purchase_orders.findUnique({
-        where: { po_number: normalizedPo },
-      })
-      if (omgRecord) {
-        omgData = {
-          orderName: omgRecord.order_name,
-          orderNumber: omgRecord.order_number,
-          customerName: omgRecord.customer_name,
-          customerEmail: omgRecord.customer_email,
-        }
-      }
-    }
-
-    // 4. Build notification data
-    const customerName = this.extractCustomerName(omgData) || 'there'
-    const orderName = (omgData?.orderName as string) || shipment.po_number || 'your order'
+    // 5. Build notification data
+    const customerName = this.extractCustomerName({
+      customerName: order.customer_name,
+    }) || 'there'
+    const orderName = order.order_name || `Order #${order.order_number}`
     const carrier = shipment.carrier || 'the carrier'
     const trackingNumber = shipment.tracking_number
 
@@ -128,30 +137,30 @@ export class TrackingNotificationService {
       trackingUrl: getTrackingUrl(carrier, trackingNumber),
     }
 
-    // 5. Render template
+    // 6. Render template
     const htmlBody = renderTrackingNotification(
       notificationType,
       notificationData,
       exceptionReason
     )
 
-    // 6. Send via Front
+    // 7. Send via Front
     try {
       const message = await this.frontClient.sendReply(
-        thread.front_conversation_id,
+        order.front_conversation_id,
         htmlBody
       )
 
       return {
         success: true,
         messageId: message.id,
-        conversationId: thread.front_conversation_id,
+        conversationId: order.front_conversation_id,
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
       return {
         success: false,
-        conversationId: thread.front_conversation_id,
+        conversationId: order.front_conversation_id,
         error: `Failed to send Front message: ${errorMessage}`,
       }
     }
