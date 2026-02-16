@@ -79,6 +79,49 @@ model omg_purchase_orders {
   @@index([customer_email], map: "idx_omg_customer_email")
 }
 
+// =============================================================================
+// ORDERS
+// Aggregate view of orders with denormalized status for server-side filtering.
+// Computed from shipments grouped by order_number via omg_purchase_orders.
+// =============================================================================
+
+enum OrderComputedStatus {
+  pending              // All shipments pending
+  in_transit           // Any shipment in transit, none delivered yet
+  partially_delivered  // Some shipments delivered, some not
+  delivered            // All shipments delivered
+  exception            // Any shipment has an exception (takes priority)
+}
+
+model orders {
+  id             Int                  @id @default(autoincrement())
+  order_number   String               @unique @db.VarChar(50) // Human-readable order number (e.g., "164")
+  
+  // Denormalized from omg_purchase_orders (for display)
+  order_name     String?              @db.VarChar(255)
+  customer_name  String?              @db.VarChar(255)
+  customer_email String?              @db.VarChar(255)
+  omg_order_id   String               @db.VarChar(50) // For generating OMG URLs
+  
+  // Computed status for server-side filtering
+  computed_status OrderComputedStatus @default(pending)
+  
+  // Denormalized shipment stats (for display without joins)
+  shipment_count   Int                @default(0)
+  delivered_count  Int                @default(0)
+  in_transit_count Int                @default(0)
+  pending_count    Int                @default(0)
+  exception_count  Int                @default(0)
+  
+  // Timestamps
+  created_at     DateTime             @default(now())
+  updated_at     DateTime             @default(now()) @updatedAt
+  
+  @@index([computed_status], map: "idx_order_status")
+  @@index([customer_email], map: "idx_order_customer_email")
+  @@index([created_at(sort: Desc)], map: "idx_order_created")
+}
+
 model sync_history {
   id                             Int       @id @default(autoincrement())
   conversations_processed        Int       @default(0)

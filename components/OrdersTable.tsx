@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { formatDistanceToNow } from 'date-fns'
 import {
   ChevronDown,
@@ -37,24 +37,11 @@ import { api } from '@/lib/orpc/client'
 import { cn } from '@/lib/utils'
 import RefreshNow from '@/components/RefreshNow'
 
-// Order-level status derived from shipment stats
-type OrderStatus = 'all' | 'delivered' | 'partially_delivered' | 'in_transit' | 'exception' | 'pending'
+// Order-level status (matches server-side enum)
+type OrderStatus = 'all' | 'pending' | 'in_transit' | 'partially_delivered' | 'delivered' | 'exception'
 
-/**
- * Derive order-level status from shipment stats
- */
-function getOrderStatus(stats: Order['stats']): Exclude<OrderStatus, 'all'> {
-  // Exception takes priority - needs attention
-  if (stats.exception > 0) return 'exception'
-  // All delivered
-  if (stats.delivered === stats.total && stats.total > 0) return 'delivered'
-  // Some delivered
-  if (stats.delivered > 0) return 'partially_delivered'
-  // Any in transit
-  if (stats.inTransit > 0) return 'in_transit'
-  // Default to pending
-  return 'pending'
-}
+// API status type (excludes 'all')
+type ApiOrderStatus = Exclude<OrderStatus, 'all'>
 
 interface Shipment {
   id: number
@@ -74,6 +61,7 @@ interface Order {
   customerName: string | null
   customerEmail: string | null
   omgOrderUrl: string
+  computedStatus: ApiOrderStatus
   shipments: Shipment[]
   stats: {
     total: number
@@ -84,49 +72,64 @@ interface Order {
   }
 }
 
+interface StatusCounts {
+  all: number
+  pending: number
+  in_transit: number
+  partially_delivered: number
+  delivered: number
+  exception: number
+}
+
 export default function OrdersTable() {
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [expandedOrders, setExpandedOrders] = useState<Set<string>>(new Set())
   const [searchQuery, setSearchQuery] = useState('')
+  const [searchInput, setSearchInput] = useState('') // Debounced input
   const [activeStatus, setActiveStatus] = useState<OrderStatus>('all')
+  const [statusCounts, setStatusCounts] = useState<StatusCounts>({
+    all: 0,
+    pending: 0,
+    in_transit: 0,
+    partially_delivered: 0,
+    delivered: 0,
+    exception: 0,
+  })
+  const [total, setTotal] = useState(0)
 
+  // Debounce search input
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSearchQuery(searchInput)
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [searchInput])
+
+  // Fetch orders when filters change
   useEffect(() => {
     fetchOrders()
-  }, [])
+  }, [activeStatus, searchQuery])
 
-  const fetchOrders = async () => {
+  const fetchOrders = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      const result = await api.orders.list({})
-      setOrders(result.orders)
+      const result = await api.orders.list({
+        status: activeStatus === 'all' ? undefined : activeStatus as ApiOrderStatus,
+        search: searchQuery || undefined,
+        limit: 100,
+      })
+      setOrders(result.orders as Order[])
+      setTotal(result.total)
+      setStatusCounts(result.statusCounts)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load orders')
     } finally {
       setLoading(false)
     }
-  }
-
-  // Compute status counts for tabs
-  const statusCounts = useMemo(() => {
-    const counts = {
-      all: orders.length,
-      delivered: 0,
-      partially_delivered: 0,
-      in_transit: 0,
-      exception: 0,
-      pending: 0,
-    }
-    
-    for (const order of orders) {
-      const status = getOrderStatus(order.stats)
-      counts[status]++
-    }
-    
-    return counts
-  }, [orders])
+  }, [activeStatus, searchQuery])
 
   const toggleExpanded = (orderNumber: string) => {
     setExpandedOrders((prev) => {
@@ -157,9 +160,9 @@ export default function OrdersTable() {
     }
   }
 
-  const getOrderStatusBadge = (stats: Order['stats']) => {
-    const status = getOrderStatus(stats)
-    switch (status) {
+  const getOrderStatusBadge = (order: Order) => {
+    const { computedStatus, stats } = order
+    switch (computedStatus) {
       case 'delivered':
         return <Badge className="bg-green-100 text-green-700">Delivered</Badge>
       case 'partially_delivered':
@@ -170,6 +173,8 @@ export default function OrdersTable() {
         return <Badge className="bg-red-100 text-red-700">Exception</Badge>
       case 'pending':
         return <Badge variant="secondary">Pending</Badge>
+      default:
+        return <Badge variant="outline">{computedStatus}</Badge>
     }
   }
 
@@ -185,30 +190,6 @@ export default function OrdersTable() {
         return null
     }
   }
-
-  // Filter orders by search query and status
-  const filteredOrders = useMemo(() => {
-    return orders.filter((order) => {
-      // Status filter
-      if (activeStatus !== 'all') {
-        const orderStatus = getOrderStatus(order.stats)
-        if (orderStatus !== activeStatus) return false
-      }
-      
-      // Search filter
-      if (searchQuery) {
-        const query = searchQuery.toLowerCase()
-        return (
-          order.orderNumber.toLowerCase().includes(query) ||
-          order.orderName?.toLowerCase().includes(query) ||
-          order.customerName?.toLowerCase().includes(query) ||
-          order.customerEmail?.toLowerCase().includes(query)
-        )
-      }
-      
-      return true
-    })
-  }, [orders, activeStatus, searchQuery])
 
   // Status tab configuration
   const statusTabs: Array<{ key: OrderStatus; label: string; icon?: React.ReactNode }> = [
@@ -280,24 +261,24 @@ export default function OrdersTable() {
       <div className="flex items-center gap-4">
         <Input
           placeholder="Search orders, customers..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
           className="max-w-sm"
         />
         <RefreshNow />
         <div className="ml-auto text-sm text-muted-foreground">
-          {filteredOrders.length} order{filteredOrders.length !== 1 ? 's' : ''}
+          {loading ? '...' : `${orders.length} of ${total}`} order{total !== 1 ? 's' : ''}
         </div>
       </div>
 
       {/* Orders List */}
       <div className="border rounded-lg">
-        {filteredOrders.length === 0 ? (
+        {orders.length === 0 ? (
           <div className="p-8 text-center text-muted-foreground">
             No orders found
           </div>
         ) : (
-          filteredOrders.map((order) => {
+          orders.map((order) => {
             const isExpanded = expandedOrders.has(order.orderNumber)
             
             return (
@@ -328,7 +309,7 @@ export default function OrdersTable() {
                           <span className="text-muted-foreground">
                             #{order.orderNumber}
                           </span>
-                          {getOrderStatusBadge(order.stats)}
+                          {getOrderStatusBadge(order)}
                           <a
                             href={order.omgOrderUrl}
                             target="_blank"

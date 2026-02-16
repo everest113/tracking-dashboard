@@ -2262,12 +2262,15 @@ const customerThreadRouter = {
 // ORDERS ROUTER
 // =============================================================================
 
+const OrderStatusEnum = z.enum(['pending', 'in_transit', 'partially_delivered', 'delivered', 'exception'])
+
 const OrderSchema = z.object({
   orderNumber: z.string(),
   orderName: z.string().nullable(),
   customerName: z.string().nullable(),
   customerEmail: z.string().nullable(),
   omgOrderUrl: z.string(),
+  computedStatus: OrderStatusEnum,
   shipments: z.array(z.object({
     id: z.number(),
     poNumber: z.string().nullable(),
@@ -2290,51 +2293,77 @@ const OrderSchema = z.object({
 
 const ordersRouter = {
   /**
-   * List all orders with their shipments
+   * List orders with server-side filtering by status
    */
   list: publicProcedure
     .input(z.object({
+      status: OrderStatusEnum.optional(),
       search: z.string().optional(),
       limit: z.number().min(1).max(200).default(100),
+      offset: z.number().min(0).default(0),
     }).optional())
     .output(z.object({
       orders: z.array(OrderSchema),
       total: z.number(),
+      statusCounts: z.object({
+        all: z.number(),
+        pending: z.number(),
+        in_transit: z.number(),
+        partially_delivered: z.number(),
+        delivered: z.number(),
+        exception: z.number(),
+      }),
     }))
     .handler(async ({ context, input }) => {
-      const { normalizePoNumber, getOmgUrls } = await import('@/lib/infrastructure/omg/sync')
+      const { normalizePoNumber } = await import('@/lib/infrastructure/omg/sync')
+      const { OrderStatus } = await import('@/lib/domain/order')
+      const { createOrderRepository } = await import('@/lib/infrastructure/order')
       
-      // Get all OMG purchase orders grouped by order number
-      const omgRecords = await context.prisma.omg_purchase_orders.findMany({
-        orderBy: { order_number: 'desc' },
-      })
+      const repository = createOrderRepository(context.prisma)
       
-      // Group by order number
-      const orderMap = new Map<string, {
-        orderNumber: string
-        orderName: string | null
-        customerName: string | null
-        customerEmail: string | null
-        omgOrderId: string
-        poNumbers: string[]
-      }>()
-      
-      for (const record of omgRecords) {
-        if (!orderMap.has(record.order_number)) {
-          orderMap.set(record.order_number, {
-            orderNumber: record.order_number,
-            orderName: record.order_name,
-            customerName: record.customer_name,
-            customerEmail: record.customer_email,
-            omgOrderId: record.omg_order_id,
-            poNumbers: [],
-          })
-        }
-        orderMap.get(record.order_number)!.poNumbers.push(record.po_number)
+      // Map input status to domain enum
+      const statusMap: Record<string, typeof OrderStatus[keyof typeof OrderStatus]> = {
+        pending: OrderStatus.Pending,
+        in_transit: OrderStatus.InTransit,
+        partially_delivered: OrderStatus.PartiallyDelivered,
+        delivered: OrderStatus.Delivered,
+        exception: OrderStatus.Exception,
       }
       
-      // Get all shipments with their thread status
-      const allShipments = await context.prisma.shipments.findMany({
+      // Get orders from the orders table (server-side filtered)
+      const { orders: domainOrders, total } = await repository.list({
+        filter: {
+          status: input?.status ? statusMap[input.status] : undefined,
+          search: input?.search,
+        },
+        limit: input?.limit ?? 100,
+        offset: input?.offset ?? 0,
+      })
+      
+      // Get status counts
+      const statusCounts = await repository.countByStatus()
+      
+      // Now fetch shipment details for these orders
+      // First, get all PO numbers for these orders
+      const orderNumbers = domainOrders.map(o => o.orderNumber)
+      
+      const omgRecords = await context.prisma.omg_purchase_orders.findMany({
+        where: { order_number: { in: orderNumbers } },
+        select: { order_number: true, po_number: true },
+      })
+      
+      // Group PO numbers by order
+      const orderPoMap = new Map<string, string[]>()
+      for (const record of omgRecords) {
+        if (!orderPoMap.has(record.order_number)) {
+          orderPoMap.set(record.order_number, [])
+        }
+        orderPoMap.get(record.order_number)!.push(record.po_number)
+      }
+      
+      // Get all shipments for these POs
+      const allPoNumbers = Array.from(orderPoMap.values()).flat()
+      const shipments = await context.prisma.shipments.findMany({
         where: { po_number: { not: null } },
         select: {
           id: true,
@@ -2348,52 +2377,45 @@ const ordersRouter = {
         },
       })
       
-      // Get thread statuses for all shipments
+      // Filter to matching POs and index by normalized PO
+      const shipmentsByPo = new Map<string, typeof shipments>()
+      for (const shipment of shipments) {
+        if (!shipment.po_number) continue
+        const normalized = normalizePoNumber(shipment.po_number)
+        if (allPoNumbers.includes(normalized)) {
+          if (!shipmentsByPo.has(normalized)) {
+            shipmentsByPo.set(normalized, [])
+          }
+          shipmentsByPo.get(normalized)!.push(shipment)
+        }
+      }
+      
+      // Get thread statuses
       const threadStatuses = await context.prisma.shipment_customer_threads.findMany({
-        select: {
-          shipment_id: true,
-          match_status: true,
-        },
+        select: { shipment_id: true, match_status: true },
       })
       const threadStatusMap = new Map(threadStatuses.map(t => [t.shipment_id, t.match_status]))
       
-      // Build orders with shipments
-      const orders: z.infer<typeof OrderSchema>[] = []
+      const getThreadStatus = (shipmentId: number): 'linked' | 'pending' | 'not_found' | 'none' => {
+        const status = threadStatusMap.get(shipmentId)
+        if (!status) return 'none'
+        if (status === 'auto_matched' || status === 'manually_linked') return 'linked'
+        if (status === 'pending_review') return 'pending'
+        return 'not_found'
+      }
       
-      for (const [orderNumber, orderData] of orderMap) {
-        // Find shipments for this order (match by normalized PO)
-        const orderShipments = allShipments.filter(s => {
-          if (!s.po_number) return false
-          const normalized = normalizePoNumber(s.po_number)
-          return orderData.poNumbers.includes(normalized)
-        })
+      // Build response
+      const orders: z.infer<typeof OrderSchema>[] = domainOrders.map(order => {
+        const poNumbers = orderPoMap.get(order.orderNumber) || []
+        const orderShipments = poNumbers.flatMap(po => shipmentsByPo.get(po) || [])
         
-        if (orderShipments.length === 0) continue
-        
-        // Calculate stats
-        const stats = {
-          total: orderShipments.length,
-          delivered: orderShipments.filter(s => s.status === 'delivered').length,
-          inTransit: orderShipments.filter(s => ['in_transit', 'out_for_delivery'].includes(s.status)).length,
-          pending: orderShipments.filter(s => ['pending', 'info_received'].includes(s.status)).length,
-          exception: orderShipments.filter(s => s.status === 'exception').length,
-        }
-        
-        // Map thread status
-        const getThreadStatus = (shipmentId: number): 'linked' | 'pending' | 'not_found' | 'none' => {
-          const status = threadStatusMap.get(shipmentId)
-          if (!status) return 'none'
-          if (status === 'auto_matched' || status === 'manually_linked') return 'linked'
-          if (status === 'pending_review') return 'pending'
-          return 'not_found'
-        }
-        
-        orders.push({
-          orderNumber: orderData.orderNumber,
-          orderName: orderData.orderName,
-          customerName: orderData.customerName,
-          customerEmail: orderData.customerEmail,
-          omgOrderUrl: `https://stitchi.omgorders.app/orders/${orderData.omgOrderId}/order`,
+        return {
+          orderNumber: order.orderNumber,
+          orderName: order.orderName,
+          customerName: order.customerName,
+          customerEmail: order.customerEmail,
+          omgOrderUrl: `https://stitchi.omgorders.app/orders/${order.omgOrderId}/order`,
+          computedStatus: order.computedStatus as z.infer<typeof OrderStatusEnum>,
           shipments: orderShipments.map(s => ({
             id: s.id,
             poNumber: s.po_number,
@@ -2405,29 +2427,44 @@ const ordersRouter = {
             lastChecked: s.last_checked?.toISOString() ?? null,
             threadStatus: getThreadStatus(s.id),
           })),
-          stats,
-        })
-      }
-      
-      // Apply search filter
-      let filteredOrders = orders
-      if (input?.search) {
-        const query = input.search.toLowerCase()
-        filteredOrders = orders.filter(o => 
-          o.orderNumber.toLowerCase().includes(query) ||
-          o.orderName?.toLowerCase().includes(query) ||
-          o.customerName?.toLowerCase().includes(query) ||
-          o.customerEmail?.toLowerCase().includes(query)
-        )
-      }
-      
-      // Sort by order number descending (newest first)
-      filteredOrders.sort((a, b) => parseInt(b.orderNumber) - parseInt(a.orderNumber))
+          stats: {
+            total: order.shipmentCount,
+            delivered: order.deliveredCount,
+            inTransit: order.inTransitCount,
+            pending: order.pendingCount,
+            exception: order.exceptionCount,
+          },
+        }
+      })
       
       return {
-        orders: filteredOrders.slice(0, input?.limit ?? 100),
-        total: filteredOrders.length,
+        orders,
+        total,
+        statusCounts: {
+          all: statusCounts.all,
+          pending: statusCounts[OrderStatus.Pending],
+          in_transit: statusCounts[OrderStatus.InTransit],
+          partially_delivered: statusCounts[OrderStatus.PartiallyDelivered],
+          delivered: statusCounts[OrderStatus.Delivered],
+          exception: statusCounts[OrderStatus.Exception],
+        },
       }
+    }),
+
+  /**
+   * Sync orders table from omg_purchase_orders + shipments
+   * Call this after any sync operation to update computed statuses
+   */
+  sync: publicProcedure
+    .output(z.object({
+      created: z.number(),
+      updated: z.number(),
+      total: z.number(),
+    }))
+    .handler(async ({ context }) => {
+      const { getOrderSyncService } = await import('@/lib/infrastructure/order')
+      const service = getOrderSyncService(context.prisma)
+      return service.syncAll()
     }),
 }
 

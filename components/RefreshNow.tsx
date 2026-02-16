@@ -131,6 +131,16 @@ export default function RefreshNow() {
         addProgress('skipped', `${omgResult.failed} shipment${omgResult.failed !== 1 ? 's' : ''} not found in OMG`)
       }
 
+      // Step 5: Sync orders table (compute statuses)
+      addProgress('processing', 'Computing order statuses...')
+      const ordersResult = await api.orders.sync()
+      
+      if (ordersResult.created > 0 || ordersResult.updated > 0) {
+        addProgress('found', `${ordersResult.total} order${ordersResult.total !== 1 ? 's' : ''} synced`)
+      } else {
+        addProgress('skipped', 'Orders already up to date')
+      }
+
       addProgress('complete', 'Refresh complete!')
 
       // Show summary toast
@@ -145,6 +155,9 @@ export default function RefreshNow() {
         messages.push(`${omgResult.synced} linked to OMG`)
       }
       messages.push(`${updateResult.checked} refreshed`)
+      if (ordersResult.total > 0) {
+        messages.push(`${ordersResult.total} orders`)
+      }
 
       toast.success('Dashboard updated', {
         description: messages.join(' • '),
