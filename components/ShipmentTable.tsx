@@ -36,6 +36,8 @@ import {
   Upload,
   Package,
   Truck,
+  MessageSquare,
+  Link2,
 } from 'lucide-react'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import {
@@ -64,6 +66,14 @@ interface OmgData {
   customerName?: string | null
   orderUrl: string
   poUrl: string
+}
+
+interface ThreadLink {
+  id: number
+  frontConversationId: string
+  confidenceScore: number
+  matchStatus: 'auto_matched' | 'pending_review' | 'manually_linked' | 'rejected' | 'not_found'
+  conversationSubject: string | null
 }
 
 interface Shipment {
@@ -220,6 +230,8 @@ export default function ShipmentTable({
   const [refreshingShipmentId, setRefreshingShipmentId] = useState<number | null>(null)
   const [deletingShipmentId, setDeletingShipmentId] = useState<number | null>(null)
   const [syncingToOmgId, setSyncingToOmgId] = useState<number | null>(null)
+  const [findingThreadId, setFindingThreadId] = useState<number | null>(null)
+  const [threadLinks, setThreadLinks] = useState<Record<number, ThreadLink | null>>({})
 
   // Get current sort from URL
   const sortField = searchParams.get('sortField') as SortField | null
@@ -348,6 +360,70 @@ export default function ShipmentTable({
     }
   }
 
+  const handleFindCustomerThread = async (shipmentId: number) => {
+    setFindingThreadId(shipmentId)
+    try {
+      const result = await api.customerThread.triggerDiscovery({ shipmentId })
+      
+      if (result.threadLink) {
+        // Store the thread link in local state
+        setThreadLinks(prev => ({
+          ...prev,
+          [shipmentId]: {
+            id: result.threadLink!.id,
+            frontConversationId: result.threadLink!.frontConversationId,
+            confidenceScore: result.threadLink!.confidenceScore,
+            matchStatus: result.threadLink!.matchStatus as ThreadLink['matchStatus'],
+            conversationSubject: result.threadLink!.conversationSubject,
+          }
+        }))
+      }
+      
+      // Show result toast
+      switch (result.status) {
+        case 'linked':
+          toast.success('Customer thread found!', {
+            description: `Auto-matched with ${Math.round((result.topScore ?? 0) * 100)}% confidence`,
+            action: result.threadLink?.frontConversationId ? {
+              label: 'Open in Front',
+              onClick: () => window.open(`https://app.frontapp.com/open/${result.threadLink!.frontConversationId}`, '_blank'),
+            } : undefined,
+          })
+          break
+        case 'pending_review':
+          toast.info('Thread needs review', {
+            description: `Found ${result.candidatesFound} candidate(s) with ${Math.round((result.topScore ?? 0) * 100)}% confidence`,
+            action: {
+              label: 'Review',
+              onClick: () => window.open('/threads', '_self'),
+            },
+          })
+          break
+        case 'already_linked':
+          toast.info('Thread already linked', {
+            description: result.threadLink?.conversationSubject || 'Conversation previously matched',
+            action: result.threadLink?.frontConversationId ? {
+              label: 'Open in Front',
+              onClick: () => window.open(`https://app.frontapp.com/open/${result.threadLink!.frontConversationId}`, '_blank'),
+            } : undefined,
+          })
+          break
+        case 'not_found':
+          toast.warning('No matching thread found', {
+            description: 'Could not find a Front conversation for this customer',
+          })
+          break
+      }
+    } catch (error) {
+      console.error('Failed to find customer thread:', error)
+      toast.error('Thread discovery failed', {
+        description: 'Check console for details',
+      })
+    } finally {
+      setFindingThreadId(null)
+    }
+  }
+
   const handleCopyTracking = useCallback(async (trackingNumber: string) => {
     try {
       await navigator.clipboard.writeText(trackingNumber)
@@ -431,7 +507,11 @@ export default function ShipmentTable({
                 const latestEvent = shipment.trackingEvents?.[0]
                 const isLoading = refreshingShipmentId === shipment.id ||
                   deletingShipmentId === shipment.id ||
-                  syncingToOmgId === shipment.id
+                  syncingToOmgId === shipment.id ||
+                  findingThreadId === shipment.id
+                
+                // Get thread link from local state (populated after discovery)
+                const threadLink = threadLinks[shipment.id]
 
                 // Determine which date to show based on status
                 let dateInfo: { label: string; value: string | null; icon: React.ReactNode } | null = null
@@ -721,6 +801,26 @@ export default function ShipmentTable({
                               )}
                               <DropdownMenuSeparator />
                               <DropdownMenuItem
+                                onClick={() => handleFindCustomerThread(shipment.id)}
+                                disabled={findingThreadId === shipment.id}
+                              >
+                                <MessageSquare className="h-4 w-4 mr-2" />
+                                Find Customer Thread
+                              </DropdownMenuItem>
+                              {threadLink && threadLink.frontConversationId && (
+                                <DropdownMenuItem asChild>
+                                  <a
+                                    href={`https://app.frontapp.com/open/${threadLink.frontConversationId}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                  >
+                                    <Link2 className="h-4 w-4 mr-2" />
+                                    Open in Front
+                                  </a>
+                                </DropdownMenuItem>
+                              )}
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
                                 onClick={() => handleDeleteShipment(shipment.id)}
                                 disabled={deletingShipmentId === shipment.id}
                                 className="text-red-600 focus:text-red-600"
@@ -763,6 +863,46 @@ export default function ShipmentTable({
                                   {formatDateTime(shipment.deliveredDate) || '—'}
                                 </p>
                               </div>
+
+                              {/* Customer Thread */}
+                              {threadLink && (
+                                <div className="col-span-3 mt-2">
+                                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
+                                    Customer Thread
+                                  </p>
+                                  <div className="flex items-center gap-3">
+                                    <Badge
+                                      variant="secondary"
+                                      className={cn(
+                                        threadLink.matchStatus === 'auto_matched' && 'bg-green-100 text-green-700',
+                                        threadLink.matchStatus === 'manually_linked' && 'bg-blue-100 text-blue-700',
+                                        threadLink.matchStatus === 'pending_review' && 'bg-yellow-100 text-yellow-700',
+                                        threadLink.matchStatus === 'not_found' && 'bg-gray-100 text-gray-700',
+                                        threadLink.matchStatus === 'rejected' && 'bg-red-100 text-red-700'
+                                      )}
+                                    >
+                                      {threadLink.matchStatus === 'auto_matched' && 'Auto-matched'}
+                                      {threadLink.matchStatus === 'manually_linked' && 'Manually linked'}
+                                      {threadLink.matchStatus === 'pending_review' && 'Pending review'}
+                                      {threadLink.matchStatus === 'not_found' && 'Not found'}
+                                      {threadLink.matchStatus === 'rejected' && 'Rejected'}
+                                      {' '}({Math.round(threadLink.confidenceScore * 100)}%)
+                                    </Badge>
+                                    {threadLink.frontConversationId && (
+                                      <a
+                                        href={`https://app.frontapp.com/open/${threadLink.frontConversationId}`}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline"
+                                      >
+                                        <MessageSquare className="h-3.5 w-3.5" />
+                                        {threadLink.conversationSubject || 'Open conversation'}
+                                        <ExternalLink className="h-3 w-3" />
+                                      </a>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
 
                               {/* Tracking Events */}
                               {shipment.trackingEvents && shipment.trackingEvents.length > 0 && (
