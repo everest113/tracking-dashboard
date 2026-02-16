@@ -80,16 +80,22 @@ export function createThreadDiscoveryService(
     async discoverThread({ shipmentId, customerEmail, orderNumber, orderName }) {
       const audit = getAuditService()
 
-      // Check if already linked
+      // Check if already linked (but allow re-discovery for not_found items)
       const existing = await repository.getByShipmentId(shipmentId)
       if (existing) {
-        return {
-          shipmentId,
-          status: 'already_linked' as const,
-          threadLink: existing,
-          candidatesFound: 0,
-          topScore: existing.confidenceScore,
+        // Only skip re-discovery for successfully linked records
+        if (existing.matchStatus === 'auto_matched' || 
+            existing.matchStatus === 'manually_linked') {
+          return {
+            shipmentId,
+            status: 'already_linked' as const,
+            threadLink: existing,
+            candidatesFound: 0,
+            topScore: existing.confidenceScore,
+          }
         }
+        // For not_found or pending_review, delete old record and re-discover
+        await repository.delete(shipmentId)
       }
 
       // Determine search strategy

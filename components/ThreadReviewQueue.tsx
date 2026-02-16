@@ -152,9 +152,10 @@ export default function ThreadReviewQueue() {
 
   /**
    * Handle search/link button click:
-   * 1. For not_discovered: trigger auto-discovery first
-   * 2. If discovery finds something (linked/pending), refresh list
-   * 3. If discovery fails (not_found), open manual link dialog
+   * 1. For not_discovered/not_found: trigger auto-discovery first
+   * 2. If discovery finds match (linked), remove from list
+   * 3. If discovery finds candidates (pending_review), refresh list  
+   * 4. If discovery fails (not_found), open manual link dialog
    */
   const handleSearchOrLink = async (item: PendingReviewItem) => {
     // If already has a candidate (pending_review), go straight to link dialog
@@ -171,32 +172,34 @@ export default function ThreadReviewQueue() {
       })
 
       if (result.status === 'linked') {
-        // Auto-matched! Remove from list and show success
+        // Auto-matched! Remove from list
         setItems((prev) => prev.filter((i) => i.shipment.id !== item.shipment.id))
-        // Could add a toast here
       } else if (result.status === 'pending_review') {
         // Found candidates - refresh to show updated item with candidates
         await fetchPendingReviews()
       } else if (result.status === 'already_linked') {
-        // Already linked - just remove from list
+        // Successfully linked previously - remove from list
         setItems((prev) => prev.filter((i) => i.shipment.id !== item.shipment.id))
       } else {
-        // not_found - open manual link dialog
-        // Update the item's status first so UI reflects the change
+        // not_found - update UI and open manual link dialog
         setItems((prev) => prev.map((i) => 
           i.shipment.id === item.shipment.id 
             ? { ...i, threadLink: { ...i.threadLink, matchStatus: 'not_found' as const } }
             : i
         ))
+        // Clear loading state BEFORE opening dialog so button is enabled
+        setActionLoading(null)
         openLinkDialog(item)
+        return // Early return to avoid clearing loading state twice
       }
     } catch (err) {
       console.error('Failed to discover thread:', err)
       // On error, fall back to manual link dialog
-      openLinkDialog(item)
-    } finally {
       setActionLoading(null)
+      openLinkDialog(item)
+      return
     }
+    setActionLoading(null)
   }
 
   const searchConversations = async () => {
