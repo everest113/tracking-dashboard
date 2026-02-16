@@ -1677,6 +1677,8 @@ const OrderSchema = z.object({
   customerEmail: z.string().nullable(),
   omgOrderUrl: z.string(),
   computedStatus: OrderStatusEnum,
+  threadStatus: z.enum(['linked', 'pending', 'not_found', 'none']),
+  frontConversationId: z.string().nullable(),
   shipments: z.array(z.object({
     id: z.number(),
     poNumber: z.string().nullable(),
@@ -1686,7 +1688,6 @@ const OrderSchema = z.object({
     shippedDate: z.string().nullable(),
     deliveredDate: z.string().nullable(),
     lastChecked: z.string().nullable(),
-    threadStatus: z.enum(['linked', 'pending', 'not_found', 'none']),
   })),
   stats: z.object({
     total: z.number(),
@@ -1799,23 +1800,27 @@ const ordersRouter = {
       // Get full order records to access thread status
       const ordersWithThreads = await context.prisma.orders.findMany({
         where: { order_number: { in: orderNumbers } },
-        select: { order_number: true, thread_match_status: true },
+        select: { order_number: true, thread_match_status: true, front_conversation_id: true },
       })
-      const orderThreadMap = new Map(ordersWithThreads.map(o => [o.order_number, o.thread_match_status]))
+      const orderThreadMap = new Map(ordersWithThreads.map(o => [o.order_number, {
+        status: o.thread_match_status,
+        conversationId: o.front_conversation_id,
+      }]))
       
-      const getThreadStatus = (orderNumber: string): 'linked' | 'pending' | 'not_found' | 'none' => {
-        const status = orderThreadMap.get(orderNumber)
-        if (!status) return 'none'
-        if (status === 'auto_matched' || status === 'manually_linked') return 'linked'
-        if (status === 'pending_review') return 'pending'
-        return 'not_found'
+      const getThreadInfo = (orderNumber: string): { status: 'linked' | 'pending' | 'not_found' | 'none', conversationId: string | null } => {
+        const info = orderThreadMap.get(orderNumber)
+        if (!info?.status) return { status: 'none', conversationId: null }
+        let status: 'linked' | 'pending' | 'not_found' | 'none' = 'not_found'
+        if (info.status === 'auto_matched' || info.status === 'manually_linked') status = 'linked'
+        else if (info.status === 'pending_review') status = 'pending'
+        return { status, conversationId: info.conversationId }
       }
       
       // Build response
       const orders: z.infer<typeof OrderSchema>[] = domainOrders.map(order => {
         const poNumbers = orderPoMap.get(order.orderNumber) || []
         const orderShipments = poNumbers.flatMap(po => shipmentsByPo.get(po) || [])
-        const orderThreadStatus = getThreadStatus(order.orderNumber)
+        const threadInfo = getThreadInfo(order.orderNumber)
         
         return {
           orderNumber: order.orderNumber,
@@ -1824,6 +1829,8 @@ const ordersRouter = {
           customerEmail: order.customerEmail,
           omgOrderUrl: `https://stitchi.omgorders.app/orders/${order.omgOrderId}/order`,
           computedStatus: order.computedStatus as z.infer<typeof OrderStatusEnum>,
+          threadStatus: threadInfo.status,
+          frontConversationId: threadInfo.conversationId,
           shipments: orderShipments.map(s => ({
             id: s.id,
             poNumber: s.po_number,
@@ -1833,7 +1840,6 @@ const ordersRouter = {
             shippedDate: s.shipped_date?.toISOString() ?? null,
             deliveredDate: s.delivered_date?.toISOString() ?? null,
             lastChecked: s.last_checked?.toISOString() ?? null,
-            threadStatus: orderThreadStatus, // All shipments in order share the same thread status
           })),
           stats: {
             total: order.shipmentCount,

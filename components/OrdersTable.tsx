@@ -52,7 +52,6 @@ interface Shipment {
   shippedDate: string | null
   deliveredDate: string | null
   lastChecked: string | null
-  threadStatus: 'linked' | 'pending' | 'not_found' | 'none'
 }
 
 interface Order {
@@ -62,6 +61,8 @@ interface Order {
   customerEmail: string | null
   omgOrderUrl: string
   computedStatus: ApiOrderStatus
+  threadStatus: 'linked' | 'pending' | 'not_found' | 'none'
+  frontConversationId: string | null
   shipments: Shipment[]
   stats: {
     total: number
@@ -175,19 +176,6 @@ export default function OrdersTable() {
         return <Badge variant="secondary">Pending</Badge>
       default:
         return <Badge variant="outline">{computedStatus}</Badge>
-    }
-  }
-
-  const getThreadStatusIcon = (status: string) => {
-    switch (status) {
-      case 'linked':
-        return <span title="Thread linked"><MessageSquare className="h-4 w-4 text-green-600" /></span>
-      case 'pending':
-        return <span title="Thread pending review"><MessageSquare className="h-4 w-4 text-yellow-600" /></span>
-      case 'not_found':
-        return <span title="No thread found"><MessageSquare className="h-4 w-4 text-gray-400" /></span>
-      default:
-        return null
     }
   }
 
@@ -363,6 +351,28 @@ export default function OrdersTable() {
                             <span>{order.stats.pending}</span>
                           </div>
                         )}
+                        
+                        {/* Thread indicator */}
+                        {order.threadStatus === 'linked' && order.frontConversationId ? (
+                          <a
+                            href={`https://app.frontapp.com/open/${order.frontConversationId}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-1 text-green-600 hover:text-green-700"
+                            title="Customer thread linked - click to open in Front"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <MessageSquare className="h-4 w-4" />
+                          </a>
+                        ) : order.threadStatus === 'pending' ? (
+                          <span className="flex items-center gap-1 text-yellow-600" title="Thread pending review">
+                            <MessageSquare className="h-4 w-4" />
+                          </span>
+                        ) : order.threadStatus === 'not_found' ? (
+                          <span className="flex items-center gap-1 text-muted-foreground" title="No thread found">
+                            <MessageSquare className="h-4 w-4" />
+                          </span>
+                        ) : null}
                       </div>
                     </button>
                   </CollapsibleTrigger>
@@ -377,7 +387,6 @@ export default function OrdersTable() {
                             <TableHead>Tracking</TableHead>
                             <TableHead>Carrier</TableHead>
                             <TableHead>Status</TableHead>
-                            <TableHead>Thread</TableHead>
                             <TableHead>Last Update</TableHead>
                           </TableRow>
                         </TableHeader>
@@ -403,9 +412,6 @@ export default function OrdersTable() {
                               </TableCell>
                               <TableCell>
                                 {getStatusBadge(shipment.status)}
-                              </TableCell>
-                              <TableCell>
-                                {getThreadStatusIcon(shipment.threadStatus)}
                               </TableCell>
                               <TableCell className="text-sm text-muted-foreground">
                                 {shipment.lastChecked ? (
