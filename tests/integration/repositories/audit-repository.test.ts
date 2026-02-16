@@ -117,7 +117,7 @@ describe('PrismaAuditRepository', () => {
     // TODO: Fix flaky test - global beforeEach cleanup interferes with test data
     // The test logic is correct but vitest's parallel execution causes race conditions
     // Functionality verified via manual testing and preview deploy
-    it.skip('should return entries in reverse chronological order', async () => {
+    it('should return entries in reverse chronological order', async () => {
       const entityId = uniqueId()
       await createTestEntries(entityId)
       
@@ -132,7 +132,7 @@ describe('PrismaAuditRepository', () => {
     })
 
     // TODO: Fix flaky test - same race condition as above
-    it.skip('should filter by action', async () => {
+    it('should filter by action', async () => {
       const entityId = uniqueId()
       await createTestEntries(entityId)
       
@@ -147,7 +147,7 @@ describe('PrismaAuditRepository', () => {
     })
 
     // TODO: Fix flaky test - same race condition as above
-    it.skip('should respect limit and offset', async () => {
+    it('should respect limit and offset', async () => {
       const entityId = uniqueId()
       await createTestEntries(entityId)
       
@@ -191,7 +191,7 @@ describe('PrismaAuditRepository', () => {
     }
 
     // TODO: Fix flaky test - helper function creates multiple entries that get cleaned up
-    it.skip('should return true if action exists', async () => {
+    it('should return true if action exists', async () => {
       const entityId = uniqueId()
       await createHasActionEntries(entityId)
       
@@ -205,7 +205,7 @@ describe('PrismaAuditRepository', () => {
     })
 
     // TODO: Fix flaky test - helper function creates multiple entries that get cleaned up
-    it.skip('should return false if action does not exist', async () => {
+    it('should return false if action does not exist', async () => {
       const entityId = uniqueId()
       await createHasActionEntries(entityId)
       
@@ -219,7 +219,7 @@ describe('PrismaAuditRepository', () => {
     })
 
     // TODO: Fix flaky test - helper function creates multiple entries that get cleaned up
-    it.skip('should filter by status', async () => {
+    it('should filter by status', async () => {
       const entityId = uniqueId()
       await createHasActionEntries(entityId)
       
@@ -270,7 +270,7 @@ describe('PrismaAuditRepository', () => {
     }
 
     // TODO: Fix flaky test - sequential creates with delays cause race conditions
-    it.skip('should return the most recent entry', async () => {
+    it('should return the most recent entry', async () => {
       const entityId = uniqueId()
       await createGetLatestEntries(entityId)
       
@@ -281,7 +281,7 @@ describe('PrismaAuditRepository', () => {
     })
 
     // TODO: Fix flaky test - sequential creates with delays cause race conditions
-    it.skip('should return the most recent entry for specific action', async () => {
+    it('should return the most recent entry for specific action', async () => {
       const entityId = uniqueId()
       await createGetLatestEntries(entityId)
       
