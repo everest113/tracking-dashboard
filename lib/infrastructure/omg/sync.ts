@@ -88,6 +88,9 @@ export async function syncPurchaseOrder(
       },
     })
 
+    // Extract primary email (OMG stores as array, we take the first)
+    const customerEmail = order.customer?.email?.[0] ?? null
+
     // Upsert the OMG purchase order record using normalized PO number
     // The router will also normalize shipment PO numbers for the join
     const omgPo = await prisma.omg_purchase_orders.upsert({
@@ -100,6 +103,7 @@ export async function syncPurchaseOrder(
         omg_po_id: po._id, // MongoDB ObjectID for URLs
         order_name: order.name,
         customer_name: order.customer?.name ?? null,
+        customer_email: customerEmail,
         recipients: extractRecipients(po),
         synced_at: new Date(),
         raw_data: JSON.parse(JSON.stringify({ po, order })),
@@ -111,6 +115,7 @@ export async function syncPurchaseOrder(
         order_number: order.number,
         order_name: order.name,
         customer_name: order.customer?.name ?? null,
+        customer_email: customerEmail,
         recipients: extractRecipients(po),
         synced_at: new Date(),
         raw_data: JSON.parse(JSON.stringify({ po, order })),

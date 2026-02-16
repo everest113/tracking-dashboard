@@ -61,6 +61,7 @@ model omg_purchase_orders {
   // Denormalized order data
   order_name     String?   @db.VarChar(255) // e.g., "Sample Order"
   customer_name  String?   @db.VarChar(255)
+  customer_email String?   @db.VarChar(255) // Primary email for Front thread matching
 
   // Recipients as JSONB array
   recipients     Json?     @default("[]") // Array of { name, address, city, state, zip, country }
@@ -74,6 +75,7 @@ model omg_purchase_orders {
   @@unique([omg_po_id]) // Each OMG PO should only appear once
   @@index([po_number], map: "idx_omg_po_number")
   @@index([order_number], map: "idx_omg_order_number")
+  @@index([customer_email], map: "idx_omg_customer_email")
 }
 
 model sync_history {
