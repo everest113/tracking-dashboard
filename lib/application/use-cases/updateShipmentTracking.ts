@@ -7,6 +7,7 @@ import type { Ship24Client } from '@/lib/infrastructure/sdks/ship24/client'
 import { Ship24Mapper } from '@/lib/infrastructure/mappers/Ship24Mapper'
 import { getErrorMessage } from '@/lib/utils/fetch-helpers'
 import { Result, Ok, Err, DomainError } from '@/lib/domain/core/Result'
+import { domainEvents } from '@/lib/domain/events'
 
 /**
  * Update Shipment Tracking Use Case - Functional Style
@@ -67,6 +68,15 @@ export const createUpdateShipmentTrackingUseCase = (
 
     const newStatus = ShipmentStatus.toString(savedShipment.status)
     const statusChanged = oldStatus !== newStatus
+
+    // Emit domain event if status changed
+    if (statusChanged && savedShipment.id) {
+      domainEvents.emit('ShipmentStatusChanged', {
+        shipmentId: savedShipment.id,
+        oldStatus,
+        newStatus,
+      })
+    }
 
     return Ok({
       success: true,

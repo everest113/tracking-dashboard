@@ -7,6 +7,7 @@ import type { ShipmentRepository } from '@/lib/infrastructure/repositories/Prism
 import { Ship24Mapper } from '@/lib/infrastructure/mappers/Ship24Mapper'
 import type { Ship24Tracking } from '@/lib/infrastructure/sdks/ship24/schemas'
 import { Result, Ok, Err, NotFoundError } from '@/lib/domain/core/Result'
+import { domainEvents } from '@/lib/domain/events'
 
 /**
  * Process Webhook Use Case - Functional Style
@@ -87,6 +88,15 @@ export const createProcessWebhookUseCase = (
 
     const newStatus = SS.toString(savedShipment.status)
     const statusChanged = oldStatus !== newStatus
+
+    // Emit domain event if status changed
+    if (statusChanged && savedShipment.id) {
+      domainEvents.emit('ShipmentStatusChanged', {
+        shipmentId: savedShipment.id,
+        oldStatus,
+        newStatus,
+      })
+    }
 
     return Ok({
       success: true,
