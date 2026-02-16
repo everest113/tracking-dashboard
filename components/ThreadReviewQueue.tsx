@@ -204,6 +204,13 @@ export default function ThreadReviewQueue() {
 
   const searchConversations = async () => {
     if (!searchEmail) return
+    
+    // If input looks like a conversation ID, link directly
+    if (searchEmail.startsWith('cnv_')) {
+      handleLinkDifferent(searchEmail)
+      return
+    }
+    
     setSearching(true)
     try {
       const result = await api.customerThread.searchConversations({ email: searchEmail })
@@ -488,26 +495,39 @@ export default function ThreadReviewQueue() {
       <Dialog open={linkDialogOpen} onOpenChange={setLinkDialogOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Link to Different Conversation</DialogTitle>
+            <DialogTitle>Link to Conversation</DialogTitle>
             <DialogDescription>
-              Search for a conversation to link to shipment{' '}
+              Link shipment{' '}
               <strong>{linkingItem?.shipment.poNumber ?? linkingItem?.shipment.trackingNumber}</strong>
+              {' '}to a Front conversation
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4">
             <div className="flex gap-2">
               <Input
-                placeholder="Search by email..."
+                placeholder="Email address or conversation ID (cnv_...)"
                 value={searchEmail}
                 onChange={(e) => setSearchEmail(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && searchConversations()}
               />
               <Button onClick={searchConversations} disabled={searching}>
-                <Search className="h-4 w-4 mr-1" />
-                Search
+                {searchEmail.startsWith('cnv_') ? (
+                  <>
+                    <Link2 className="h-4 w-4 mr-1" />
+                    Link
+                  </>
+                ) : (
+                  <>
+                    <Search className="h-4 w-4 mr-1" />
+                    Search
+                  </>
+                )}
               </Button>
             </div>
+            <p className="text-xs text-muted-foreground">
+              Enter an email to search, or paste a conversation ID (cnv_xxx) to link directly.
+            </p>
 
             {searching && (
               <div className="space-y-2">
