@@ -150,6 +150,55 @@ export default function ThreadReviewQueue() {
     setLinkDialogOpen(true)
   }
 
+  /**
+   * Handle search/link button click:
+   * 1. For not_discovered: trigger auto-discovery first
+   * 2. If discovery finds something (linked/pending), refresh list
+   * 3. If discovery fails (not_found), open manual link dialog
+   */
+  const handleSearchOrLink = async (item: PendingReviewItem) => {
+    // If already has a candidate (pending_review), go straight to link dialog
+    if (item.threadLink.matchStatus === 'pending_review') {
+      openLinkDialog(item)
+      return
+    }
+
+    // For not_discovered or not_found, try auto-discovery first
+    setActionLoading(item.shipment.id)
+    try {
+      const result = await api.customerThread.triggerDiscovery({ 
+        shipmentId: item.shipment.id 
+      })
+
+      if (result.status === 'linked') {
+        // Auto-matched! Remove from list and show success
+        setItems((prev) => prev.filter((i) => i.shipment.id !== item.shipment.id))
+        // Could add a toast here
+      } else if (result.status === 'pending_review') {
+        // Found candidates - refresh to show updated item with candidates
+        await fetchPendingReviews()
+      } else if (result.status === 'already_linked') {
+        // Already linked - just remove from list
+        setItems((prev) => prev.filter((i) => i.shipment.id !== item.shipment.id))
+      } else {
+        // not_found - open manual link dialog
+        // Update the item's status first so UI reflects the change
+        setItems((prev) => prev.map((i) => 
+          i.shipment.id === item.shipment.id 
+            ? { ...i, threadLink: { ...i.threadLink, matchStatus: 'not_found' as const } }
+            : i
+        ))
+        openLinkDialog(item)
+      }
+    } catch (err) {
+      console.error('Failed to discover thread:', err)
+      // On error, fall back to manual link dialog
+      openLinkDialog(item)
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
   const searchConversations = async () => {
     if (!searchEmail) return
     setSearching(true)
@@ -360,18 +409,20 @@ export default function ThreadReviewQueue() {
                           variant="ghost"
                           size="sm"
                           className="h-8 w-8 p-0 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
-                          onClick={() => openLinkDialog(item)}
+                          onClick={() => handleSearchOrLink(item)}
                           disabled={isLoading}
                           title={
                             item.threadLink.matchStatus === 'not_discovered' 
-                              ? 'Search & Link Thread' 
+                              ? 'Auto-search & Link Thread' 
                               : item.threadLink.matchStatus === 'not_found' 
-                                ? 'Find & Link Thread' 
-                                : 'Link Different'
+                                ? 'Search Again or Link Manually' 
+                                : 'Link Different Thread'
                           }
                         >
                           {item.threadLink.matchStatus === 'not_discovered' ? (
                             <Search className="h-4 w-4" />
+                          ) : item.threadLink.matchStatus === 'not_found' ? (
+                            <RefreshCw className="h-4 w-4" />
                           ) : (
                             <Link2 className="h-4 w-4" />
                           )}
