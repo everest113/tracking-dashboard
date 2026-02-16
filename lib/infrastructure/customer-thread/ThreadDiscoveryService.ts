@@ -3,12 +3,12 @@
  *
  * Discovers and links Front customer conversations to shipments.
  * Uses email lookup and confidence scoring to match threads.
+ * Can also search by order name/number when no customer email is available.
  */
 
 import type { CustomerThreadRepository } from '@/lib/domain/customer-thread'
 import {
   ThreadMatchStatus,
-  ConfidenceThresholds,
   calculateConfidenceScore,
   getMatchStatus,
   type ThreadDiscoveryResult,
@@ -23,19 +23,24 @@ export interface ThreadDiscoveryService {
    * Discover and link a customer thread for a shipment.
    * Idempotent - returns existing link if already matched.
    * Note: orderNumber is customer-facing, not the internal PO number.
+   * Can search by email, or by orderName/orderNumber if no email available.
    */
   discoverThread(params: {
     shipmentId: number
     customerEmail: string | null
     orderNumber: string
+    orderName?: string | null
   }): Promise<ThreadDiscoveryResult>
 
   /**
-   * Search Front for conversation candidates.
+   * Search Front for conversation candidates by email.
    */
-  searchConversations(
-    email: string
-  ): Promise<ConversationCandidate[]>
+  searchConversationsByEmail(email: string): Promise<ConversationCandidate[]>
+
+  /**
+   * Search Front for conversation candidates by query (order name/number).
+   */
+  searchConversationsByQuery(query: string): Promise<ConversationCandidate[]>
 
   /**
    * Score candidates and return ranked results.
@@ -50,7 +55,13 @@ export interface ThreadDiscoveryService {
 interface Dependencies {
   repository: CustomerThreadRepository
   frontClient: {
-    searchConversations(query: string): Promise<Array<{
+    searchConversationsByEmail(email: string): Promise<Array<{
+      id: string
+      subject: string | null
+      lastMessageAt: string | null
+      recipients: Array<{ handle: string }>
+    }>>
+    searchConversationsByQuery(query: string): Promise<Array<{
       id: string
       subject: string | null
       lastMessageAt: string | null
@@ -65,7 +76,7 @@ export function createThreadDiscoveryService(
   const { repository, frontClient } = deps
 
   return {
-    async discoverThread({ shipmentId, customerEmail, orderNumber }) {
+    async discoverThread({ shipmentId, customerEmail, orderNumber, orderName }) {
       const audit = getAuditService()
 
       // Check if already linked
@@ -80,13 +91,39 @@ export function createThreadDiscoveryService(
         }
       }
 
-      // If no customer email, we can't search
-      if (!customerEmail) {
+      // Determine search strategy
+      let candidates: ConversationCandidate[] = []
+      let searchMethod: 'email' | 'query' = 'email'
+      let searchTerm: string = ''
+
+      if (customerEmail) {
+        // Primary: search by customer email
+        searchMethod = 'email'
+        searchTerm = customerEmail
+        candidates = await this.searchConversationsByEmail(customerEmail)
+      }
+      
+      // If no email OR email search returned nothing, try searching by order name/number
+      if (candidates.length === 0 && (orderName || orderNumber)) {
+        searchMethod = 'query'
+        // Search by order name first (more specific), fall back to order number
+        searchTerm = orderName || `Order ${orderNumber}`
+        candidates = await this.searchConversationsByQuery(searchTerm)
+        
+        // If order name search failed, try just the order number
+        if (candidates.length === 0 && orderName && orderNumber) {
+          searchTerm = orderNumber
+          candidates = await this.searchConversationsByQuery(orderNumber)
+        }
+      }
+
+      // If we still have no way to search, return not_found
+      if (!customerEmail && !orderName && !orderNumber) {
         await audit.recordSkipped({
           entityType: AuditEntityTypes.Shipment,
           entityId: String(shipmentId),
           action: AuditActions.ThreadSearched,
-          reason: 'No customer email available',
+          reason: 'No customer email or order info available',
         })
 
         return {
@@ -97,16 +134,17 @@ export function createThreadDiscoveryService(
         }
       }
 
-      // Search Front for conversations
-      const candidates = await this.searchConversations(customerEmail)
-
       // Record search in audit
       await audit.recordSuccess({
         entityType: AuditEntityTypes.Shipment,
         entityId: String(shipmentId),
         action: AuditActions.ThreadSearched,
         metadata: {
+          searchMethod,
+          searchTerm,
           email: customerEmail,
+          orderNumber,
+          orderName,
           candidatesFound: candidates.length,
         },
       })
@@ -130,7 +168,7 @@ export function createThreadDiscoveryService(
           entityType: AuditEntityTypes.Shipment,
           entityId: String(shipmentId),
           action: AuditActions.ThreadNoMatch,
-          metadata: { email: customerEmail },
+          metadata: { searchMethod, searchTerm },
         })
 
         return {
@@ -173,6 +211,7 @@ export function createThreadDiscoveryService(
             conversationId: topCandidate.conversationId,
             score: topCandidate.score,
             breakdown: topCandidate.breakdown,
+            searchMethod,
           },
         })
       }
@@ -190,9 +229,9 @@ export function createThreadDiscoveryService(
       }
     },
 
-    async searchConversations(email: string): Promise<ConversationCandidate[]> {
+    async searchConversationsByEmail(email: string): Promise<ConversationCandidate[]> {
       try {
-        const results = await frontClient.searchConversations(email)
+        const results = await frontClient.searchConversationsByEmail(email)
 
         return results.map((conv) => ({
           conversationId: conv.id,
@@ -201,7 +240,23 @@ export function createThreadDiscoveryService(
           participants: conv.recipients.map((r) => r.handle),
         }))
       } catch (error) {
-        console.error('[ThreadDiscovery] Failed to search Front:', error)
+        console.error('[ThreadDiscovery] Failed to search Front by email:', error)
+        return []
+      }
+    },
+
+    async searchConversationsByQuery(query: string): Promise<ConversationCandidate[]> {
+      try {
+        const results = await frontClient.searchConversationsByQuery(query)
+
+        return results.map((conv) => ({
+          conversationId: conv.id,
+          subject: conv.subject,
+          lastMessageAt: conv.lastMessageAt ? new Date(conv.lastMessageAt) : null,
+          participants: conv.recipients.map((r) => r.handle),
+        }))
+      } catch (error) {
+        console.error('[ThreadDiscovery] Failed to search Front by query:', error)
         return []
       }
     },

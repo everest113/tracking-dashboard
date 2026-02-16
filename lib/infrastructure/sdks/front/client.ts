@@ -156,6 +156,38 @@ export class FrontClient extends BaseSdkClient {
 
     return response._results
   }
+
+  /**
+   * Search conversations by text query (order number, subject text, etc.)
+   * Uses Front's general search which searches across subject and body.
+   */
+  async searchConversationsByQuery(
+    query: string,
+    options: {
+      inboxId?: string
+      limit?: number
+    } = {}
+  ): Promise<FrontConversation[]> {
+    const limit = options.limit || 25
+    
+    // Build search query - optionally filter by inbox
+    const parts: string[] = [query]
+    
+    if (options.inboxId) {
+      parts.push(`inbox:${options.inboxId}`)
+    }
+    
+    const searchQuery = parts.join(' ')
+    
+    const endpoint = `/conversations/search/${encodeURIComponent(searchQuery)}?limit=${limit}`
+    
+    const response = await this.get<FrontListResponse<FrontConversation>>(
+      endpoint,
+      FrontListResponseSchema(FrontConversationSchema)
+    )
+
+    return response._results
+  }
 }
 
 /**
@@ -180,4 +212,16 @@ export async function searchConversationsByEmail(
 ): Promise<FrontConversation[]> {
   const client = getFrontClient()
   return client.searchConversationsByEmail(email, options)
+}
+
+/**
+ * Search conversations by text query (order number, subject, etc.)
+ * Uses Front's general search which searches subject and body.
+ */
+export async function searchConversationsByQuery(
+  query: string,
+  options?: { inboxId?: string; limit?: number }
+): Promise<FrontConversation[]> {
+  const client = getFrontClient()
+  return client.searchConversationsByQuery(query, options)
 }

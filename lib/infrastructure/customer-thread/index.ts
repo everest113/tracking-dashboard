@@ -33,25 +33,32 @@ export function getCustomerThreadRepository(): CustomerThreadRepository {
 export async function getThreadDiscoveryService(): Promise<ThreadDiscoveryService> {
   if (!threadDiscoveryService) {
     // Lazy import Front client to avoid circular deps
-    const { searchConversationsByEmail } = await import('@/lib/infrastructure/sdks/front/client')
+    const { searchConversationsByEmail, searchConversationsByQuery } = await import('@/lib/infrastructure/sdks/front/client')
 
     const repository = getCustomerThreadRepository()
+
+    // Helper to map Front conversation to our format
+    const mapConversation = (conv: Awaited<ReturnType<typeof searchConversationsByEmail>>[0], fallbackEmail?: string) => ({
+      id: conv.id,
+      subject: conv.subject ?? null,
+      // created_at is Unix timestamp (seconds) - convert to Date string
+      lastMessageAt: conv.created_at ? new Date(conv.created_at * 1000).toISOString() : null,
+      // Single recipient from conversation
+      recipients: conv.recipient 
+        ? [{ handle: conv.recipient.handle }]
+        : fallbackEmail ? [{ handle: fallbackEmail }] : [],
+    })
 
     threadDiscoveryService = createThreadDiscoveryService({
       repository,
       frontClient: {
-        async searchConversations(email: string) {
+        async searchConversationsByEmail(email: string) {
           const results = await searchConversationsByEmail(email)
-          return results.map((conv) => ({
-            id: conv.id,
-            subject: conv.subject ?? null,
-            // created_at is Unix timestamp (seconds) - convert to Date string
-            lastMessageAt: conv.created_at ? new Date(conv.created_at * 1000).toISOString() : null,
-            // Single recipient from conversation + the email we searched for
-            recipients: conv.recipient 
-              ? [{ handle: conv.recipient.handle }]
-              : [{ handle: email }], // Fallback to search email
-          }))
+          return results.map((conv) => mapConversation(conv, email))
+        },
+        async searchConversationsByQuery(query: string) {
+          const results = await searchConversationsByQuery(query)
+          return results.map((conv) => mapConversation(conv))
         },
       },
     })

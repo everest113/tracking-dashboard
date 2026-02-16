@@ -1932,6 +1932,7 @@ const customerThreadRouter = {
       debug: z.object({
         customerEmail: z.string().nullable(),
         orderNumber: z.string().nullable(),
+        orderName: z.string().nullable(),
         poNumber: z.string().nullable(),
       }).optional(),
     }))
@@ -1949,9 +1950,10 @@ const customerThreadRouter = {
         throw new Error('Shipment not found')
       }
       
-      // Get customer email and order number from OMG
+      // Get customer email, order number, and order name from OMG
       let customerEmail: string | null = null
       let orderNumber: string = ''
+      let orderName: string | null = null
       let reason: string | null = null
       
       if (!shipment.po_number) {
@@ -1960,7 +1962,7 @@ const customerThreadRouter = {
         const normalizedPo = normalizePoNumber(shipment.po_number)
         const omgPo = await context.prisma.omg_purchase_orders.findUnique({
           where: { po_number: normalizedPo },
-          select: { customer_email: true, order_number: true },
+          select: { customer_email: true, order_number: true, order_name: true },
         })
         
         if (!omgPo) {
@@ -1968,15 +1970,12 @@ const customerThreadRouter = {
         } else {
           customerEmail = omgPo.customer_email ?? null
           orderNumber = omgPo.order_number ?? ''
-          
-          if (!customerEmail) {
-            reason = 'OMG record has no customer email'
-          }
+          orderName = omgPo.order_name ?? null
         }
       }
       
-      // If we can't search, return early with reason
-      if (!customerEmail) {
+      // If we have no OMG record and no PO, we can't search
+      if (!shipment.po_number) {
         return {
           status: 'not_found' as const,
           threadLink: null,
@@ -1986,6 +1985,7 @@ const customerThreadRouter = {
           debug: {
             customerEmail,
             orderNumber: orderNumber || null,
+            orderName,
             poNumber: shipment.po_number,
           },
         }
@@ -1996,6 +1996,7 @@ const customerThreadRouter = {
         shipmentId: input.shipmentId,
         customerEmail,
         orderNumber,
+        orderName,
       })
       
       // Determine reason if not found
@@ -2021,6 +2022,7 @@ const customerThreadRouter = {
         debug: {
           customerEmail,
           orderNumber: orderNumber || null,
+          orderName,
           poNumber: shipment.po_number,
         },
       }
