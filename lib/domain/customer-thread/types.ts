@@ -33,7 +33,7 @@ export const ConfidenceThresholds = {
  */
 export const ScoringWeights = {
   EMAIL_MATCH: 0.4,
-  ORDER_IN_SUBJECT: 0.4,
+  ORDER_IN_SUBJECT: 0.4, // Order number or name in subject
   ORDER_IN_BODY: 0.2,
   RECENCY_BONUS_MAX: 0.1, // Bonus for recent conversations
   RECENCY_DAYS_THRESHOLD: 30, // Days within which recency bonus applies
@@ -124,12 +124,13 @@ export interface ReviewAction {
 
 /**
  * Calculate confidence score for a conversation candidate.
- * Note: We match against the ORDER number (customer-facing), not PO number (supplier-facing).
+ * Note: We match against the ORDER number and/or name (customer-facing), not PO number (supplier-facing).
  */
 export function calculateConfidenceScore(
   candidate: ConversationCandidate,
   customerEmail: string | null,
-  orderNumber: string
+  orderNumber: string,
+  orderName?: string | null
 ): ScoringResult {
   let score = 0
   const breakdown = {
@@ -150,21 +151,33 @@ export function calculateConfidenceScore(
     }
   }
 
-  // Order number in subject (40%)
+  // Order number or name in subject (40%)
   if (candidate.subject) {
-    // Check for order number in various formats
     const subjectLower = candidate.subject.toLowerCase()
-    const orderLower = orderNumber.toLowerCase()
-    // Match exact order number or with common prefixes
-    if (
-      subjectLower.includes(orderLower) ||
-      subjectLower.includes(`order ${orderLower}`) ||
-      subjectLower.includes(`order# ${orderLower}`) ||
-      subjectLower.includes(`order#${orderLower}`) ||
-      subjectLower.includes(`#${orderLower}`)
-    ) {
-      breakdown.orderInSubject = true
-      score += ScoringWeights.ORDER_IN_SUBJECT
+    
+    // Check for order number in various formats
+    if (orderNumber) {
+      const orderLower = orderNumber.toLowerCase()
+      if (
+        subjectLower.includes(orderLower) ||
+        subjectLower.includes(`order ${orderLower}`) ||
+        subjectLower.includes(`order# ${orderLower}`) ||
+        subjectLower.includes(`order#${orderLower}`) ||
+        subjectLower.includes(`#${orderLower}`)
+      ) {
+        breakdown.orderInSubject = true
+        score += ScoringWeights.ORDER_IN_SUBJECT
+      }
+    }
+    
+    // Also check for order name in subject (if not already matched by number)
+    if (!breakdown.orderInSubject && orderName) {
+      const nameLower = orderName.toLowerCase()
+      // Check if the order name appears in subject (fuzzy match - at least 3 consecutive words)
+      if (nameLower.length >= 3 && subjectLower.includes(nameLower)) {
+        breakdown.orderInSubject = true
+        score += ScoringWeights.ORDER_IN_SUBJECT
+      }
     }
   }
 

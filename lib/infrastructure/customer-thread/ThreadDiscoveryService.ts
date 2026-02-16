@@ -48,7 +48,8 @@ export interface ThreadDiscoveryService {
   scoreCandidates(
     candidates: ConversationCandidate[],
     customerEmail: string | null,
-    orderNumber: string
+    orderNumber: string,
+    orderName?: string | null
   ): ScoringResult[]
 }
 
@@ -181,7 +182,7 @@ export function createThreadDiscoveryService(
       }
 
       // Score candidates
-      const scores = this.scoreCandidates(candidates, customerEmail, orderNumber)
+      const scores = this.scoreCandidates(candidates, customerEmail, orderNumber, orderName)
       const topCandidate = scores[0]
 
       // Determine match status
@@ -264,10 +265,11 @@ export function createThreadDiscoveryService(
     scoreCandidates(
       candidates: ConversationCandidate[],
       customerEmail: string | null,
-      orderNumber: string
+      orderNumber: string,
+      orderName?: string | null
     ): ScoringResult[] {
       const scores = candidates.map((candidate) =>
-        calculateConfidenceScore(candidate, customerEmail, orderNumber)
+        calculateConfidenceScore(candidate, customerEmail, orderNumber, orderName)
       )
 
       // Sort by score descending
