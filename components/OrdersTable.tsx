@@ -122,6 +122,9 @@ export default function OrdersTable() {
   const [threadPopoverOpen, setThreadPopoverOpen] = useState<string | null>(null)
   const [threadLoading, setThreadLoading] = useState<string | null>(null)
   const [manualConversationId, setManualConversationId] = useState('')
+  
+  // Refresh state
+  const [refreshingOrder, setRefreshingOrder] = useState<string | null>(null)
 
   // Debounce search input
   useEffect(() => {
@@ -279,6 +282,31 @@ export default function OrdersTable() {
     }
   }
 
+  // Refresh single order from OMG
+  const handleRefreshOrder = async (orderNumber: string) => {
+    setRefreshingOrder(orderNumber)
+    try {
+      const result = await api.orders.refreshOne({ orderNumber })
+      
+      if (result.success) {
+        toast.success('Order refreshed', {
+          description: `${result.shipmentCount} shipment(s), status: ${result.computedStatus}`,
+        })
+        fetchOrders() // Refresh the list
+      } else {
+        toast.error('Refresh failed', {
+          description: result.error || 'Unknown error',
+        })
+      }
+    } catch (err) {
+      toast.error('Refresh failed', {
+        description: err instanceof Error ? err.message : 'Unknown error',
+      })
+    } finally {
+      setRefreshingOrder(null)
+    }
+  }
+
   // Status tab configuration
   const statusTabs: Array<{ key: OrderStatus; label: string; icon?: React.ReactNode }> = [
     { key: 'all', label: 'All' },
@@ -398,12 +426,30 @@ export default function OrdersTable() {
                             #{order.orderNumber}
                           </span>
                           {getOrderStatusBadge(order)}
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6"
+                            disabled={refreshingOrder === order.orderNumber}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleRefreshOrder(order.orderNumber)
+                            }}
+                            title="Refresh order from OMG"
+                          >
+                            {refreshingOrder === order.orderNumber ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <RefreshCw className="h-3.5 w-3.5" />
+                            )}
+                          </Button>
                           <a
                             href={order.omgOrderUrl}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="text-muted-foreground hover:text-foreground"
                             onClick={(e) => e.stopPropagation()}
+                            title="Open in OMG"
                           >
                             <ExternalLink className="h-4 w-4" />
                           </a>

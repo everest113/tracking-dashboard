@@ -1937,6 +1937,103 @@ const ordersRouter = {
     }),
 
   /**
+   * Refresh a single order from OMG and recompute its stats.
+   */
+  refreshOne: publicProcedure
+    .input(z.object({
+      orderNumber: z.string(),
+    }))
+    .output(z.object({
+      success: z.boolean(),
+      orderNumber: z.string(),
+      synced: z.boolean(),
+      posCount: z.number(),
+      shipmentCount: z.number(),
+      computedStatus: z.string(),
+      error: z.string().optional(),
+    }))
+    .handler(async ({ context, input }) => {
+      const { orderNumber } = input
+      
+      console.log(`=== Refreshing order: ${orderNumber} ===`)
+      
+      try {
+        // Step 1: Re-sync order from OMG
+        const { getOmgOrderSyncService } = await import('@/lib/infrastructure/omg')
+        const omgService = getOmgOrderSyncService(context.prisma)
+        const syncResult = await omgService.syncOrder(orderNumber)
+        
+        if (!syncResult) {
+          // Order not found in OMG, check if it exists locally
+          const localOrder = await context.prisma.orders.findUnique({
+            where: { order_number: orderNumber },
+          })
+          
+          if (!localOrder) {
+            return {
+              success: false,
+              orderNumber,
+              synced: false,
+              posCount: 0,
+              shipmentCount: 0,
+              computedStatus: 'pending',
+              error: 'Order not found in OMG or local database',
+            }
+          }
+          
+          // Order exists locally but not in OMG (maybe filtered out)
+          // Just recompute stats
+        }
+        
+        // Step 2: Recompute order stats from shipments
+        const { getOrderSyncService } = await import('@/lib/infrastructure/order')
+        const orderService = getOrderSyncService(context.prisma)
+        await orderService.syncOrder(orderNumber)
+        
+        // Step 3: Fetch updated order
+        const updatedOrder = await context.prisma.orders.findUnique({
+          where: { order_number: orderNumber },
+        })
+        
+        if (!updatedOrder) {
+          return {
+            success: false,
+            orderNumber,
+            synced: syncResult !== null,
+            posCount: syncResult?.posCount ?? 0,
+            shipmentCount: 0,
+            computedStatus: 'pending',
+            error: 'Order not found after sync',
+          }
+        }
+        
+        console.log(`✅ Order ${orderNumber} refreshed: ${updatedOrder.shipment_count} shipments, status=${updatedOrder.computed_status}`)
+        
+        return {
+          success: true,
+          orderNumber,
+          synced: syncResult !== null,
+          posCount: updatedOrder.po_count,
+          shipmentCount: updatedOrder.shipment_count,
+          computedStatus: updatedOrder.computed_status,
+        }
+      } catch (error) {
+        const errorMsg = getErrorMessage(error)
+        console.error(`❌ Error refreshing order ${orderNumber}:`, errorMsg)
+        
+        return {
+          success: false,
+          orderNumber,
+          synced: false,
+          posCount: 0,
+          shipmentCount: 0,
+          computedStatus: 'pending',
+          error: errorMsg,
+        }
+      }
+    }),
+
+  /**
    * Discover tracking numbers for orders by searching Front.
    * Searches for POs that are missing shipment data.
    */
