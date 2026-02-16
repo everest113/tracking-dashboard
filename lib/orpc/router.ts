@@ -1455,7 +1455,7 @@ const omgRouter = {
         }).nullish(),
         error: z.string().optional(),
       }))
-      .handler(async ({ input }) => {
+      .handler(async ({ context, input }) => {
         const { getShipmentOmgData } = await import('@/lib/infrastructure/omg')
         
         try {
@@ -1499,7 +1499,7 @@ const omgRouter = {
         linked: z.boolean().optional(),
         error: z.string().optional(),
       }))
-      .handler(async ({ input }) => {
+      .handler(async ({ context, input }) => {
         const { syncShipmentOmgData } = await import('@/lib/infrastructure/omg')
         
         const result = await syncShipmentOmgData(input.shipmentId)
@@ -1527,7 +1527,7 @@ const omgRouter = {
           error: z.string(),
         })),
       }))
-      .handler(async ({ input }) => {
+      .handler(async ({ context, input }) => {
         const { batchSyncOmgData } = await import('@/lib/infrastructure/omg')
         
         const result = await batchSyncOmgData({ limit: input.limit })
@@ -1577,7 +1577,7 @@ const auditRouter = {
       total: z.number(),
       hasMore: z.boolean(),
     }))
-    .handler(async ({ input }) => {
+    .handler(async ({ context, input }) => {
       const { getAuditService } = await import('@/lib/infrastructure/audit')
       const auditService = getAuditService()
 
@@ -1618,7 +1618,7 @@ const auditRouter = {
     .output(z.object({
       exists: z.boolean(),
     }))
-    .handler(async ({ input }) => {
+    .handler(async ({ context, input }) => {
       const { getAuditService } = await import('@/lib/infrastructure/audit')
       const auditService = getAuditService()
 
@@ -1644,7 +1644,7 @@ const auditRouter = {
     .output(z.object({
       entry: AuditEntrySchema.nullable(),
     }))
-    .handler(async ({ input }) => {
+    .handler(async ({ context, input }) => {
       const { getAuditService } = await import('@/lib/infrastructure/audit')
       const auditService = getAuditService()
 
@@ -1662,6 +1662,376 @@ const auditRouter = {
     }),
 }
 
+// =============================================================================
+// CUSTOMER THREAD ROUTER
+// =============================================================================
+
+/**
+ * Customer thread link response schema
+ */
+const CustomerThreadLinkSchema = z.object({
+  id: z.number(),
+  shipmentId: z.number(),
+  frontConversationId: z.string(),
+  confidenceScore: z.number(),
+  matchStatus: z.enum(['auto_matched', 'pending_review', 'manually_linked', 'rejected', 'not_found']),
+  emailMatched: z.boolean(),
+  poInSubject: z.boolean(),
+  poInBody: z.boolean(),
+  daysSinceLastMessage: z.number().nullable(),
+  matchedEmail: z.string().nullable(),
+  conversationSubject: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  reviewedAt: z.string().nullable(),
+  reviewedBy: z.string().nullable(),
+})
+
+/**
+ * Pending review item with shipment context
+ */
+const PendingReviewItemSchema = z.object({
+  threadLink: CustomerThreadLinkSchema,
+  shipment: z.object({
+    id: z.number(),
+    poNumber: z.string().nullable(),
+    trackingNumber: z.string(),
+    carrier: z.string().nullable(),
+    status: z.string(),
+  }),
+  customerEmail: z.string().nullable(),
+  customerName: z.string().nullable(),
+})
+
+const customerThreadRouter = {
+  /**
+   * Get all thread links pending manual review
+   */
+  getPendingReviews: publicProcedure
+    .input(z.object({
+      limit: z.number().min(1).max(100).default(50),
+    }).optional())
+    .output(z.object({
+      items: z.array(PendingReviewItemSchema),
+      total: z.number(),
+    }))
+    .handler(async ({ context, input }) => {
+      const limit = input?.limit ?? 50
+      const { getCustomerThreadRepository } = await import('@/lib/infrastructure/customer-thread')
+      const repository = getCustomerThreadRepository()
+      
+      const pendingLinks = await repository.getPendingReview(limit)
+      
+      // Get shipment and OMG data for each link
+      const items = await Promise.all(pendingLinks.map(async (link) => {
+        const shipment = await context.prisma.shipments.findUnique({
+          where: { id: link.shipmentId },
+          select: {
+            id: true,
+            po_number: true,
+            tracking_number: true,
+            carrier: true,
+            status: true,
+          },
+        })
+        
+        // Get customer info from OMG if available
+        let customerEmail: string | null = null
+        let customerName: string | null = null
+        
+        if (shipment?.po_number) {
+          const { normalizePoNumber } = await import('@/lib/infrastructure/omg/sync')
+          const normalizedPo = normalizePoNumber(shipment.po_number)
+          const omgPo = await context.prisma.omg_purchase_orders.findUnique({
+            where: { po_number: normalizedPo },
+            select: { customer_email: true, customer_name: true },
+          })
+          customerEmail = omgPo?.customer_email ?? null
+          customerName = omgPo?.customer_name ?? null
+        }
+        
+        return {
+          threadLink: {
+            ...link,
+            createdAt: link.createdAt.toISOString(),
+            updatedAt: link.updatedAt.toISOString(),
+            reviewedAt: link.reviewedAt?.toISOString() ?? null,
+          },
+          shipment: shipment ? {
+            id: shipment.id,
+            poNumber: shipment.po_number,
+            trackingNumber: shipment.tracking_number,
+            carrier: shipment.carrier,
+            status: shipment.status,
+          } : {
+            id: link.shipmentId,
+            poNumber: null,
+            trackingNumber: 'Unknown',
+            carrier: null,
+            status: 'unknown',
+          },
+          customerEmail,
+          customerName,
+        }
+      }))
+      
+      return {
+        items,
+        total: pendingLinks.length,
+      }
+    }),
+
+  /**
+   * Approve a pending thread match
+   */
+  approve: publicProcedure
+    .input(z.object({
+      shipmentId: z.number(),
+      reviewedBy: z.string().default('user'),
+    }))
+    .output(z.object({
+      success: z.boolean(),
+      threadLink: CustomerThreadLinkSchema,
+    }))
+    .handler(async ({ context, input }) => {
+      const { getCustomerThreadRepository } = await import('@/lib/infrastructure/customer-thread')
+      const { ThreadMatchStatus } = await import('@/lib/domain/customer-thread')
+      const { getAuditService } = await import('@/lib/infrastructure/audit')
+      const { AuditEntityTypes, AuditActions } = await import('@/lib/domain/audit')
+      
+      const repository = getCustomerThreadRepository()
+      const audit = getAuditService()
+      
+      const updated = await repository.updateStatus(
+        input.shipmentId,
+        ThreadMatchStatus.ManuallyLinked,
+        input.reviewedBy
+      )
+      
+      await audit.recordSuccess({
+        entityType: AuditEntityTypes.Shipment,
+        entityId: String(input.shipmentId),
+        action: AuditActions.ThreadManuallyLinked,
+        actor: input.reviewedBy,
+        metadata: {
+          conversationId: updated.frontConversationId,
+          action: 'approved',
+        },
+      })
+      
+      return {
+        success: true,
+        threadLink: {
+          ...updated,
+          createdAt: updated.createdAt.toISOString(),
+          updatedAt: updated.updatedAt.toISOString(),
+          reviewedAt: updated.reviewedAt?.toISOString() ?? null,
+        },
+      }
+    }),
+
+  /**
+   * Reject a pending thread match
+   */
+  reject: publicProcedure
+    .input(z.object({
+      shipmentId: z.number(),
+      reviewedBy: z.string().default('user'),
+    }))
+    .output(z.object({
+      success: z.boolean(),
+    }))
+    .handler(async ({ context, input }) => {
+      const { getCustomerThreadRepository } = await import('@/lib/infrastructure/customer-thread')
+      const { ThreadMatchStatus } = await import('@/lib/domain/customer-thread')
+      const { getAuditService } = await import('@/lib/infrastructure/audit')
+      const { AuditEntityTypes, AuditActions } = await import('@/lib/domain/audit')
+      
+      const repository = getCustomerThreadRepository()
+      const audit = getAuditService()
+      
+      await repository.updateStatus(
+        input.shipmentId,
+        ThreadMatchStatus.Rejected,
+        input.reviewedBy
+      )
+      
+      await audit.recordSuccess({
+        entityType: AuditEntityTypes.Shipment,
+        entityId: String(input.shipmentId),
+        action: AuditActions.ThreadManuallyLinked,
+        actor: input.reviewedBy,
+        metadata: { action: 'rejected' },
+      })
+      
+      return { success: true }
+    }),
+
+  /**
+   * Link a shipment to a different conversation (manual override)
+   */
+  linkDifferent: publicProcedure
+    .input(z.object({
+      shipmentId: z.number(),
+      newConversationId: z.string(),
+      reviewedBy: z.string().default('user'),
+    }))
+    .output(z.object({
+      success: z.boolean(),
+      threadLink: CustomerThreadLinkSchema,
+    }))
+    .handler(async ({ context, input }) => {
+      const { getCustomerThreadRepository } = await import('@/lib/infrastructure/customer-thread')
+      const { getAuditService } = await import('@/lib/infrastructure/audit')
+      const { AuditEntityTypes, AuditActions } = await import('@/lib/domain/audit')
+      
+      const repository = getCustomerThreadRepository()
+      const audit = getAuditService()
+      
+      const updated = await repository.updateConversation(
+        input.shipmentId,
+        input.newConversationId,
+        input.reviewedBy
+      )
+      
+      await audit.recordSuccess({
+        entityType: AuditEntityTypes.Shipment,
+        entityId: String(input.shipmentId),
+        action: AuditActions.ThreadManuallyLinked,
+        actor: input.reviewedBy,
+        metadata: {
+          conversationId: input.newConversationId,
+          action: 'linked_different',
+        },
+      })
+      
+      return {
+        success: true,
+        threadLink: {
+          ...updated,
+          createdAt: updated.createdAt.toISOString(),
+          updatedAt: updated.updatedAt.toISOString(),
+          reviewedAt: updated.reviewedAt?.toISOString() ?? null,
+        },
+      }
+    }),
+
+  /**
+   * Trigger thread discovery for a shipment
+   */
+  triggerDiscovery: publicProcedure
+    .input(z.object({
+      shipmentId: z.number(),
+    }))
+    .output(z.object({
+      status: z.enum(['linked', 'pending_review', 'not_found', 'already_linked']),
+      threadLink: CustomerThreadLinkSchema.nullable(),
+      candidatesFound: z.number(),
+      topScore: z.number().nullable(),
+    }))
+    .handler(async ({ context, input }) => {
+      const { getThreadDiscoveryService } = await import('@/lib/infrastructure/customer-thread')
+      const { normalizePoNumber } = await import('@/lib/infrastructure/omg/sync')
+      
+      // Get shipment
+      const shipment = await context.prisma.shipments.findUnique({
+        where: { id: input.shipmentId },
+        select: { id: true, po_number: true },
+      })
+      
+      if (!shipment) {
+        throw new Error('Shipment not found')
+      }
+      
+      // Get customer email from OMG
+      let customerEmail: string | null = null
+      if (shipment.po_number) {
+        const normalizedPo = normalizePoNumber(shipment.po_number)
+        const omgPo = await context.prisma.omg_purchase_orders.findUnique({
+          where: { po_number: normalizedPo },
+          select: { customer_email: true },
+        })
+        customerEmail = omgPo?.customer_email ?? null
+      }
+      
+      const discoveryService = await getThreadDiscoveryService()
+      const result = await discoveryService.discoverThread({
+        shipmentId: input.shipmentId,
+        customerEmail,
+        poNumber: shipment.po_number ?? '',
+      })
+      
+      return {
+        status: result.status,
+        threadLink: result.threadLink ? {
+          ...result.threadLink,
+          createdAt: result.threadLink.createdAt.toISOString(),
+          updatedAt: result.threadLink.updatedAt.toISOString(),
+          reviewedAt: result.threadLink.reviewedAt?.toISOString() ?? null,
+        } : null,
+        candidatesFound: result.candidatesFound,
+        topScore: result.topScore,
+      }
+    }),
+
+  /**
+   * Get thread link for a specific shipment
+   */
+  getByShipment: publicProcedure
+    .input(z.object({
+      shipmentId: z.number(),
+    }))
+    .output(z.object({
+      threadLink: CustomerThreadLinkSchema.nullable(),
+    }))
+    .handler(async ({ context, input }) => {
+      const { getCustomerThreadRepository } = await import('@/lib/infrastructure/customer-thread')
+      const repository = getCustomerThreadRepository()
+      
+      const link = await repository.getByShipmentId(input.shipmentId)
+      
+      return {
+        threadLink: link ? {
+          ...link,
+          createdAt: link.createdAt.toISOString(),
+          updatedAt: link.updatedAt.toISOString(),
+          reviewedAt: link.reviewedAt?.toISOString() ?? null,
+        } : null,
+      }
+    }),
+
+  /**
+   * Search Front conversations for manual linking
+   */
+  searchConversations: publicProcedure
+    .input(z.object({
+      email: z.string().email(),
+      limit: z.number().min(1).max(50).default(25),
+    }))
+    .output(z.object({
+      conversations: z.array(z.object({
+        id: z.string(),
+        subject: z.string().nullable(),
+        createdAt: z.string(),
+        recipientEmail: z.string().nullable(),
+      })),
+    }))
+    .handler(async ({ context, input }) => {
+      const { searchConversationsByEmail } = await import('@/lib/infrastructure/sdks/front/client')
+      
+      const results = await searchConversationsByEmail(input.email, { limit: input.limit })
+      
+      return {
+        conversations: results.map((conv) => ({
+          id: conv.id,
+          subject: conv.subject ?? null,
+          createdAt: new Date(conv.created_at * 1000).toISOString(),
+          recipientEmail: conv.recipient?.handle ?? null,
+        })),
+      }
+    }),
+}
+
 // Plain nested object structure (recommended by oRPC docs)
 export const appRouter = {
   shipments: shipmentsRouter,
@@ -1672,5 +2042,6 @@ export const appRouter = {
   front: frontRouter,
   omg: omgRouter,
   audit: auditRouter,
+  customerThread: customerThreadRouter,
 }
 export type AppRouter = typeof appRouter
