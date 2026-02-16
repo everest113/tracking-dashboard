@@ -1674,7 +1674,7 @@ const CustomerThreadLinkSchema = z.object({
   shipmentId: z.number(),
   frontConversationId: z.string(),
   confidenceScore: z.number(),
-  matchStatus: z.enum(['auto_matched', 'pending_review', 'manually_linked', 'rejected', 'not_found']),
+  matchStatus: z.enum(['auto_matched', 'pending_review', 'manually_linked', 'rejected', 'not_found', 'not_discovered']),
   emailMatched: z.boolean(),
   orderInSubject: z.boolean(),
   orderInBody: z.boolean(),
@@ -1705,7 +1705,10 @@ const PendingReviewItemSchema = z.object({
 
 const customerThreadRouter = {
   /**
-   * Get all thread links pending manual review
+   * Get all shipments needing thread review:
+   * - Shipments with pending_review or not_found thread status
+   * - Shipments with no thread record at all (never been through discovery)
+   * - Excludes shipments with auto_matched, manually_linked, or rejected status
    */
   getPendingReviews: publicProcedure
     .input(z.object({
@@ -1717,15 +1720,112 @@ const customerThreadRouter = {
     }))
     .handler(async ({ context, input }) => {
       const limit = input?.limit ?? 50
-      const { getCustomerThreadRepository } = await import('@/lib/infrastructure/customer-thread')
-      const repository = getCustomerThreadRepository()
+      const { normalizePoNumber } = await import('@/lib/infrastructure/omg/sync')
       
-      const pendingLinks = await repository.getPendingReview(limit)
+      // Get all shipment IDs that have been successfully linked (exclude from results)
+      const linkedThreads = await context.prisma.shipment_customer_threads.findMany({
+        where: {
+          match_status: { in: ['auto_matched', 'manually_linked', 'rejected'] }
+        },
+        select: { shipment_id: true }
+      })
+      const linkedShipmentIds = new Set(linkedThreads.map(t => t.shipment_id))
       
-      // Get shipment and OMG data for each link
-      const items = await Promise.all(pendingLinks.map(async (link) => {
+      // Get shipments with pending/not_found thread records
+      const pendingThreads = await context.prisma.shipment_customer_threads.findMany({
+        where: {
+          match_status: { in: ['pending_review', 'not_found'] }
+        },
+        orderBy: [
+          { match_status: 'asc' },
+          { confidence_score: 'desc' }
+        ],
+        take: limit,
+      })
+      const pendingShipmentIds = new Set(pendingThreads.map(t => t.shipment_id))
+      
+      // Get shipments that have NO thread record at all
+      const remainingSlots = limit - pendingThreads.length
+      let shipmentsWithoutThread: Array<{
+        id: number
+        po_number: string | null
+        tracking_number: string
+        carrier: string | null
+        status: string
+      }> = []
+      
+      if (remainingSlots > 0) {
+        // Get all shipment IDs that have any thread record
+        const allThreadShipmentIds = await context.prisma.shipment_customer_threads.findMany({
+          select: { shipment_id: true }
+        })
+        const hasThreadRecord = new Set(allThreadShipmentIds.map(t => t.shipment_id))
+        
+        // Find shipments without thread records
+        shipmentsWithoutThread = await context.prisma.shipments.findMany({
+          where: {
+            id: { notIn: Array.from(hasThreadRecord) }
+          },
+          select: {
+            id: true,
+            po_number: true,
+            tracking_number: true,
+            carrier: true,
+            status: true,
+          },
+          orderBy: { created_at: 'desc' },
+          take: remainingSlots,
+        })
+      }
+      
+      // Build combined results
+      const items: Array<{
+        threadLink: {
+          id: number
+          shipmentId: number
+          frontConversationId: string
+          confidenceScore: number
+          matchStatus: 'auto_matched' | 'pending_review' | 'manually_linked' | 'rejected' | 'not_found' | 'not_discovered'
+          emailMatched: boolean
+          orderInSubject: boolean
+          orderInBody: boolean
+          daysSinceLastMessage: number | null
+          matchedEmail: string | null
+          conversationSubject: string | null
+          createdAt: string
+          updatedAt: string
+          reviewedAt: string | null
+          reviewedBy: string | null
+        }
+        shipment: {
+          id: number
+          poNumber: string | null
+          trackingNumber: string
+          carrier: string | null
+          status: string
+        }
+        customerEmail: string | null
+        customerName: string | null
+      }> = []
+      
+      // Helper to get customer info from OMG
+      const getCustomerInfo = async (poNumber: string | null) => {
+        if (!poNumber) return { customerEmail: null, customerName: null }
+        const normalizedPo = normalizePoNumber(poNumber)
+        const omgPo = await context.prisma.omg_purchase_orders.findUnique({
+          where: { po_number: normalizedPo },
+          select: { customer_email: true, customer_name: true },
+        })
+        return {
+          customerEmail: omgPo?.customer_email ?? null,
+          customerName: omgPo?.customer_name ?? null,
+        }
+      }
+      
+      // Add shipments with pending/not_found thread records
+      for (const thread of pendingThreads) {
         const shipment = await context.prisma.shipments.findUnique({
-          where: { id: link.shipmentId },
+          where: { id: thread.shipment_id },
           select: {
             id: true,
             po_number: true,
@@ -1735,27 +1835,25 @@ const customerThreadRouter = {
           },
         })
         
-        // Get customer info from OMG if available
-        let customerEmail: string | null = null
-        let customerName: string | null = null
+        const { customerEmail, customerName } = await getCustomerInfo(shipment?.po_number ?? null)
         
-        if (shipment?.po_number) {
-          const { normalizePoNumber } = await import('@/lib/infrastructure/omg/sync')
-          const normalizedPo = normalizePoNumber(shipment.po_number)
-          const omgPo = await context.prisma.omg_purchase_orders.findUnique({
-            where: { po_number: normalizedPo },
-            select: { customer_email: true, customer_name: true },
-          })
-          customerEmail = omgPo?.customer_email ?? null
-          customerName = omgPo?.customer_name ?? null
-        }
-        
-        return {
+        items.push({
           threadLink: {
-            ...link,
-            createdAt: link.createdAt.toISOString(),
-            updatedAt: link.updatedAt.toISOString(),
-            reviewedAt: link.reviewedAt?.toISOString() ?? null,
+            id: thread.id,
+            shipmentId: thread.shipment_id,
+            frontConversationId: thread.front_conversation_id,
+            confidenceScore: thread.confidence_score,
+            matchStatus: thread.match_status as 'auto_matched' | 'pending_review' | 'manually_linked' | 'rejected' | 'not_found' | 'not_discovered',
+            emailMatched: thread.email_matched,
+            orderInSubject: thread.order_in_subject,
+            orderInBody: thread.order_in_body,
+            daysSinceLastMessage: thread.days_since_last_message,
+            matchedEmail: thread.matched_email,
+            conversationSubject: thread.conversation_subject,
+            createdAt: thread.created_at.toISOString(),
+            updatedAt: thread.updated_at.toISOString(),
+            reviewedAt: thread.reviewed_at?.toISOString() ?? null,
+            reviewedBy: thread.reviewed_by,
           },
           shipment: shipment ? {
             id: shipment.id,
@@ -1764,7 +1862,7 @@ const customerThreadRouter = {
             carrier: shipment.carrier,
             status: shipment.status,
           } : {
-            id: link.shipmentId,
+            id: thread.shipment_id,
             poNumber: null,
             trackingNumber: 'Unknown',
             carrier: null,
@@ -1772,12 +1870,51 @@ const customerThreadRouter = {
           },
           customerEmail,
           customerName,
-        }
-      }))
+        })
+      }
+      
+      // Add shipments without thread records (show as "not_discovered")
+      for (const shipment of shipmentsWithoutThread) {
+        const { customerEmail, customerName } = await getCustomerInfo(shipment.po_number)
+        
+        items.push({
+          threadLink: {
+            id: 0, // No record yet
+            shipmentId: shipment.id,
+            frontConversationId: '',
+            confidenceScore: 0,
+            matchStatus: 'not_discovered', // Special status for never-tested
+            emailMatched: false,
+            orderInSubject: false,
+            orderInBody: false,
+            daysSinceLastMessage: null,
+            matchedEmail: null,
+            conversationSubject: null,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            reviewedAt: null,
+            reviewedBy: null,
+          },
+          shipment: {
+            id: shipment.id,
+            poNumber: shipment.po_number,
+            trackingNumber: shipment.tracking_number,
+            carrier: shipment.carrier,
+            status: shipment.status,
+          },
+          customerEmail,
+          customerName,
+        })
+      }
+      
+      // Get total count of all shipments needing attention
+      const totalLinked = linkedShipmentIds.size
+      const totalShipments = await context.prisma.shipments.count()
+      const total = totalShipments - totalLinked
       
       return {
         items,
-        total: pendingLinks.length,
+        total,
       }
     }),
 

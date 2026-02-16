@@ -48,7 +48,7 @@ interface PendingReviewItem {
     shipmentId: number
     frontConversationId: string
     confidenceScore: number
-    matchStatus: string
+    matchStatus: 'pending_review' | 'not_found' | 'not_discovered' | string
     emailMatched: boolean
     orderInSubject: boolean
     orderInBody: boolean
@@ -308,6 +308,8 @@ export default function ThreadReviewQueue() {
                     <TableCell>
                       {item.threadLink.matchStatus === 'not_found' ? (
                         <span className="text-muted-foreground italic">No thread found</span>
+                      ) : item.threadLink.matchStatus === 'not_discovered' ? (
+                        <span className="text-muted-foreground italic">Not yet searched</span>
                       ) : (
                         <div className="max-w-[200px] truncate" title={item.threadLink.conversationSubject ?? ''}>
                           {item.threadLink.conversationSubject ?? 'No subject'}
@@ -319,6 +321,10 @@ export default function ThreadReviewQueue() {
                         <Badge variant="outline" className="text-orange-600 border-orange-300">
                           Not Found
                         </Badge>
+                      ) : item.threadLink.matchStatus === 'not_discovered' ? (
+                        <Badge variant="outline" className="text-gray-500 border-gray-300">
+                          Not Searched
+                        </Badge>
                       ) : (
                         getConfidenceBadge(item.threadLink.confidenceScore)
                       )}
@@ -326,7 +332,7 @@ export default function ThreadReviewQueue() {
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1">
                         {/* Only show Approve/Reject if there's a candidate to review */}
-                        {item.threadLink.matchStatus !== 'not_found' && (
+                        {item.threadLink.matchStatus === 'pending_review' && (
                           <>
                             <Button
                               variant="ghost"
@@ -356,9 +362,19 @@ export default function ThreadReviewQueue() {
                           className="h-8 w-8 p-0 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
                           onClick={() => openLinkDialog(item)}
                           disabled={isLoading}
-                          title={item.threadLink.matchStatus === 'not_found' ? 'Find & Link Thread' : 'Link Different'}
+                          title={
+                            item.threadLink.matchStatus === 'not_discovered' 
+                              ? 'Search & Link Thread' 
+                              : item.threadLink.matchStatus === 'not_found' 
+                                ? 'Find & Link Thread' 
+                                : 'Link Different'
+                          }
                         >
-                          <Link2 className="h-4 w-4" />
+                          {item.threadLink.matchStatus === 'not_discovered' ? (
+                            <Search className="h-4 w-4" />
+                          ) : (
+                            <Link2 className="h-4 w-4" />
+                          )}
                         </Button>
                       </div>
                     </TableCell>
