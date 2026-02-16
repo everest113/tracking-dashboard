@@ -1541,6 +1541,127 @@ const omgRouter = {
       }),
 }
 
+// =============================================================================
+// AUDIT ROUTER
+// =============================================================================
+
+/**
+ * Audit entry response schema
+ */
+const AuditEntrySchema = z.object({
+  id: z.string(),
+  entityType: z.string(),
+  entityId: z.string(),
+  action: z.string(),
+  actor: z.string(),
+  metadata: z.record(z.string(), z.unknown()),
+  status: z.string(),
+  error: z.string().nullable(),
+  createdAt: z.string(),
+})
+
+const auditRouter = {
+  /**
+   * Get audit history for an entity
+   */
+  getHistory: publicProcedure
+    .input(z.object({
+      entityType: z.string(),
+      entityId: z.string(),
+      action: z.string().optional(),
+      limit: z.number().min(1).max(100).default(50),
+      offset: z.number().min(0).default(0),
+    }))
+    .output(z.object({
+      entries: z.array(AuditEntrySchema),
+      total: z.number(),
+      hasMore: z.boolean(),
+    }))
+    .handler(async ({ input }) => {
+      const { getAuditService } = await import('@/lib/infrastructure/audit')
+      const auditService = getAuditService()
+
+      const [entries, total] = await Promise.all([
+        auditService.getHistory(input.entityType, input.entityId, {
+          action: input.action,
+          limit: input.limit,
+          offset: input.offset,
+        }),
+        auditService.countEntries({
+          entityType: input.entityType,
+          entityId: input.entityId,
+          action: input.action,
+        }),
+      ])
+
+      return {
+        entries: entries.map((e) => ({
+          ...e,
+          createdAt: e.createdAt.toISOString(),
+        })),
+        total,
+        hasMore: input.offset + entries.length < total,
+      }
+    }),
+
+  /**
+   * Check if a successful action exists for an entity.
+   * Useful for idempotency checks.
+   */
+  hasAction: publicProcedure
+    .input(z.object({
+      entityType: z.string(),
+      entityId: z.string(),
+      action: z.string(),
+      status: z.enum(['success', 'failed', 'skipped', 'pending']).optional(),
+    }))
+    .output(z.object({
+      exists: z.boolean(),
+    }))
+    .handler(async ({ input }) => {
+      const { getAuditService } = await import('@/lib/infrastructure/audit')
+      const auditService = getAuditService()
+
+      const exists = await auditService.hasAction(
+        input.entityType,
+        input.entityId,
+        input.action,
+        input.status
+      )
+
+      return { exists }
+    }),
+
+  /**
+   * Get the most recent audit entry for an entity.
+   */
+  getLatest: publicProcedure
+    .input(z.object({
+      entityType: z.string(),
+      entityId: z.string(),
+      action: z.string().optional(),
+    }))
+    .output(z.object({
+      entry: AuditEntrySchema.nullable(),
+    }))
+    .handler(async ({ input }) => {
+      const { getAuditService } = await import('@/lib/infrastructure/audit')
+      const auditService = getAuditService()
+
+      const entry = await auditService.getLatest(
+        input.entityType,
+        input.entityId,
+        input.action
+      )
+
+      return {
+        entry: entry
+          ? { ...entry, createdAt: entry.createdAt.toISOString() }
+          : null,
+      }
+    }),
+}
+
 // Plain nested object structure (recommended by oRPC docs)
 export const appRouter = {
   shipments: shipmentsRouter,
@@ -1550,5 +1671,6 @@ export const appRouter = {
   trackers: trackersRouter,
   front: frontRouter,
   omg: omgRouter,
+  audit: auditRouter,
 }
 export type AppRouter = typeof appRouter

@@ -78,4 +78,9 @@ beforeEach(async () => {
   } catch {
     // Table might not exist
   }
+  
+  // Note: audit_history is NOT cleaned here because:
+  // 1. Audit tests use unique IDs per test (no conflict)
+  // 2. Global cleanup during parallel execution causes race conditions
+  // 3. Audit entries are append-only by design (cleaning doesn't make sense)
 })
