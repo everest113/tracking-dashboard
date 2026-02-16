@@ -9,27 +9,80 @@
 import type { PrismaClient } from '@prisma/client'
 import { searchConversations, getConversationMessages } from '@/lib/infrastructure/sdks/front/client'
 
-// Common carrier tracking number patterns
+// Maximum tracking numbers to extract per conversation (prevents SKU floods)
+const MAX_TRACKING_PER_CONVERSATION = 20
+
+// Common carrier tracking number patterns (conservative - prefer false negatives over false positives)
 const TRACKING_PATTERNS = [
-  // UPS: 1Z followed by 16 alphanumeric chars
+  // UPS: 1Z followed by 16 alphanumeric chars (very reliable format)
   { carrier: 'ups', pattern: /\b1Z[A-Z0-9]{16}\b/gi },
-  // FedEx: 12, 15, 20, or 22 digits
-  { carrier: 'fedex', pattern: /\b\d{12,22}\b/g },
-  // USPS: 20-22 digits or specific formats
-  { carrier: 'usps', pattern: /\b(94|93|92|91|94\d)\d{18,22}\b/g },
-  // DHL: 10-11 digits
-  { carrier: 'dhl', pattern: /\b\d{10,11}\b/g },
+  // FedEx Express: 12 digits starting with certain prefixes (7, 4)
+  // Most FedEx Express numbers start with 7 or 4
+  { carrier: 'fedex', pattern: /\b[47]\d{11}\b/g },
+  // FedEx Ground: 15 digits (home delivery often starts with 96)
+  { carrier: 'fedex', pattern: /\b(96\d{13}|9\d{14})\b/g },
+  // USPS: 20-22 digits starting with specific prefixes
+  { carrier: 'usps', pattern: /\b(94|93|92|91)\d{18,20}\b/g },
+  // DHL: JJD waybill format only (10-11 digits too prone to false positives)
+  { carrier: 'dhl', pattern: /\bJJD\d{10,}\b/gi },
 ]
 
-// Filter out false positives (phone numbers, zip codes, etc.)
+// Filter out false positives
 function isLikelyTrackingNumber(num: string): boolean {
-  // Too short
-  if (num.length < 10) return false
+  const cleaned = num.toUpperCase().replace(/[\s-]/g, '')
+  
   // UPS format is very reliable
-  if (num.startsWith('1Z') && num.length === 18) return true
-  // FedEx/USPS long numbers
-  if (num.length >= 12 && num.length <= 22 && /^\d+$/.test(num)) return true
+  if (cleaned.startsWith('1Z') && cleaned.length === 18) return true
+  
+  // USPS: 20-22 digits starting with 9
+  if (/^9[0-9]{19,21}$/.test(cleaned)) return true
+  
+  // FedEx Express: 12 digits starting with 7 or 4
+  if (/^[47]\d{11}$/.test(cleaned)) return true
+  
+  // FedEx Ground: 15 digits starting with 9
+  if (/^9\d{14}$/.test(cleaned)) return true
+  
+  // DHL JJD format
+  if (/^JJD\d{10,}$/i.test(cleaned)) return true
+  
+  // Reject everything else
   return false
+}
+
+/**
+ * Filter out sequential numbers that are likely SKUs/item codes
+ * If many numbers differ by small constants (64, 128, etc.), they're probably not tracking numbers
+ */
+function filterSequentialNumbers(tracking: Array<{ trackingNumber: string; carrier: string }>): Array<{ trackingNumber: string; carrier: string }> {
+  if (tracking.length <= 3) return tracking
+  
+  // Sort numeric-only tracking numbers
+  const numericTracking = tracking.filter(t => /^\d+$/.test(t.trackingNumber))
+  if (numericTracking.length <= 3) return tracking
+  
+  // Check for sequential patterns (common SKU increments: 1, 64, 128, 256, 1000)
+  const nums = numericTracking.map(t => ({ ...t, value: BigInt(t.trackingNumber) }))
+    .sort((a, b) => a.value < b.value ? -1 : 1)
+  
+  let sequentialCount = 0
+  const suspiciousDiffs = [BigInt(1), BigInt(64), BigInt(128), BigInt(256), BigInt(512), BigInt(1000), BigInt(10000)]
+  
+  for (let i = 0; i < nums.length - 1; i++) {
+    const diff = nums[i + 1].value - nums[i].value
+    if (suspiciousDiffs.includes(diff)) {
+      sequentialCount++
+    }
+  }
+  
+  // If more than 30% of numbers are sequential, it's likely SKU data - reject all numeric
+  const sequentialRatio = sequentialCount / (nums.length - 1)
+  if (sequentialRatio > 0.3) {
+    console.warn(`[Tracking Discovery] Rejecting ${numericTracking.length} numbers due to sequential pattern (${(sequentialRatio * 100).toFixed(0)}% sequential)`)
+    return tracking.filter(t => !/^\d+$/.test(t.trackingNumber)) // Keep only non-numeric (like UPS 1Z...)
+  }
+  
+  return tracking
 }
 
 interface ExtractedTracking {
@@ -75,7 +128,7 @@ export function createTrackingDiscoveryService(prisma: PrismaClient): TrackingDi
    * Extract tracking numbers from conversation messages
    */
   async function extractTrackingFromConversation(conversationId: string): Promise<Array<{ trackingNumber: string; carrier: string }>> {
-    const results: Array<{ trackingNumber: string; carrier: string }> = []
+    let results: Array<{ trackingNumber: string; carrier: string }> = []
     const seen = new Set<string>()
     
     try {
@@ -94,6 +147,15 @@ export function createTrackingDiscoveryService(prisma: PrismaClient): TrackingDi
             }
           }
         }
+      }
+      
+      // Filter out sequential SKU-like numbers
+      results = filterSequentialNumbers(results)
+      
+      // Limit results to prevent floods
+      if (results.length > MAX_TRACKING_PER_CONVERSATION) {
+        console.warn(`[Tracking Discovery] Limiting ${results.length} tracking numbers to ${MAX_TRACKING_PER_CONVERSATION} for conversation ${conversationId}`)
+        results = results.slice(0, MAX_TRACKING_PER_CONVERSATION)
       }
     } catch (err) {
       console.warn(`[Tracking Discovery] Failed to get messages for ${conversationId}:`, err)

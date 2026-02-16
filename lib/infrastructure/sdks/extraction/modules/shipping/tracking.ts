@@ -26,47 +26,83 @@ function stripCarrierPrefix(trackingNumber: string): string {
   return cleaned
 }
 
+// Maximum tracking numbers per extraction (prevents SKU floods)
+const MAX_TRACKING_PER_EXTRACTION = 20
+
 /**
  * Additional validation for tracking numbers
  * Returns true if the tracking number looks valid for the carrier
+ * 
+ * IMPORTANT: Be conservative - false negatives are better than false positives
+ * to avoid wasting Ship24 API calls on non-tracking numbers
  */
 function validateTrackingNumber(trackingNumber: string, carrier: string): boolean {
   const cleaned = trackingNumber.toUpperCase().replace(/[\s-]/g, '')
   
   switch (carrier) {
     case 'ups':
-      // UPS: 1Z + 16 alphanumeric = 18 total
+      // UPS: 1Z + 16 alphanumeric = 18 total (very reliable format)
       return /^1Z[A-Z0-9]{16}$/.test(cleaned)
     
     case 'usps':
-      // USPS: 20-22 digits OR 13 chars starting with 2 letters
-      return /^\d{20,22}$/.test(cleaned) || /^[A-Z]{2}\d{9}[A-Z]{2}$/.test(cleaned)
+      // USPS: 20-22 digits starting with 9 (most common prefix)
+      // OR international format: 2 letters + 9 digits + 2 letters
+      return /^9\d{19,21}$/.test(cleaned) || /^[A-Z]{2}\d{9}[A-Z]{2}$/.test(cleaned)
     
     case 'fedex':
-      // FedEx: 12, 14, or 15 digits
-      return /^\d{12}$/.test(cleaned) || /^\d{14,15}$/.test(cleaned)
+      // FedEx Express: 12 digits starting with 7 or 4 (common prefixes)
+      // FedEx Ground: 15 digits starting with 9
+      // Be conservative to avoid SKU/invoice numbers
+      if (/^[47]\d{11}$/.test(cleaned)) return true // Express
+      if (/^9\d{14}$/.test(cleaned)) return true // Ground
+      return false
     
     case 'dhl':
-      // DHL: 10 digits (but NOT phone number pattern) OR JJD format
-      // Reject if it looks like a US phone number (starts with common area code patterns)
-      if (/^\d{10}$/.test(cleaned)) {
-        // Reject obvious phone patterns (area codes starting with 2-9)
-        const firstThree = cleaned.substring(0, 3)
-        const phoneAreaCodes = ['800', '888', '877', '866', '855', '844', '833', '822']
-        if (phoneAreaCodes.includes(firstThree)) return false
-        // Accept if it looks like a DHL number
-        return true
-      }
-      // JJD waybill format
-      return /^JJD\d{10,}$/.test(cleaned)
+      // DHL: Only accept JJD waybill format (10-digit pure numeric is too risky)
+      return /^JJD\d{10,}$/i.test(cleaned)
     
     case 'other':
-      // For "other" carriers, require at least 10 chars and some structure
-      return cleaned.length >= 10
+      // For "other" carriers, reject pure numeric (too risky for false positives)
+      // Only accept if it has some structure (letters + numbers)
+      return cleaned.length >= 10 && /[A-Z]/.test(cleaned) && /\d/.test(cleaned)
     
     default:
-      return true
+      return false // Reject unknown carriers
   }
+}
+
+/**
+ * Filter out sequential numbers that are likely SKUs/item codes
+ */
+function filterSequentialShipments<T extends { trackingNumber: string }>(shipments: T[]): T[] {
+  if (shipments.length <= 3) return shipments
+  
+  // Sort numeric-only tracking numbers
+  const numericShipments = shipments.filter(s => /^\d+$/.test(s.trackingNumber))
+  if (numericShipments.length <= 3) return shipments
+  
+  // Check for sequential patterns (common SKU increments: 1, 64, 128, 256, 1000)
+  const nums = numericShipments.map(s => ({ ...s, value: BigInt(s.trackingNumber) }))
+    .sort((a, b) => a.value < b.value ? -1 : 1)
+  
+  let sequentialCount = 0
+  const suspiciousDiffs = [BigInt(1), BigInt(64), BigInt(128), BigInt(256), BigInt(512), BigInt(1000), BigInt(10000)]
+  
+  for (let i = 0; i < nums.length - 1; i++) {
+    const diff = nums[i + 1].value - nums[i].value
+    if (suspiciousDiffs.includes(diff)) {
+      sequentialCount++
+    }
+  }
+  
+  // If more than 30% of numbers are sequential, it's likely SKU data - reject all numeric
+  const sequentialRatio = sequentialCount / (nums.length - 1)
+  if (sequentialRatio > 0.3) {
+    console.warn(`[Extraction] Rejecting ${numericShipments.length} numbers due to sequential pattern (${(sequentialRatio * 100).toFixed(0)}% sequential)`)
+    return shipments.filter(s => !/^\d+$/.test(s.trackingNumber))
+  }
+  
+  return shipments
 }
 
 /**
@@ -83,7 +119,7 @@ async function extractTrackingOnly(messages: EmailMessage[]): Promise<TrackingOn
   })
 
   // Post-process: validate and normalize tracking numbers
-  const validatedShipments = result.shipments
+  let validatedShipments = result.shipments
     .filter(shipment => {
       if (!shipment.trackingNumber || typeof shipment.trackingNumber !== 'string') {
         console.warn('[Extraction] Skipping shipment with invalid tracking number:', shipment)
@@ -121,6 +157,15 @@ async function extractTrackingOnly(messages: EmailMessage[]): Promise<TrackingOn
         shipment.trackingNumber.toUpperCase().replace(/[\s-]/g, '')
       ),
     }))
+  
+  // Filter out sequential SKU-like numbers
+  validatedShipments = filterSequentialShipments(validatedShipments)
+  
+  // Limit results to prevent floods
+  if (validatedShipments.length > MAX_TRACKING_PER_EXTRACTION) {
+    console.warn(`[Extraction] Limiting ${validatedShipments.length} tracking numbers to ${MAX_TRACKING_PER_EXTRACTION}`)
+    validatedShipments = validatedShipments.slice(0, MAX_TRACKING_PER_EXTRACTION)
+  }
 
   return { shipments: validatedShipments }
 }
