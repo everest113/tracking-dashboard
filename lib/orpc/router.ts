@@ -1687,16 +1687,22 @@ const OrderSchema = z.object({
   omgOperationsStatus: z.string().nullable(),
   poCount: z.number(),
   lastSyncedAt: z.string().nullable(),
-  // Shipments
-  shipments: z.array(z.object({
-    id: z.number(),
-    poNumber: z.string().nullable(),
-    trackingNumber: z.string(),
-    carrier: z.string().nullable(),
-    status: z.string(),
-    shippedDate: z.string().nullable(),
-    deliveredDate: z.string().nullable(),
-    lastChecked: z.string().nullable(),
+  // Purchase Orders with their shipments
+  purchaseOrders: z.array(z.object({
+    poNumber: z.string(),
+    supplierName: z.string().nullable(),
+    shipDate: z.string().nullable(),
+    inHandsDate: z.string().nullable(),
+    operationsStatus: z.string().nullable(),
+    shipments: z.array(z.object({
+      id: z.number(),
+      trackingNumber: z.string(),
+      carrier: z.string().nullable(),
+      status: z.string(),
+      shippedDate: z.string().nullable(),
+      deliveredDate: z.string().nullable(),
+      lastChecked: z.string().nullable(),
+    })),
   })),
   stats: z.object({
     total: z.number(),
@@ -1759,26 +1765,33 @@ const ordersRouter = {
       // Get status counts
       const statusCounts = await repository.countByStatus()
       
-      // Now fetch shipment details for these orders
-      // First, get all PO numbers for these orders
+      // Now fetch PO and shipment details for these orders
       const orderNumbers = domainOrders.map(o => o.orderNumber)
       
+      // Get all POs with their details
       const poRecords = await context.prisma.purchase_orders.findMany({
         where: { order_number: { in: orderNumbers } },
-        select: { order_number: true, po_number: true },
+        select: { 
+          order_number: true, 
+          po_number: true,
+          supplier_name: true,
+          ship_date: true,
+          in_hands_date: true,
+          operations_status: true,
+        },
       })
       
-      // Group PO numbers by order
-      const orderPoMap = new Map<string, string[]>()
+      // Group POs by order
+      const orderPosMap = new Map<string, typeof poRecords>()
       for (const record of poRecords) {
-        if (!orderPoMap.has(record.order_number)) {
-          orderPoMap.set(record.order_number, [])
+        if (!orderPosMap.has(record.order_number)) {
+          orderPosMap.set(record.order_number, [])
         }
-        orderPoMap.get(record.order_number)!.push(record.po_number)
+        orderPosMap.get(record.order_number)!.push(record)
       }
       
-      // Get all shipments for these POs
-      const allPoNumbers = Array.from(orderPoMap.values()).flat()
+      // Get all shipments
+      const allPoNumbers = poRecords.map(p => p.po_number)
       const shipments = await context.prisma.shipments.findMany({
         where: { po_number: { not: null } },
         select: {
@@ -1793,7 +1806,7 @@ const ordersRouter = {
         },
       })
       
-      // Filter to matching POs and index by normalized PO
+      // Index shipments by normalized PO
       const shipmentsByPo = new Map<string, typeof shipments>()
       for (const shipment of shipments) {
         if (!shipment.po_number) continue
@@ -1827,9 +1840,29 @@ const ordersRouter = {
       
       // Build response
       const orders: z.infer<typeof OrderSchema>[] = domainOrders.map(order => {
-        const poNumbers = orderPoMap.get(order.orderNumber) || []
-        const orderShipments = poNumbers.flatMap(po => shipmentsByPo.get(po) || [])
+        const orderPos = orderPosMap.get(order.orderNumber) || []
         const threadInfo = getThreadInfo(order.orderNumber)
+        
+        // Build purchaseOrders with nested shipments
+        const purchaseOrders = orderPos.map(po => {
+          const poShipments = shipmentsByPo.get(po.po_number) || []
+          return {
+            poNumber: po.po_number,
+            supplierName: po.supplier_name,
+            shipDate: po.ship_date?.toISOString() ?? null,
+            inHandsDate: po.in_hands_date?.toISOString() ?? null,
+            operationsStatus: po.operations_status,
+            shipments: poShipments.map(s => ({
+              id: s.id,
+              trackingNumber: s.tracking_number,
+              carrier: s.carrier,
+              status: s.status,
+              shippedDate: s.shipped_date?.toISOString() ?? null,
+              deliveredDate: s.delivered_date?.toISOString() ?? null,
+              lastChecked: s.last_checked?.toISOString() ?? null,
+            })),
+          }
+        })
         
         return {
           orderNumber: order.orderNumber,
@@ -1845,17 +1878,8 @@ const ordersRouter = {
           omgOperationsStatus: order.omgOperationsStatus,
           poCount: order.poCount,
           lastSyncedAt: order.lastSyncedAt?.toISOString() ?? null,
-          // Shipments
-          shipments: orderShipments.map(s => ({
-            id: s.id,
-            poNumber: s.po_number,
-            trackingNumber: s.tracking_number,
-            carrier: s.carrier,
-            status: s.status,
-            shippedDate: s.shipped_date?.toISOString() ?? null,
-            deliveredDate: s.delivered_date?.toISOString() ?? null,
-            lastChecked: s.last_checked?.toISOString() ?? null,
-          })),
+          // Purchase Orders with shipments
+          purchaseOrders,
           stats: {
             total: order.shipmentCount,
             delivered: order.deliveredCount,

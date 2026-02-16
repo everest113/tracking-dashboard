@@ -57,13 +57,21 @@ type ApiOrderStatus = Exclude<OrderStatus, 'all'>
 
 interface Shipment {
   id: number
-  poNumber: string | null
   trackingNumber: string
   carrier: string | null
   status: string
   shippedDate: string | null
   deliveredDate: string | null
   lastChecked: string | null
+}
+
+interface PurchaseOrder {
+  poNumber: string
+  supplierName: string | null
+  shipDate: string | null
+  inHandsDate: string | null
+  operationsStatus: string | null
+  shipments: Shipment[]
 }
 
 interface Order {
@@ -80,8 +88,8 @@ interface Order {
   omgOperationsStatus: string | null
   poCount: number
   lastSyncedAt: string | null
-  // Shipments
-  shipments: Shipment[]
+  // Purchase Orders with shipments
+  purchaseOrders: PurchaseOrder[]
   stats: {
     total: number
     delivered: number
@@ -628,13 +636,14 @@ export default function OrdersTable() {
                     </button>
                   </CollapsibleTrigger>
 
-                  {/* Shipments Table */}
+                  {/* Purchase Orders Table */}
                   <CollapsibleContent>
                     <div className="px-4 pb-4">
                       <Table>
                         <TableHeader>
                           <TableRow>
                             <TableHead>PO</TableHead>
+                            <TableHead>Supplier</TableHead>
                             <TableHead>Tracking</TableHead>
                             <TableHead>Carrier</TableHead>
                             <TableHead>Status</TableHead>
@@ -642,37 +651,87 @@ export default function OrdersTable() {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {order.shipments.map((shipment) => (
-                            <TableRow key={shipment.id}>
-                              <TableCell className="font-mono text-sm">
-                                {shipment.poNumber || '—'}
-                              </TableCell>
-                              <TableCell>
-                                <a
-                                  href={`https://www.google.com/search?q=${encodeURIComponent(shipment.trackingNumber)}+tracking`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="font-mono text-sm text-primary hover:underline flex items-center gap-1"
-                                >
-                                  {shipment.trackingNumber}
-                                  <ExternalLink className="h-3 w-3" />
-                                </a>
-                              </TableCell>
-                              <TableCell className="text-sm text-muted-foreground uppercase">
-                                {shipment.carrier || '—'}
-                              </TableCell>
-                              <TableCell>
-                                {getStatusBadge(shipment.status)}
-                              </TableCell>
-                              <TableCell className="text-sm text-muted-foreground">
-                                {shipment.lastChecked ? (
-                                  formatDistanceToNow(new Date(shipment.lastChecked), { addSuffix: true })
-                                ) : (
-                                  '—'
-                                )}
+                          {order.purchaseOrders.length === 0 ? (
+                            <TableRow>
+                              <TableCell colSpan={6} className="text-center text-muted-foreground py-4">
+                                No purchase orders
                               </TableCell>
                             </TableRow>
-                          ))}
+                          ) : (
+                            order.purchaseOrders.map((po) => {
+                              // If PO has shipments, show one row per shipment
+                              if (po.shipments.length > 0) {
+                                return po.shipments.map((shipment, idx) => (
+                                  <TableRow key={`${po.poNumber}-${shipment.id}`}>
+                                    <TableCell className="font-mono text-sm">
+                                      {idx === 0 ? po.poNumber : ''}
+                                    </TableCell>
+                                    <TableCell className="text-sm text-muted-foreground">
+                                      {idx === 0 ? (po.supplierName || '—') : ''}
+                                    </TableCell>
+                                    <TableCell>
+                                      <a
+                                        href={`https://www.google.com/search?q=${encodeURIComponent(shipment.trackingNumber)}+tracking`}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="font-mono text-sm text-primary hover:underline flex items-center gap-1"
+                                      >
+                                        {shipment.trackingNumber}
+                                        <ExternalLink className="h-3 w-3" />
+                                      </a>
+                                    </TableCell>
+                                    <TableCell className="text-sm text-muted-foreground uppercase">
+                                      {shipment.carrier || '—'}
+                                    </TableCell>
+                                    <TableCell>
+                                      {getStatusBadge(shipment.status)}
+                                    </TableCell>
+                                    <TableCell className="text-sm text-muted-foreground">
+                                      {shipment.lastChecked ? (
+                                        formatDistanceToNow(new Date(shipment.lastChecked), { addSuffix: true })
+                                      ) : (
+                                        '—'
+                                      )}
+                                    </TableCell>
+                                  </TableRow>
+                                ))
+                              }
+                              
+                              // PO with no shipments - show empty row
+                              return (
+                                <TableRow key={po.poNumber} className="bg-muted/30">
+                                  <TableCell className="font-mono text-sm">
+                                    {po.poNumber}
+                                  </TableCell>
+                                  <TableCell className="text-sm text-muted-foreground">
+                                    {po.supplierName || '—'}
+                                  </TableCell>
+                                  <TableCell className="text-sm text-muted-foreground italic">
+                                    No tracking yet
+                                  </TableCell>
+                                  <TableCell>—</TableCell>
+                                  <TableCell>
+                                    {po.operationsStatus ? (
+                                      <Badge variant="outline" className="text-xs">
+                                        {po.operationsStatus}
+                                      </Badge>
+                                    ) : (
+                                      <Badge variant="secondary" className="text-xs">Awaiting</Badge>
+                                    )}
+                                  </TableCell>
+                                  <TableCell className="text-sm text-muted-foreground">
+                                    {po.shipDate ? (
+                                      <span title="Ship date">
+                                        Ships {formatDistanceToNow(new Date(po.shipDate), { addSuffix: true })}
+                                      </span>
+                                    ) : (
+                                      '—'
+                                    )}
+                                  </TableCell>
+                                </TableRow>
+                              )
+                            })
+                          )}
                         </TableBody>
                       </Table>
                     </div>
