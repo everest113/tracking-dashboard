@@ -148,7 +148,7 @@ export function createOrderRepository(prisma: PrismaClient): OrderRepository {
       const [records, total] = await Promise.all([
         prisma.orders.findMany({
           where,
-          orderBy: { created_at: 'desc' },
+          orderBy: { order_number: 'desc' },
           take: limit,
           skip: offset,
         }),
