@@ -1935,6 +1935,47 @@ const ordersRouter = {
       const service = getOrderSyncService(context.prisma)
       return service.syncAll()
     }),
+
+  /**
+   * Discover tracking numbers for orders by searching Front.
+   * Searches for POs that are missing shipment data.
+   */
+  discoverTracking: publicProcedure
+    .input(z.object({
+      /** Limit number of orders to process */
+      limit: z.number().min(1).max(200).default(50),
+      /** Specific order number to process (optional) */
+      orderNumber: z.string().optional(),
+    }).optional())
+    .output(z.object({
+      ordersProcessed: z.number(),
+      posSearched: z.number(),
+      trackingFound: z.number(),
+      shipmentsCreated: z.number(),
+      errors: z.array(z.object({
+        poNumber: z.string(),
+        error: z.string(),
+      })),
+    }))
+    .handler(async ({ context, input }) => {
+      const { getTrackingDiscoveryService } = await import('@/lib/infrastructure/tracking')
+      const service = getTrackingDiscoveryService(context.prisma)
+      
+      if (input?.orderNumber) {
+        // Discover for specific order
+        const result = await service.discoverForOrder(input.orderNumber)
+        return {
+          ordersProcessed: 1,
+          posSearched: result.posSearched,
+          trackingFound: result.trackingFound,
+          shipmentsCreated: result.shipmentsCreated,
+          errors: [],
+        }
+      }
+      
+      // Discover for all orders
+      return service.discoverAll({ limit: input?.limit ?? 50 })
+    }),
 }
 
 // Plain nested object structure (recommended by oRPC docs)

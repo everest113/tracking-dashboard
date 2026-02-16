@@ -145,7 +145,18 @@ export default function RefreshNow() {
         addProgress('skipped', `${omgOrdersResult.ordersSkipped} pending orders skipped`)
       }
       
-      // Step 6: Recompute order stats from shipments
+      // Step 6: Discover tracking from Front for orders missing shipments
+      addProgress('processing', 'Discovering tracking numbers from Front...')
+      const discoveryResult = await api.orders.discoverTracking({ limit: 100 })
+      
+      if (discoveryResult.shipmentsCreated > 0) {
+        addProgress('found', `${discoveryResult.shipmentsCreated} shipment${discoveryResult.shipmentsCreated !== 1 ? 's' : ''} discovered`)
+      }
+      if (discoveryResult.posSearched > 0 && discoveryResult.shipmentsCreated === 0) {
+        addProgress('skipped', `Searched ${discoveryResult.posSearched} PO${discoveryResult.posSearched !== 1 ? 's' : ''} - no new tracking`)
+      }
+      
+      // Step 7: Recompute order stats from shipments
       addProgress('processing', 'Computing shipment stats...')
       const statsResult = await api.orders.recomputeStats()
       
@@ -172,6 +183,9 @@ export default function RefreshNow() {
       const totalOrders = omgOrdersResult.ordersCreated + omgOrdersResult.ordersUpdated
       if (totalOrders > 0) {
         messages.push(`${totalOrders} orders`)
+      }
+      if (discoveryResult.shipmentsCreated > 0) {
+        messages.push(`${discoveryResult.shipmentsCreated} discovered`)
       }
 
       toast.success('Dashboard updated', {

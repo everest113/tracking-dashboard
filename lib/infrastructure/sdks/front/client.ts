@@ -293,3 +293,23 @@ export async function getConversation(
   const client = getFrontClient()
   return client.getConversation(conversationId)
 }
+
+/**
+ * Get messages for a conversation (convenience function).
+ */
+export async function getConversationMessages(
+  conversationId: string
+): Promise<FrontMessage[]> {
+  const client = getFrontClient()
+  return client.getConversationMessages(conversationId)
+}
+
+/**
+ * Search conversations by query string (alias for searchConversationsByQuery).
+ */
+export async function searchConversations(
+  query: string,
+  options?: { inboxId?: string; limit?: number }
+): Promise<FrontConversation[]> {
+  return searchConversationsByQuery(query, options)
+}
