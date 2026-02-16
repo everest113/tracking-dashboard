@@ -22,11 +22,12 @@ export interface ThreadDiscoveryService {
   /**
    * Discover and link a customer thread for a shipment.
    * Idempotent - returns existing link if already matched.
+   * Note: orderNumber is customer-facing, not the internal PO number.
    */
   discoverThread(params: {
     shipmentId: number
     customerEmail: string | null
-    poNumber: string
+    orderNumber: string
   }): Promise<ThreadDiscoveryResult>
 
   /**
@@ -42,7 +43,7 @@ export interface ThreadDiscoveryService {
   scoreCandidates(
     candidates: ConversationCandidate[],
     customerEmail: string | null,
-    poNumber: string
+    orderNumber: string
   ): ScoringResult[]
 }
 
@@ -64,7 +65,7 @@ export function createThreadDiscoveryService(
   const { repository, frontClient } = deps
 
   return {
-    async discoverThread({ shipmentId, customerEmail, poNumber }) {
+    async discoverThread({ shipmentId, customerEmail, orderNumber }) {
       const audit = getAuditService()
 
       // Check if already linked
@@ -118,8 +119,8 @@ export function createThreadDiscoveryService(
           confidenceScore: 0,
           matchStatus: ThreadMatchStatus.NotFound,
           emailMatched: false,
-          poInSubject: false,
-          poInBody: false,
+          orderInSubject: false,
+          orderInBody: false,
           daysSinceLastMessage: null,
           matchedEmail: customerEmail,
           conversationSubject: null,
@@ -142,7 +143,7 @@ export function createThreadDiscoveryService(
       }
 
       // Score candidates
-      const scores = this.scoreCandidates(candidates, customerEmail, poNumber)
+      const scores = this.scoreCandidates(candidates, customerEmail, orderNumber)
       const topCandidate = scores[0]
 
       // Determine match status
@@ -155,8 +156,8 @@ export function createThreadDiscoveryService(
         confidenceScore: topCandidate.score,
         matchStatus,
         emailMatched: topCandidate.breakdown.emailMatched,
-        poInSubject: topCandidate.breakdown.poInSubject,
-        poInBody: topCandidate.breakdown.poInBody,
+        orderInSubject: topCandidate.breakdown.orderInSubject,
+        orderInBody: topCandidate.breakdown.orderInBody,
         daysSinceLastMessage: topCandidate.breakdown.daysSinceLastMessage,
         matchedEmail: customerEmail,
         conversationSubject: candidates.find(c => c.conversationId === topCandidate.conversationId)?.subject ?? null,
@@ -208,10 +209,10 @@ export function createThreadDiscoveryService(
     scoreCandidates(
       candidates: ConversationCandidate[],
       customerEmail: string | null,
-      poNumber: string
+      orderNumber: string
     ): ScoringResult[] {
       const scores = candidates.map((candidate) =>
-        calculateConfidenceScore(candidate, customerEmail, poNumber)
+        calculateConfidenceScore(candidate, customerEmail, orderNumber)
       )
 
       // Sort by score descending

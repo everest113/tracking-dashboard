@@ -202,9 +202,9 @@ model shipment_customer_threads {
   match_status          ThreadMatchStatus @default(pending_review)
   
   // Scoring breakdown (for debugging/audit)
-  email_matched         Boolean           @default(false)
-  po_in_subject         Boolean           @default(false)
-  po_in_body            Boolean           @default(false)
+  email_matched           Boolean           @default(false)
+  order_in_subject        Boolean           @default(false)
+  order_in_body           Boolean           @default(false)
   days_since_last_message Int?
   
   // Metadata
