@@ -1928,6 +1928,12 @@ const customerThreadRouter = {
       threadLink: CustomerThreadLinkSchema.nullable(),
       candidatesFound: z.number(),
       topScore: z.number().nullable(),
+      reason: z.string().nullable(), // Why not_found (for debugging)
+      debug: z.object({
+        customerEmail: z.string().nullable(),
+        orderNumber: z.string().nullable(),
+        poNumber: z.string().nullable(),
+      }).optional(),
     }))
     .handler(async ({ context, input }) => {
       const { getThreadDiscoveryService } = await import('@/lib/infrastructure/customer-thread')
@@ -1946,22 +1952,60 @@ const customerThreadRouter = {
       // Get customer email and order number from OMG
       let customerEmail: string | null = null
       let orderNumber: string = ''
-      if (shipment.po_number) {
+      let reason: string | null = null
+      
+      if (!shipment.po_number) {
+        reason = 'Shipment has no PO number'
+      } else {
         const normalizedPo = normalizePoNumber(shipment.po_number)
         const omgPo = await context.prisma.omg_purchase_orders.findUnique({
           where: { po_number: normalizedPo },
           select: { customer_email: true, order_number: true },
         })
-        customerEmail = omgPo?.customer_email ?? null
-        orderNumber = omgPo?.order_number ?? ''
+        
+        if (!omgPo) {
+          reason = `No OMG record found for PO ${normalizedPo}`
+        } else {
+          customerEmail = omgPo.customer_email ?? null
+          orderNumber = omgPo.order_number ?? ''
+          
+          if (!customerEmail) {
+            reason = 'OMG record has no customer email'
+          }
+        }
+      }
+      
+      // If we can't search, return early with reason
+      if (!customerEmail) {
+        return {
+          status: 'not_found' as const,
+          threadLink: null,
+          candidatesFound: 0,
+          topScore: null,
+          reason,
+          debug: {
+            customerEmail,
+            orderNumber: orderNumber || null,
+            poNumber: shipment.po_number,
+          },
+        }
       }
       
       const discoveryService = await getThreadDiscoveryService()
       const result = await discoveryService.discoverThread({
         shipmentId: input.shipmentId,
         customerEmail,
-        orderNumber, // Customer-facing order number, not internal PO
+        orderNumber,
       })
+      
+      // Determine reason if not found
+      if (result.status === 'not_found') {
+        if (result.candidatesFound === 0) {
+          reason = `No Front conversations found for ${customerEmail}`
+        } else {
+          reason = `${result.candidatesFound} conversation(s) found but confidence too low (${Math.round((result.topScore ?? 0) * 100)}%)`
+        }
+      }
       
       return {
         status: result.status,
@@ -1973,6 +2017,12 @@ const customerThreadRouter = {
         } : null,
         candidatesFound: result.candidatesFound,
         topScore: result.topScore,
+        reason,
+        debug: {
+          customerEmail,
+          orderNumber: orderNumber || null,
+          poNumber: shipment.po_number,
+        },
       }
     }),
 

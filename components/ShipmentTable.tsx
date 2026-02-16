@@ -410,8 +410,12 @@ export default function ShipmentTable({
           break
         case 'not_found':
           toast.warning('No matching thread found', {
-            description: 'Could not find a Front conversation for this customer',
+            description: result.reason || 'Could not find a Front conversation for this customer',
           })
+          // Log debug info to console for troubleshooting
+          if (result.debug) {
+            console.log('[Thread Discovery Debug]', result.debug)
+          }
           break
       }
     } catch (error) {
