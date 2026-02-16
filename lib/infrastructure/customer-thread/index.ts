@@ -45,8 +45,12 @@ export async function getThreadDiscoveryService(): Promise<ThreadDiscoveryServic
           return results.map((conv) => ({
             id: conv.id,
             subject: conv.subject ?? null,
-            lastMessageAt: conv.last_message?.created_at ?? null,
-            recipients: conv.recipients?.map((r) => ({ handle: r.handle })) ?? [],
+            // created_at is Unix timestamp (seconds) - convert to Date string
+            lastMessageAt: conv.created_at ? new Date(conv.created_at * 1000).toISOString() : null,
+            // Single recipient from conversation + the email we searched for
+            recipients: conv.recipient 
+              ? [{ handle: conv.recipient.handle }]
+              : [{ handle: email }], // Fallback to search email
           }))
         },
       },
