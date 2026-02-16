@@ -84,31 +84,33 @@ describe('PrismaAuditRepository', () => {
   })
 
   describe('getHistory', () => {
-    beforeEach(async () => {
-      // Create test entries with slight time delays for ordering
+    // Helper to create standard test entries for getHistory tests
+    async function createTestEntries(entityId: string) {
       await repository.create({
         entityType: AuditEntityTypes.Shipment,
-        entityId: '200',
+        entityId,
         action: AuditActions.ShipmentCreated,
         status: AuditStatus.Success,
       })
-      await new Promise((r) => setTimeout(r, 10))
+      await new Promise((r) => setTimeout(r, 15))
       await repository.create({
         entityType: AuditEntityTypes.Shipment,
-        entityId: '200',
+        entityId,
         action: AuditActions.ThreadSearched,
         status: AuditStatus.Success,
       })
-      await new Promise((r) => setTimeout(r, 10))
+      await new Promise((r) => setTimeout(r, 15))
       await repository.create({
         entityType: AuditEntityTypes.Shipment,
-        entityId: '200',
+        entityId,
         action: AuditActions.NotificationSent,
         status: AuditStatus.Success,
       })
-    })
+    }
 
     it('should return entries in reverse chronological order', async () => {
+      await createTestEntries('200')
+      
       const history = await repository.getHistory({
         entityType: AuditEntityTypes.Shipment,
         entityId: '200',
@@ -120,9 +122,11 @@ describe('PrismaAuditRepository', () => {
     })
 
     it('should filter by action', async () => {
+      await createTestEntries('201')
+      
       const history = await repository.getHistory({
         entityType: AuditEntityTypes.Shipment,
-        entityId: '200',
+        entityId: '201',
         action: AuditActions.ThreadSearched,
       })
 
@@ -131,9 +135,11 @@ describe('PrismaAuditRepository', () => {
     })
 
     it('should respect limit and offset', async () => {
+      await createTestEntries('202')
+      
       const history = await repository.getHistory({
         entityType: AuditEntityTypes.Shipment,
-        entityId: '200',
+        entityId: '202',
         limit: 2,
         offset: 1,
       })
@@ -154,22 +160,25 @@ describe('PrismaAuditRepository', () => {
   })
 
   describe('hasAction', () => {
-    beforeEach(async () => {
+    // Helper to create test entries for hasAction tests
+    async function createHasActionEntries(entityId: string) {
       await repository.create({
         entityType: AuditEntityTypes.Shipment,
-        entityId: '300',
+        entityId,
         action: AuditActions.NotificationSent,
         status: AuditStatus.Success,
       })
       await repository.create({
         entityType: AuditEntityTypes.Shipment,
-        entityId: '300',
+        entityId,
         action: AuditActions.NotificationFailed,
         status: AuditStatus.Failed,
       })
-    })
+    }
 
     it('should return true if action exists', async () => {
+      await createHasActionEntries('300')
+      
       const exists = await repository.hasAction({
         entityType: AuditEntityTypes.Shipment,
         entityId: '300',
@@ -180,9 +189,11 @@ describe('PrismaAuditRepository', () => {
     })
 
     it('should return false if action does not exist', async () => {
+      await createHasActionEntries('301')
+      
       const exists = await repository.hasAction({
         entityType: AuditEntityTypes.Shipment,
-        entityId: '300',
+        entityId: '301',
         action: AuditActions.ShipmentCreated,
       })
 
@@ -190,16 +201,18 @@ describe('PrismaAuditRepository', () => {
     })
 
     it('should filter by status', async () => {
+      await createHasActionEntries('302')
+      
       const existsSuccess = await repository.hasAction({
         entityType: AuditEntityTypes.Shipment,
-        entityId: '300',
+        entityId: '302',
         action: AuditActions.NotificationSent,
         status: AuditStatus.Success,
       })
 
       const existsFailed = await repository.hasAction({
         entityType: AuditEntityTypes.Shipment,
-        entityId: '300',
+        entityId: '302',
         action: AuditActions.NotificationSent,
         status: AuditStatus.Failed,
       })
@@ -210,32 +223,35 @@ describe('PrismaAuditRepository', () => {
   })
 
   describe('getLatest', () => {
-    beforeEach(async () => {
+    // Helper to create test entries for getLatest tests
+    async function createGetLatestEntries(entityId: string) {
       await repository.create({
         entityType: AuditEntityTypes.Shipment,
-        entityId: '400',
+        entityId,
         action: AuditActions.NotificationFailed,
         status: AuditStatus.Failed,
         error: 'First failure',
       })
-      await new Promise((r) => setTimeout(r, 10))
+      await new Promise((r) => setTimeout(r, 15))
       await repository.create({
         entityType: AuditEntityTypes.Shipment,
-        entityId: '400',
+        entityId,
         action: AuditActions.NotificationFailed,
         status: AuditStatus.Failed,
         error: 'Second failure',
       })
-      await new Promise((r) => setTimeout(r, 10))
+      await new Promise((r) => setTimeout(r, 15))
       await repository.create({
         entityType: AuditEntityTypes.Shipment,
-        entityId: '400',
+        entityId,
         action: AuditActions.NotificationSent,
         status: AuditStatus.Success,
       })
-    })
+    }
 
     it('should return the most recent entry', async () => {
+      await createGetLatestEntries('400')
+      
       const latest = await repository.getLatest(AuditEntityTypes.Shipment, '400')
 
       expect(latest).not.toBeNull()
@@ -243,9 +259,11 @@ describe('PrismaAuditRepository', () => {
     })
 
     it('should return the most recent entry for specific action', async () => {
+      await createGetLatestEntries('401')
+      
       const latest = await repository.getLatest(
         AuditEntityTypes.Shipment,
-        '400',
+        '401',
         AuditActions.NotificationFailed
       )
 
@@ -264,7 +282,7 @@ describe('PrismaAuditRepository', () => {
   })
 
   describe('count', () => {
-    beforeEach(async () => {
+    it('should count all entries for entity', async () => {
       await repository.createMany([
         {
           entityType: AuditEntityTypes.Shipment,
@@ -285,9 +303,7 @@ describe('PrismaAuditRepository', () => {
           status: AuditStatus.Success,
         },
       ])
-    })
 
-    it('should count all entries for entity', async () => {
       const count = await repository.count({
         entityType: AuditEntityTypes.Shipment,
         entityId: '500',
@@ -297,9 +313,30 @@ describe('PrismaAuditRepository', () => {
     })
 
     it('should count entries filtered by action', async () => {
+      await repository.createMany([
+        {
+          entityType: AuditEntityTypes.Shipment,
+          entityId: '501',
+          action: AuditActions.ShipmentCreated,
+          status: AuditStatus.Success,
+        },
+        {
+          entityType: AuditEntityTypes.Shipment,
+          entityId: '501',
+          action: AuditActions.NotificationSent,
+          status: AuditStatus.Success,
+        },
+        {
+          entityType: AuditEntityTypes.Shipment,
+          entityId: '501',
+          action: AuditActions.NotificationSent,
+          status: AuditStatus.Success,
+        },
+      ])
+
       const count = await repository.count({
         entityType: AuditEntityTypes.Shipment,
-        entityId: '500',
+        entityId: '501',
         action: AuditActions.NotificationSent,
       })
 
