@@ -1,8 +1,8 @@
 /**
  * Order Sync Service
  * 
- * Synchronizes the orders table with data from omg_purchase_orders and shipments.
- * Computes denormalized status and stats for efficient server-side filtering.
+ * Recomputes order stats (shipment counts, computed status) based on shipments.
+ * Orders are created by OmgOrderSyncService - this service only updates stats.
  */
 
 import type { PrismaClient } from '@prisma/client'
@@ -12,233 +12,165 @@ import {
   categorizeShipmentStatus,
   type OrderShipmentStats 
 } from '@/lib/domain/order'
-import { createOrderRepository, type OrderRepository } from './OrderRepository'
 
 export interface OrderSyncResult {
-  created: number
+  created: number  // Always 0 in new architecture
   updated: number
   total: number
 }
 
 export interface OrderSyncService {
   /**
-   * Sync all orders from omg_purchase_orders + shipments.
-   * Creates/updates orders table with computed status.
+   * Recompute stats for all orders based on shipments.
+   * Uses purchase_orders table to link shipments to orders.
    */
   syncAll(): Promise<OrderSyncResult>
 
   /**
-   * Sync a single order by order number.
-   * Call this when a shipment status changes.
+   * Recompute stats for a single order.
    */
   syncOrder(orderNumber: string): Promise<{ status: OrderStatus; stats: OrderShipmentStats } | null>
 
   /**
    * Sync orders affected by a specific shipment.
-   * Looks up the order via po_number and recomputes status.
+   * Looks up the order via po_number and recomputes stats.
    */
   syncByShipmentId(shipmentId: number): Promise<void>
 }
 
 export function createOrderSyncService(prisma: PrismaClient): OrderSyncService {
-  const repository = createOrderRepository(prisma)
+  const { normalizePoNumber } = require('@/lib/infrastructure/omg/sync')
+
+  /**
+   * Get shipment stats for an order by looking up its POs
+   */
+  async function getOrderStats(orderNumber: string): Promise<OrderShipmentStats> {
+    // Get all POs for this order
+    const pos = await prisma.purchase_orders.findMany({
+      where: { order_number: orderNumber },
+      select: { po_number: true },
+    })
+    
+    const poNumbers = pos.map(p => p.po_number)
+    
+    if (poNumbers.length === 0) {
+      // Also check old omg_purchase_orders table for backwards compat
+      const oldPos = await prisma.omg_purchase_orders.findMany({
+        where: { order_number: orderNumber },
+        select: { po_number: true },
+      })
+      poNumbers.push(...oldPos.map(p => p.po_number))
+    }
+    
+    // Get shipments matching these POs
+    const shipments = await prisma.shipments.findMany({
+      where: { po_number: { not: null } },
+      select: { po_number: true, status: true },
+    })
+    
+    // Filter to shipments matching our POs
+    const normalizedPOs = new Set(poNumbers.map(po => normalizePoNumber(po)))
+    const matchingShipments = shipments.filter(s => {
+      if (!s.po_number) return false
+      return normalizedPOs.has(normalizePoNumber(s.po_number))
+    })
+    
+    // Compute stats
+    const stats: OrderShipmentStats = {
+      total: 0,
+      delivered: 0,
+      inTransit: 0,
+      pending: 0,
+      exception: 0,
+    }
+    
+    for (const shipment of matchingShipments) {
+      stats.total++
+      const category = categorizeShipmentStatus(shipment.status)
+      stats[category]++
+    }
+    
+    return stats
+  }
 
   return {
     async syncAll(): Promise<OrderSyncResult> {
-      // Get all unique orders from omg_purchase_orders
-      const omgOrders = await prisma.omg_purchase_orders.findMany({
-        select: {
-          order_number: true,
-          order_name: true,
-          customer_name: true,
-          customer_email: true,
-          omg_order_id: true,
-          po_number: true,
-        },
+      // Get all orders from the orders table
+      const orders = await prisma.orders.findMany({
+        select: { order_number: true },
       })
-
-      // Group by order_number (an order can have multiple POs)
-      const orderMap = new Map<string, {
-        orderNumber: string
-        orderName: string | null
-        customerName: string | null
-        customerEmail: string | null
-        omgOrderId: string
-        poNumbers: string[]
-      }>()
-
-      for (const record of omgOrders) {
-        if (!orderMap.has(record.order_number)) {
-          orderMap.set(record.order_number, {
-            orderNumber: record.order_number,
-            orderName: record.order_name,
-            customerName: record.customer_name,
-            customerEmail: record.customer_email,
-            omgOrderId: record.omg_order_id,
-            poNumbers: [],
-          })
-        }
-        orderMap.get(record.order_number)!.poNumbers.push(record.po_number)
-      }
-
-      // Get all shipments with their statuses
-      const shipments = await prisma.shipments.findMany({
-        where: { po_number: { not: null } },
-        select: {
-          po_number: true,
-          status: true,
-        },
-      })
-
-      // Build a map of normalized PO -> shipment statuses
-      const { normalizePoNumber } = await import('@/lib/infrastructure/omg/sync')
-      const poStatusMap = new Map<string, string[]>()
       
-      for (const shipment of shipments) {
-        if (!shipment.po_number) continue
-        const normalized = normalizePoNumber(shipment.po_number)
-        if (!poStatusMap.has(normalized)) {
-          poStatusMap.set(normalized, [])
-        }
-        poStatusMap.get(normalized)!.push(shipment.status)
-      }
-
-      let created = 0
       let updated = 0
-
-      // Upsert each order
-      for (const [orderNumber, orderData] of orderMap) {
-        // Compute stats from shipments
-        const stats: OrderShipmentStats = {
-          total: 0,
-          delivered: 0,
-          inTransit: 0,
-          pending: 0,
-          exception: 0,
-        }
-
-        for (const poNumber of orderData.poNumbers) {
-          const statuses = poStatusMap.get(poNumber) || []
-          for (const status of statuses) {
-            stats.total++
-            const category = categorizeShipmentStatus(status)
-            stats[category]++
-          }
-        }
-
+      
+      for (const order of orders) {
+        const stats = await getOrderStats(order.order_number)
         const computedStatus = computeOrderStatus(stats)
-
-        // Check if exists
-        const existing = await repository.findByOrderNumber(orderNumber)
-
-        await repository.upsert({
-          orderNumber: orderData.orderNumber,
-          orderName: orderData.orderName,
-          customerName: orderData.customerName,
-          customerEmail: orderData.customerEmail,
-          omgOrderId: orderData.omgOrderId,
-          computedStatus,
-          shipmentCount: stats.total,
-          deliveredCount: stats.delivered,
-          inTransitCount: stats.inTransit,
-          pendingCount: stats.pending,
-          exceptionCount: stats.exception,
+        
+        // Map to Prisma enum
+        const prismaStatus = {
+          [OrderStatus.Pending]: 'pending' as const,
+          [OrderStatus.InTransit]: 'in_transit' as const,
+          [OrderStatus.PartiallyDelivered]: 'partially_delivered' as const,
+          [OrderStatus.Delivered]: 'delivered' as const,
+          [OrderStatus.Exception]: 'exception' as const,
+        }[computedStatus]
+        
+        await prisma.orders.update({
+          where: { order_number: order.order_number },
+          data: {
+            computed_status: prismaStatus,
+            shipment_count: stats.total,
+            delivered_count: stats.delivered,
+            in_transit_count: stats.inTransit,
+            pending_count: stats.pending,
+            exception_count: stats.exception,
+          },
         })
-
-        if (existing) {
-          updated++
-        } else {
-          created++
-        }
+        
+        updated++
       }
-
+      
       return {
-        created,
+        created: 0, // Orders are created by OmgOrderSyncService
         updated,
-        total: orderMap.size,
+        total: orders.length,
       }
     },
 
     async syncOrder(orderNumber: string): Promise<{ status: OrderStatus; stats: OrderShipmentStats } | null> {
-      // Get all POs for this order
-      const omgRecords = await prisma.omg_purchase_orders.findMany({
+      // Check if order exists
+      const order = await prisma.orders.findUnique({
         where: { order_number: orderNumber },
-        select: {
-          po_number: true,
-          order_name: true,
-          customer_name: true,
-          customer_email: true,
-          omg_order_id: true,
-        },
       })
-
-      if (omgRecords.length === 0) {
+      
+      if (!order) {
         return null
       }
-
-      const poNumbers = omgRecords.map(r => r.po_number)
-      const firstRecord = omgRecords[0]
-
-      // Get shipments for these POs
-      const { normalizePoNumber } = await import('@/lib/infrastructure/omg/sync')
-      const normalizedPOs = poNumbers
-
-      const shipments = await prisma.shipments.findMany({
-        where: { 
-          po_number: { 
-            in: normalizedPOs.map(po => {
-              // Match both normalized and raw formats
-              return po
-            })
-          }
-        },
-        select: { status: true, po_number: true },
-      })
-
-      // Also try matching with the shipment's po_number normalized
-      const allShipments = await prisma.shipments.findMany({
-        where: { po_number: { not: null } },
-        select: { status: true, po_number: true },
-      })
-
-      const matchingShipments = allShipments.filter(s => {
-        if (!s.po_number) return false
-        const normalized = normalizePoNumber(s.po_number)
-        return normalizedPOs.includes(normalized)
-      })
-
-      // Compute stats
-      const stats: OrderShipmentStats = {
-        total: 0,
-        delivered: 0,
-        inTransit: 0,
-        pending: 0,
-        exception: 0,
-      }
-
-      for (const shipment of matchingShipments) {
-        stats.total++
-        const category = categorizeShipmentStatus(shipment.status)
-        stats[category]++
-      }
-
+      
+      const stats = await getOrderStats(orderNumber)
       const computedStatus = computeOrderStatus(stats)
-
-      // Update the order
-      await repository.upsert({
-        orderNumber,
-        orderName: firstRecord.order_name,
-        customerName: firstRecord.customer_name,
-        customerEmail: firstRecord.customer_email,
-        omgOrderId: firstRecord.omg_order_id,
-        computedStatus,
-        shipmentCount: stats.total,
-        deliveredCount: stats.delivered,
-        inTransitCount: stats.inTransit,
-        pendingCount: stats.pending,
-        exceptionCount: stats.exception,
+      
+      // Map to Prisma enum
+      const prismaStatus = {
+        [OrderStatus.Pending]: 'pending' as const,
+        [OrderStatus.InTransit]: 'in_transit' as const,
+        [OrderStatus.PartiallyDelivered]: 'partially_delivered' as const,
+        [OrderStatus.Delivered]: 'delivered' as const,
+        [OrderStatus.Exception]: 'exception' as const,
+      }[computedStatus]
+      
+      await prisma.orders.update({
+        where: { order_number: orderNumber },
+        data: {
+          computed_status: prismaStatus,
+          shipment_count: stats.total,
+          delivered_count: stats.delivered,
+          in_transit_count: stats.inTransit,
+          pending_count: stats.pending,
+          exception_count: stats.exception,
+        },
       })
-
+      
       return { status: computedStatus, stats }
     },
 
@@ -253,21 +185,31 @@ export function createOrderSyncService(prisma: PrismaClient): OrderSyncService {
         return
       }
 
-      // Find the order number via omg_purchase_orders
-      const { normalizePoNumber } = await import('@/lib/infrastructure/omg/sync')
       const normalizedPo = normalizePoNumber(shipment.po_number)
 
-      const omgRecord = await prisma.omg_purchase_orders.findUnique({
+      // Find the order via purchase_orders table first
+      let orderRecord = await prisma.purchase_orders.findUnique({
         where: { po_number: normalizedPo },
         select: { order_number: true },
       })
+      
+      // Fallback to old omg_purchase_orders table
+      if (!orderRecord) {
+        const oldRecord = await prisma.omg_purchase_orders.findUnique({
+          where: { po_number: normalizedPo },
+          select: { order_number: true },
+        })
+        if (oldRecord) {
+          orderRecord = { order_number: oldRecord.order_number }
+        }
+      }
 
-      if (!omgRecord) {
+      if (!orderRecord) {
         return
       }
 
       // Sync the order
-      await this.syncOrder(omgRecord.order_number)
+      await this.syncOrder(orderRecord.order_number)
     },
   }
 }

@@ -131,14 +131,28 @@ export default function RefreshNow() {
         addProgress('skipped', `${omgResult.failed} shipment${omgResult.failed !== 1 ? 's' : ''} not found in OMG`)
       }
 
-      // Step 5: Sync orders table (compute statuses)
-      addProgress('processing', 'Computing order statuses...')
-      const ordersResult = await api.orders.sync()
+      // Step 5: Sync orders from OMG (primary sync)
+      addProgress('processing', 'Syncing orders from OMG...')
+      const omgOrdersResult = await api.orders.syncFromOmg({ sinceDays: 14 })
       
-      if (ordersResult.created > 0 || ordersResult.updated > 0) {
-        addProgress('found', `${ordersResult.total} order${ordersResult.total !== 1 ? 's' : ''} synced`)
+      if (omgOrdersResult.ordersCreated > 0) {
+        addProgress('found', `${omgOrdersResult.ordersCreated} new order${omgOrdersResult.ordersCreated !== 1 ? 's' : ''} from OMG`)
+      }
+      if (omgOrdersResult.ordersUpdated > 0) {
+        addProgress('found', `${omgOrdersResult.ordersUpdated} order${omgOrdersResult.ordersUpdated !== 1 ? 's' : ''} updated`)
+      }
+      if (omgOrdersResult.ordersSkipped > 0) {
+        addProgress('skipped', `${omgOrdersResult.ordersSkipped} pending orders skipped`)
+      }
+      
+      // Step 6: Recompute order stats from shipments
+      addProgress('processing', 'Computing shipment stats...')
+      const statsResult = await api.orders.recomputeStats()
+      
+      if (statsResult.updated > 0) {
+        addProgress('found', `${statsResult.updated} order${statsResult.updated !== 1 ? 's' : ''} stats updated`)
       } else {
-        addProgress('skipped', 'Orders already up to date')
+        addProgress('skipped', 'Order stats already current')
       }
 
       addProgress('complete', 'Refresh complete!')
@@ -155,8 +169,9 @@ export default function RefreshNow() {
         messages.push(`${omgResult.synced} linked to OMG`)
       }
       messages.push(`${updateResult.checked} refreshed`)
-      if (ordersResult.total > 0) {
-        messages.push(`${ordersResult.total} orders`)
+      const totalOrders = omgOrdersResult.ordersCreated + omgOrdersResult.ordersUpdated
+      if (totalOrders > 0) {
+        messages.push(`${totalOrders} orders`)
       }
 
       toast.success('Dashboard updated', {

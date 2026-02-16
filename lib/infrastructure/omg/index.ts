@@ -34,3 +34,12 @@ export {
   // Normalization helpers
   normalizePoNumber,
 } from './sync'
+
+export {
+  // Order sync service
+  createOmgOrderSyncService,
+  getOmgOrderSyncService,
+  type OmgOrderSyncService,
+  type OmgOrderSyncResult,
+  type OmgOrderSyncOptions,
+} from './OmgOrderSyncService'

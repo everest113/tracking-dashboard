@@ -72,6 +72,12 @@ export interface Order {
   customerEmail: string | null
   omgOrderId: string
   computedStatus: OrderStatus
+  // OMG status fields
+  omgApprovalStatus: string | null
+  omgOperationsStatus: string | null
+  poCount: number
+  lastSyncedAt: Date | null
+  // Shipment stats
   shipmentCount: number
   deliveredCount: number
   inTransitCount: number

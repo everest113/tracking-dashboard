@@ -1679,6 +1679,12 @@ const OrderSchema = z.object({
   computedStatus: OrderStatusEnum,
   threadStatus: z.enum(['linked', 'pending', 'not_found', 'none']),
   frontConversationId: z.string().nullable(),
+  // OMG status fields
+  omgApprovalStatus: z.string().nullable(),
+  omgOperationsStatus: z.string().nullable(),
+  poCount: z.number(),
+  lastSyncedAt: z.string().nullable(),
+  // Shipments
   shipments: z.array(z.object({
     id: z.number(),
     poNumber: z.string().nullable(),
@@ -1831,6 +1837,12 @@ const ordersRouter = {
           computedStatus: order.computedStatus as z.infer<typeof OrderStatusEnum>,
           threadStatus: threadInfo.status,
           frontConversationId: threadInfo.conversationId,
+          // OMG status fields
+          omgApprovalStatus: order.omgApprovalStatus,
+          omgOperationsStatus: order.omgOperationsStatus,
+          poCount: order.poCount,
+          lastSyncedAt: order.lastSyncedAt?.toISOString() ?? null,
+          // Shipments
           shipments: orderShipments.map(s => ({
             id: s.id,
             poNumber: s.po_number,
@@ -1866,10 +1878,50 @@ const ordersRouter = {
     }),
 
   /**
-   * Sync orders table from omg_purchase_orders + shipments
-   * Call this after any sync operation to update computed statuses
+   * Sync orders directly from OMG API.
+   * This is the primary sync - fetches orders and their POs from OMG.
+   * Filters out pending_approval and pending_prepayment orders.
    */
-  sync: publicProcedure
+  syncFromOmg: publicProcedure
+    .input(z.object({
+      /** Only sync orders updated in the last N days (default: 14) */
+      sinceDays: z.number().min(1).max(365).default(14),
+      /** Force full resync (ignore date filter) */
+      fullResync: z.boolean().default(false),
+      /** Trigger thread discovery for new orders */
+      triggerThreadDiscovery: z.boolean().default(true),
+    }).optional())
+    .output(z.object({
+      ordersCreated: z.number(),
+      ordersUpdated: z.number(),
+      ordersSkipped: z.number(),
+      posCreated: z.number(),
+      posUpdated: z.number(),
+      totalOrdersProcessed: z.number(),
+      errors: z.array(z.object({
+        orderNumber: z.string(),
+        error: z.string(),
+      })),
+    }))
+    .handler(async ({ context, input }) => {
+      const { getOmgOrderSyncService } = await import('@/lib/infrastructure/omg')
+      const service = getOmgOrderSyncService(context.prisma)
+      
+      const sinceDays = input?.sinceDays ?? 14
+      const since = new Date(Date.now() - sinceDays * 24 * 60 * 60 * 1000)
+      
+      return service.syncAll({
+        since,
+        fullResync: input?.fullResync ?? false,
+        triggerThreadDiscovery: input?.triggerThreadDiscovery ?? true,
+      })
+    }),
+
+  /**
+   * Recompute order stats from shipments.
+   * Call this after shipment changes to update delivered/in_transit counts.
+   */
+  recomputeStats: publicProcedure
     .output(z.object({
       created: z.number(),
       updated: z.number(),

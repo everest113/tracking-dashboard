@@ -46,6 +46,10 @@ function mapToOrder(record: {
   customer_email: string | null
   omg_order_id: string
   computed_status: OrderComputedStatus
+  omg_approval_status: string | null
+  omg_operations_status: string | null
+  po_count: number
+  last_synced_at: Date | null
   shipment_count: number
   delivered_count: number
   in_transit_count: number
@@ -61,6 +65,10 @@ function mapToOrder(record: {
     customerEmail: record.customer_email,
     omgOrderId: record.omg_order_id,
     computedStatus: mapPrismaStatus(record.computed_status),
+    omgApprovalStatus: record.omg_approval_status,
+    omgOperationsStatus: record.omg_operations_status,
+    poCount: record.po_count,
+    lastSyncedAt: record.last_synced_at,
     shipmentCount: record.shipment_count,
     deliveredCount: record.delivered_count,
     inTransitCount: record.in_transit_count,
@@ -87,6 +95,13 @@ export interface OrderRepository {
   findByOrderNumber(orderNumber: string): Promise<Order | null>
   list(options?: OrderListOptions): Promise<{ orders: Order[]; total: number }>
   upsert(order: Omit<Order, 'createdAt' | 'updatedAt'>): Promise<Order>
+  updateStats(orderNumber: string, status: OrderStatus, stats: {
+    shipmentCount: number
+    deliveredCount: number
+    inTransitCount: number
+    pendingCount: number
+    exceptionCount: number
+  }): Promise<Order | null>
   updateStatus(orderNumber: string, status: OrderStatus, stats: {
     shipmentCount: number
     deliveredCount: number
@@ -177,6 +192,34 @@ export function createOrderRepository(prisma: PrismaClient): OrderRepository {
       return mapToOrder(record)
     },
 
+    async updateStats(orderNumber: string, status: OrderStatus, stats: {
+      shipmentCount: number
+      deliveredCount: number
+      inTransitCount: number
+      pendingCount: number
+      exceptionCount: number
+    }): Promise<Order | null> {
+      // Only update if order exists (orders are created by OmgOrderSyncService)
+      const existing = await prisma.orders.findUnique({
+        where: { order_number: orderNumber },
+      })
+      if (!existing) return null
+      
+      const record = await prisma.orders.update({
+        where: { order_number: orderNumber },
+        data: {
+          computed_status: mapDomainStatus(status),
+          shipment_count: stats.shipmentCount,
+          delivered_count: stats.deliveredCount,
+          in_transit_count: stats.inTransitCount,
+          pending_count: stats.pendingCount,
+          exception_count: stats.exceptionCount,
+        },
+      })
+      return mapToOrder(record)
+    },
+
+    // Legacy method - kept for backwards compat
     async updateStatus(orderNumber: string, status: OrderStatus, stats: {
       shipmentCount: number
       deliveredCount: number

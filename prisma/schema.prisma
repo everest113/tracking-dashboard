@@ -97,14 +97,22 @@ model orders {
   id             Int                  @id @default(autoincrement())
   order_number   String               @unique @db.VarChar(50) // Human-readable order number (e.g., "164")
   
-  // Denormalized from omg_purchase_orders (for display)
+  // Core order data from OMG
   order_name     String?              @db.VarChar(255)
   customer_name  String?              @db.VarChar(255)
   customer_email String?              @db.VarChar(255)
   omg_order_id   String               @db.VarChar(50) // For generating OMG URLs
   
+  // OMG status fields (synced directly from OMG)
+  omg_approval_status   String?       @db.VarChar(50)  // "approved", "pending_approval", etc.
+  omg_operations_status String?       @db.VarChar(50)  // Overall order ops status
+  omg_created_at        DateTime?                      // When order was created in OMG
+  
   // Computed status for server-side filtering
   computed_status OrderComputedStatus @default(pending)
+  
+  // PO count (for display)
+  po_count         Int                @default(0)
   
   // Denormalized shipment stats (for display without joins)
   shipment_count   Int                @default(0)
@@ -112,6 +120,9 @@ model orders {
   in_transit_count Int                @default(0)
   pending_count    Int                @default(0)
   exception_count  Int                @default(0)
+  
+  // Last sync timestamp
+  last_synced_at   DateTime?
   
   // Customer thread linking (for tracking notifications)
   front_conversation_id   String?           @db.VarChar(100)
@@ -134,11 +145,55 @@ model orders {
   created_at     DateTime             @default(now())
   updated_at     DateTime             @default(now()) @updatedAt
   
+  // Relations
+  purchase_orders purchase_orders[]
+  
   @@index([computed_status], map: "idx_order_status")
   @@index([customer_email], map: "idx_order_customer_email")
   @@index([created_at(sort: Desc)], map: "idx_order_created")
   @@index([front_conversation_id], map: "idx_order_conversation")
   @@index([thread_match_status], map: "idx_order_thread_status")
+  @@index([omg_approval_status], map: "idx_order_approval_status")
+  @@index([last_synced_at], map: "idx_order_last_synced")
+}
+
+// =============================================================================
+// PURCHASE ORDERS
+// Individual POs within an order, synced from OMG.
+// Links orders to shipments via po_number matching.
+// =============================================================================
+
+model purchase_orders {
+  id              Int      @id @default(autoincrement())
+  po_number       String   @unique @db.VarChar(50)  // e.g., "164-1"
+  order_number    String   @db.VarChar(50)          // FK to orders
+  
+  // OMG identifiers
+  omg_po_id       String   @unique @db.VarChar(50)
+  omg_order_id    String   @db.VarChar(50)
+  
+  // Supplier info
+  supplier_name   String?  @db.VarChar(255)
+  
+  // Dates from OMG
+  ship_date       DateTime?
+  in_hands_date   DateTime?
+  
+  // Operations status from OMG (e.g., "In Production", "Shipped")
+  operations_status String? @db.VarChar(50)
+  
+  // Tracking numbers from OMG (JSON array of {number, carrier})
+  tracking_numbers Json    @default("[]")
+  
+  // Timestamps
+  created_at      DateTime @default(now())
+  updated_at      DateTime @default(now()) @updatedAt
+  synced_at       DateTime @default(now())
+  
+  // Relations
+  order           orders   @relation(fields: [order_number], references: [order_number])
+  
+  @@index([order_number], map: "idx_po_order_number")
 }
 
 model sync_history {
