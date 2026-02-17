@@ -24,6 +24,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Delete existing Neon Branch (if exists)
+        uses: neondatabase/delete-branch-action@v3
+        continue-on-error: true
+        with:
+          project_id: ${{ secrets.NEON_PROJECT_ID }}
+          api_key: ${{ secrets.NEON_API_KEY }}
+          branch: preview/pr-${{ github.event.pull_request.number }}
+
       - name: Create Neon Branch
         id: create-branch
         uses: neondatabase/create-branch-action@v5
