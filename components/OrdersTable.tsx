@@ -21,6 +21,7 @@ import {
   Search,
   X,
   Loader2,
+  Factory,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -195,22 +196,45 @@ export default function OrdersTable() {
     }
   }
 
-  const getOrderStatusBadge = (order: Order) => {
+  // Delivery status badge - based on actual carrier tracking data
+  const getDeliveryStatusBadge = (order: Order) => {
     const { computedStatus, stats } = order
+    
+    // Don't show delivery status if no shipments yet
+    if (stats.total === 0) return null
+    
+    const icon = <Truck className="h-3 w-3 mr-1" />
+    
     switch (computedStatus) {
       case 'delivered':
-        return <Badge className="bg-green-100 text-green-700">Delivered</Badge>
+        return <Badge className="bg-green-100 text-green-700" title="Delivery status from carrier tracking">{icon}Delivered</Badge>
       case 'partially_delivered':
-        return <Badge className="bg-blue-100 text-blue-700">{stats.delivered}/{stats.total} Delivered</Badge>
+        return <Badge className="bg-blue-100 text-blue-700" title="Delivery status from carrier tracking">{icon}{stats.delivered}/{stats.total} Delivered</Badge>
       case 'in_transit':
-        return <Badge className="bg-purple-100 text-purple-700">In Transit</Badge>
+        return <Badge className="bg-purple-100 text-purple-700" title="Delivery status from carrier tracking">{icon}In Transit</Badge>
       case 'exception':
-        return <Badge className="bg-red-100 text-red-700">Exception</Badge>
+        return <Badge className="bg-red-100 text-red-700" title="Delivery status from carrier tracking">{icon}Exception</Badge>
       case 'pending':
-        return <Badge variant="secondary">Pending</Badge>
+        return <Badge variant="secondary" title="Delivery status from carrier tracking">{icon}Pending</Badge>
       default:
-        return <Badge variant="outline">{computedStatus}</Badge>
+        return null
     }
+  }
+  
+  // Production status badge - from OMG/vendor workflow
+  const getProductionStatusBadge = (order: Order) => {
+    if (!order.omgOperationsStatus) return null
+    
+    return (
+      <Badge 
+        variant="outline" 
+        className="text-xs gap-1 text-muted-foreground"
+        title="Production status from vendor"
+      >
+        <Factory className="h-3 w-3" />
+        {order.omgOperationsStatus}
+      </Badge>
+    )
   }
 
   // Thread management functions
@@ -433,7 +457,8 @@ export default function OrdersTable() {
                           <span className="text-muted-foreground">
                             #{order.orderNumber}
                           </span>
-                          {getOrderStatusBadge(order)}
+                          {getProductionStatusBadge(order)}
+                          {getDeliveryStatusBadge(order)}
                           <Button
                             variant="ghost"
                             size="icon"
@@ -471,11 +496,6 @@ export default function OrdersTable() {
                               <Mail className="h-3 w-3" />
                               {order.customerEmail}
                             </span>
-                          )}
-                          {order.omgOperationsStatus && (
-                            <Badge variant="outline" className="text-xs">
-                              {order.omgOperationsStatus}
-                            </Badge>
                           )}
                           {order.poCount > 0 && order.stats.total === 0 && (
                             <span className="text-xs text-yellow-600">
