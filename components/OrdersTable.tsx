@@ -21,6 +21,8 @@ import {
   Search,
   X,
   Loader2,
+  Factory,
+  CalendarDays,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -86,6 +88,7 @@ interface Order {
   // OMG status fields
   omgApprovalStatus: string | null
   omgOperationsStatus: string | null
+  inHandsDate: string | null
   poCount: number
   lastSyncedAt: string | null
   // Purchase Orders with shipments
@@ -195,22 +198,31 @@ export default function OrdersTable() {
     }
   }
 
-  const getOrderStatusBadge = (order: Order) => {
-    const { computedStatus, stats } = order
-    switch (computedStatus) {
-      case 'delivered':
-        return <Badge className="bg-green-100 text-green-700">Delivered</Badge>
-      case 'partially_delivered':
-        return <Badge className="bg-blue-100 text-blue-700">{stats.delivered}/{stats.total} Delivered</Badge>
-      case 'in_transit':
-        return <Badge className="bg-purple-100 text-purple-700">In Transit</Badge>
-      case 'exception':
-        return <Badge className="bg-red-100 text-red-700">Exception</Badge>
-      case 'pending':
-        return <Badge variant="secondary">Pending</Badge>
-      default:
-        return <Badge variant="outline">{computedStatus}</Badge>
+  // Production status from OMG - where is the order in vendor workflow
+  const getProductionStatus = (order: Order) => {
+    if (!order.omgOperationsStatus) return null
+    return {
+      label: order.omgOperationsStatus,
+      color: 'bg-muted text-muted-foreground',
+      icon: Factory
     }
+  }
+  
+  // Get in-hands date from order (synced from OMG)
+  const getInHandsDate = (order: Order): Date | null => {
+    if (!order.inHandsDate) return null
+    return new Date(order.inHandsDate)
+  }
+  
+  // Format date as "Mar 15" or "Mar 15, 2025" if different year
+  const formatInHandsDate = (date: Date): string => {
+    const now = new Date()
+    const sameYear = date.getFullYear() === now.getFullYear()
+    return date.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      ...(sameYear ? {} : { year: 'numeric' })
+    })
   }
 
   // Thread management functions
@@ -425,96 +437,123 @@ export default function OrdersTable() {
                         )}
                       </div>
                       
+                      {/* Order Info */}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
-                          <span className="font-semibold">
+                          <span className="font-semibold truncate">
                             {order.orderName || `Order #${order.orderNumber}`}
                           </span>
-                          <span className="text-muted-foreground">
+                          <span className="text-sm text-muted-foreground">
                             #{order.orderNumber}
                           </span>
-                          {getOrderStatusBadge(order)}
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-6 w-6"
-                            disabled={refreshingOrder === order.orderNumber}
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              handleRefreshOrder(order.orderNumber)
-                            }}
-                            title="Refresh order from OMG"
-                          >
-                            {refreshingOrder === order.orderNumber ? (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                            ) : (
-                              <RefreshCw className="h-3.5 w-3.5" />
-                            )}
-                          </Button>
-                          <a
-                            href={order.omgOrderUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-muted-foreground hover:text-foreground"
-                            onClick={(e) => e.stopPropagation()}
-                            title="Open in OMG"
-                          >
-                            <ExternalLink className="h-4 w-4" />
-                          </a>
                         </div>
-                        <div className="text-sm text-muted-foreground flex items-center gap-4 mt-1">
-                          {order.customerName && (
-                            <span>{order.customerName}</span>
-                          )}
+                        <div className="text-sm text-muted-foreground flex items-center gap-3">
+                          {order.customerName && <span>{order.customerName}</span>}
                           {order.customerEmail && (
-                            <span className="flex items-center gap-1">
+                            <span className="flex items-center gap-1 text-xs">
                               <Mail className="h-3 w-3" />
                               {order.customerEmail}
-                            </span>
-                          )}
-                          {order.omgOperationsStatus && (
-                            <Badge variant="outline" className="text-xs">
-                              {order.omgOperationsStatus}
-                            </Badge>
-                          )}
-                          {order.poCount > 0 && order.stats.total === 0 && (
-                            <span className="text-xs text-yellow-600">
-                              {order.poCount} PO{order.poCount !== 1 ? 's' : ''} · No shipments yet
                             </span>
                           )}
                         </div>
                       </div>
 
-                      {/* Stats */}
-                      <div className="flex items-center gap-3 text-sm">
-                        <div className="flex items-center gap-1" title="Total shipments">
-                          <Package className="h-4 w-4 text-muted-foreground" />
-                          <span>{order.stats.total}</span>
+                      {/* Production Status (from OMG) */}
+                      {(() => {
+                        const status = getProductionStatus(order)
+                        if (!status) return null
+                        const StatusIcon = status.icon
+                        return (
+                          <Badge variant="outline" className="gap-1 whitespace-nowrap text-xs">
+                            <StatusIcon className="h-3 w-3" />
+                            {status.label}
+                          </Badge>
+                        )
+                      })()}
+                      
+                      {/* In-Hands Date */}
+                      {(() => {
+                        const inHandsDate = getInHandsDate(order)
+                        if (!inHandsDate) return null
+                        const isPast = inHandsDate < new Date()
+                        return (
+                          <span 
+                            className={cn(
+                              "flex items-center gap-1 text-xs whitespace-nowrap",
+                              isPast ? "text-red-600" : "text-muted-foreground"
+                            )}
+                            title={`In-hands date: ${inHandsDate.toLocaleDateString()}`}
+                          >
+                            <CalendarDays className="h-3 w-3" />
+                            {formatInHandsDate(inHandsDate)}
+                          </span>
+                        )
+                      })()}
+
+                      {/* Shipment Stats */}
+                      {order.stats.total > 0 ? (
+                        <div className="flex items-center gap-2 text-sm">
+                          {order.stats.delivered > 0 && (
+                            <span className="flex items-center gap-0.5 text-green-600" title="Delivered">
+                              <CheckCircle2 className="h-3.5 w-3.5" />
+                              {order.stats.delivered}
+                            </span>
+                          )}
+                          {order.stats.inTransit > 0 && (
+                            <span className="flex items-center gap-0.5 text-blue-600" title="In Transit">
+                              <Truck className="h-3.5 w-3.5" />
+                              {order.stats.inTransit}
+                            </span>
+                          )}
+                          {order.stats.pending > 0 && (
+                            <span className="flex items-center gap-0.5 text-gray-500" title="Pending">
+                              <Clock className="h-3.5 w-3.5" />
+                              {order.stats.pending}
+                            </span>
+                          )}
+                          {order.stats.exception > 0 && (
+                            <span className="flex items-center gap-0.5 text-red-600" title="Exception">
+                              <AlertCircle className="h-3.5 w-3.5" />
+                              {order.stats.exception}
+                            </span>
+                          )}
                         </div>
-                        {order.stats.delivered > 0 && (
-                          <div className="flex items-center gap-1 text-green-600" title="Delivered">
-                            <CheckCircle2 className="h-4 w-4" />
-                            <span>{order.stats.delivered}</span>
-                          </div>
-                        )}
-                        {order.stats.inTransit > 0 && (
-                          <div className="flex items-center gap-1 text-blue-600" title="In transit">
-                            <Truck className="h-4 w-4" />
-                            <span>{order.stats.inTransit}</span>
-                          </div>
-                        )}
-                        {order.stats.exception > 0 && (
-                          <div className="flex items-center gap-1 text-red-600" title="Exception">
-                            <AlertCircle className="h-4 w-4" />
-                            <span>{order.stats.exception}</span>
-                          </div>
-                        )}
-                        {order.stats.pending > 0 && (
-                          <div className="flex items-center gap-1 text-gray-500" title="Pending">
-                            <Clock className="h-4 w-4" />
-                            <span>{order.stats.pending}</span>
-                          </div>
-                        )}
+                      ) : order.poCount > 0 ? (
+                        <div className="text-xs text-muted-foreground whitespace-nowrap">
+                          {order.poCount} PO{order.poCount !== 1 ? 's' : ''}
+                        </div>
+                      ) : null}
+
+                      {/* Actions */}
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          disabled={refreshingOrder === order.orderNumber}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleRefreshOrder(order.orderNumber)
+                          }}
+                          title="Refresh from OMG"
+                        >
+                          {refreshingOrder === order.orderNumber ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <RefreshCw className="h-3.5 w-3.5" />
+                          )}
+                        </Button>
+                        <a
+                          href={order.omgOrderUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
+                          onClick={(e) => e.stopPropagation()}
+                          title="Open in OMG"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" />
+                        </a>
+                      </div>
                         
                         {/* Thread indicator with popover */}
                         <Popover 
@@ -629,7 +668,6 @@ export default function OrdersTable() {
                             </div>
                           </PopoverContent>
                         </Popover>
-                      </div>
                     </button>
                   </CollapsibleTrigger>
 

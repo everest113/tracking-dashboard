@@ -48,6 +48,7 @@ function mapToOrder(record: {
   computed_status: OrderComputedStatus
   omg_approval_status: string | null
   omg_operations_status: string | null
+  in_hands_date: Date | null
   po_count: number
   last_synced_at: Date | null
   shipment_count: number
@@ -67,6 +68,7 @@ function mapToOrder(record: {
     computedStatus: mapPrismaStatus(record.computed_status),
     omgApprovalStatus: record.omg_approval_status,
     omgOperationsStatus: record.omg_operations_status,
+    inHandsDate: record.in_hands_date,
     poCount: record.po_count,
     lastSyncedAt: record.last_synced_at,
     shipmentCount: record.shipment_count,

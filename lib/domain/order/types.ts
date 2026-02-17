@@ -75,6 +75,7 @@ export interface Order {
   // OMG status fields
   omgApprovalStatus: string | null
   omgOperationsStatus: string | null
+  inHandsDate: Date | null
   poCount: number
   lastSyncedAt: Date | null
   // Shipment stats

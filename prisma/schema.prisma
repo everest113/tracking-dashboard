@@ -75,6 +75,8 @@ model orders {
   omg_approval_status   String?       @db.VarChar(50)  // "approved", "pending_approval", etc.
   omg_operations_status String?       @db.VarChar(50)  // Overall order ops status
   omg_created_at        DateTime?                      // When order was created in OMG
+  in_hands_date         DateTime?                      // Customer in-hands deadline from OMG
+  followup_date         DateTime?                      // Follow-up date from OMG
   
   // Computed status for server-side filtering
   computed_status OrderComputedStatus @default(pending)
@@ -123,6 +125,8 @@ model orders {
   @@index([thread_match_status], map: "idx_order_thread_status")
   @@index([omg_approval_status], map: "idx_order_approval_status")
   @@index([last_synced_at], map: "idx_order_last_synced")
+  @@index([in_hands_date], map: "idx_order_in_hands_date")
+  @@index([followup_date], map: "idx_order_followup_date")
 }
 
 // =============================================================================

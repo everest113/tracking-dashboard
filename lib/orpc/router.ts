@@ -1685,6 +1685,7 @@ const OrderSchema = z.object({
   // OMG status fields
   omgApprovalStatus: z.string().nullable(),
   omgOperationsStatus: z.string().nullable(),
+  inHandsDate: z.string().nullable(),
   poCount: z.number(),
   lastSyncedAt: z.string().nullable(),
   // Purchase Orders with their shipments
@@ -1882,6 +1883,7 @@ const ordersRouter = {
           // OMG status fields
           omgApprovalStatus: order.omgApprovalStatus,
           omgOperationsStatus: order.omgOperationsStatus,
+          inHandsDate: order.inHandsDate?.toISOString() ?? null,
           poCount: order.poCount,
           lastSyncedAt: order.lastSyncedAt?.toISOString() ?? null,
           // Purchase Orders with shipments
