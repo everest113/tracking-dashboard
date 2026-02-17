@@ -568,12 +568,27 @@ export default function OrdersTable() {
                             <div className="space-y-3">
                               <div className="font-medium text-sm">Customer Thread</div>
                               
-                              {/* Current status */}
-                              {order.threadStatus === 'linked' && order.frontConversationId ? (
+                              {/* Show conversation link if we have one */}
+                              {order.frontConversationId && (
                                 <div className="space-y-2">
-                                  <div className="flex items-center gap-2 text-sm text-green-600">
-                                    <CheckCircle2 className="h-4 w-4" />
-                                    <span>Linked to Front</span>
+                                  <div className={cn(
+                                    "flex items-center gap-2 text-sm",
+                                    order.threadStatus === 'linked' ? "text-green-600" : 
+                                    order.threadStatus === 'pending' ? "text-yellow-600" : 
+                                    "text-muted-foreground"
+                                  )}>
+                                    {order.threadStatus === 'linked' ? (
+                                      <CheckCircle2 className="h-4 w-4" />
+                                    ) : order.threadStatus === 'pending' ? (
+                                      <AlertCircle className="h-4 w-4" />
+                                    ) : (
+                                      <MessageSquare className="h-4 w-4" />
+                                    )}
+                                    <span>
+                                      {order.threadStatus === 'linked' ? 'Linked to Front' :
+                                       order.threadStatus === 'pending' ? 'Pending review' :
+                                       'Conversation found'}
+                                    </span>
                                   </div>
                                   <a
                                     href={`https://app.frontapp.com/open/${order.frontConversationId}`}
@@ -588,12 +603,10 @@ export default function OrdersTable() {
                                     {order.frontConversationId}
                                   </div>
                                 </div>
-                              ) : order.threadStatus === 'pending' ? (
-                                <div className="flex items-center gap-2 text-sm text-yellow-600">
-                                  <AlertCircle className="h-4 w-4" />
-                                  <span>Pending review - approve or change below</span>
-                                </div>
-                              ) : (
+                              )}
+                              
+                              {/* No conversation yet */}
+                              {!order.frontConversationId && (
                                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                                   <MessageSquare className="h-4 w-4" />
                                   <span>No thread linked</span>
