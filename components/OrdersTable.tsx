@@ -546,30 +546,19 @@ export default function OrdersTable() {
                             <button
                               className={cn(
                                 "flex items-center gap-1 px-1.5 py-0.5 rounded transition-colors",
-                                // Use frontConversationId as source of truth for "has conversation"
-                                order.frontConversationId && order.threadStatus === 'linked' && "bg-green-100 text-green-700 hover:bg-green-200",
-                                order.frontConversationId && order.threadStatus === 'pending' && "bg-yellow-100 text-yellow-700 hover:bg-yellow-200",
-                                order.frontConversationId && order.threadStatus !== 'linked' && order.threadStatus !== 'pending' && "bg-blue-50 text-blue-600 hover:bg-blue-100",
-                                !order.frontConversationId && "text-muted-foreground/40 hover:text-muted-foreground hover:bg-muted"
+                                order.frontConversationId 
+                                  ? "bg-green-100 text-green-700 hover:bg-green-200"
+                                  : "text-muted-foreground/40 hover:text-muted-foreground hover:bg-muted"
                               )}
                               onClick={(e) => e.stopPropagation()}
-                              title={
-                                order.frontConversationId 
-                                  ? (order.threadStatus === 'linked' ? 'Thread linked - click to view' :
-                                     order.threadStatus === 'pending' ? 'Pending review - click to review' :
-                                     'Conversation found - click to view')
-                                  : 'No thread - click to link'
-                              }
+                              title={order.frontConversationId ? 'Conversation linked' : 'No conversation - click to link'}
                             >
                               <MessageSquare className={cn(
                                 "h-4 w-4",
                                 !order.frontConversationId && "opacity-40"
                               )} />
-                              {order.frontConversationId && order.threadStatus === 'linked' && (
+                              {order.frontConversationId && (
                                 <CheckCircle2 className="h-3 w-3" />
-                              )}
-                              {order.frontConversationId && order.threadStatus === 'pending' && (
-                                <span className="text-xs font-medium">!</span>
                               )}
                             </button>
                           </PopoverTrigger>
@@ -579,29 +568,14 @@ export default function OrdersTable() {
                             onClick={(e) => e.stopPropagation()}
                           >
                             <div className="space-y-3">
-                              <div className="font-medium text-sm">Customer Thread</div>
+                              <div className="font-medium text-sm">Customer Conversation</div>
                               
                               {/* Show conversation link if we have one */}
-                              {order.frontConversationId && (
+                              {order.frontConversationId ? (
                                 <div className="space-y-2">
-                                  <div className={cn(
-                                    "flex items-center gap-2 text-sm",
-                                    order.threadStatus === 'linked' ? "text-green-600" : 
-                                    order.threadStatus === 'pending' ? "text-yellow-600" : 
-                                    "text-muted-foreground"
-                                  )}>
-                                    {order.threadStatus === 'linked' ? (
-                                      <CheckCircle2 className="h-4 w-4" />
-                                    ) : order.threadStatus === 'pending' ? (
-                                      <AlertCircle className="h-4 w-4" />
-                                    ) : (
-                                      <MessageSquare className="h-4 w-4" />
-                                    )}
-                                    <span>
-                                      {order.threadStatus === 'linked' ? 'Linked to Front' :
-                                       order.threadStatus === 'pending' ? 'Pending review' :
-                                       'Conversation found'}
-                                    </span>
+                                  <div className="flex items-center gap-2 text-sm text-green-600">
+                                    <CheckCircle2 className="h-4 w-4" />
+                                    <span>Linked</span>
                                   </div>
                                   <a
                                     href={`https://app.frontapp.com/open/${order.frontConversationId}`}
@@ -610,19 +584,16 @@ export default function OrdersTable() {
                                     className="flex items-center gap-2 text-sm text-primary hover:underline"
                                   >
                                     <ExternalLink className="h-3 w-3" />
-                                    Open conversation
+                                    Open in Front
                                   </a>
                                   <div className="text-xs text-muted-foreground font-mono">
                                     {order.frontConversationId}
                                   </div>
                                 </div>
-                              )}
-                              
-                              {/* No conversation yet */}
-                              {!order.frontConversationId && (
+                              ) : (
                                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                                   <MessageSquare className="h-4 w-4" />
-                                  <span>No thread linked</span>
+                                  <span>No conversation linked</span>
                                 </div>
                               )}
                               
