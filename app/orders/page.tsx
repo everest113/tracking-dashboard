@@ -9,18 +9,16 @@ export default function OrdersPage() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <DashboardHeader />
         
-        <div className="mt-8">
-          <h2 className="text-2xl font-bold tracking-tight mb-2">
-            Orders
-          </h2>
-          <p className="text-muted-foreground mb-6">
-            View orders and their associated shipments
+        <div className="mb-6">
+          <h1 className="text-2xl font-bold tracking-tight">Orders</h1>
+          <p className="text-muted-foreground">
+            View orders, their POs, and associated shipments
           </p>
-          
-          <Suspense fallback={<OrdersTableSkeleton />}>
-            <OrdersTable />
-          </Suspense>
         </div>
+        
+        <Suspense fallback={<OrdersTableSkeleton />}>
+          <OrdersTable />
+        </Suspense>
       </div>
     </main>
   )

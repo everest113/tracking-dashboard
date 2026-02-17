@@ -36,8 +36,14 @@ export default async function Home({ searchParams }: PageProps) {
   return (
     <main className="min-h-screen bg-background">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Header with User Menu */}
         <DashboardHeader />
+
+        <div className="mb-6">
+          <h1 className="text-2xl font-bold tracking-tight">Shipments</h1>
+          <p className="text-muted-foreground">
+            Track active shipments and their delivery status
+          </p>
+        </div>
 
         {/* Stale Data Warning */}
         <StaleDataBanner />
