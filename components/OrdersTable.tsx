@@ -22,6 +22,7 @@ import {
   X,
   Loader2,
   Factory,
+  CalendarDays,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -204,6 +205,28 @@ export default function OrdersTable() {
       color: 'bg-muted text-muted-foreground',
       icon: Factory
     }
+  }
+  
+  // Get earliest in-hands date from all POs
+  const getInHandsDate = (order: Order): Date | null => {
+    const dates = order.purchaseOrders
+      .map(po => po.inHandsDate)
+      .filter((d): d is string => d !== null)
+      .map(d => new Date(d))
+    
+    if (dates.length === 0) return null
+    return dates.reduce((earliest, d) => d < earliest ? d : earliest)
+  }
+  
+  // Format date as "Mar 15" or "Mar 15, 2025" if different year
+  const formatInHandsDate = (date: Date): string => {
+    const now = new Date()
+    const sameYear = date.getFullYear() === now.getFullYear()
+    return date.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      ...(sameYear ? {} : { year: 'numeric' })
+    })
   }
 
   // Thread management functions
@@ -449,6 +472,25 @@ export default function OrdersTable() {
                             <StatusIcon className="h-3 w-3" />
                             {status.label}
                           </Badge>
+                        )
+                      })()}
+                      
+                      {/* In-Hands Date */}
+                      {(() => {
+                        const inHandsDate = getInHandsDate(order)
+                        if (!inHandsDate) return null
+                        const isPast = inHandsDate < new Date()
+                        return (
+                          <span 
+                            className={cn(
+                              "flex items-center gap-1 text-xs whitespace-nowrap",
+                              isPast ? "text-red-600" : "text-muted-foreground"
+                            )}
+                            title={`In-hands date: ${inHandsDate.toLocaleDateString()}`}
+                          >
+                            <CalendarDays className="h-3 w-3" />
+                            {formatInHandsDate(inHandsDate)}
+                          </span>
                         )
                       })()}
 
