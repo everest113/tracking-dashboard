@@ -1721,6 +1721,7 @@ const ordersRouter = {
     .input(z.object({
       status: OrderStatusEnum.optional(),
       search: z.string().optional(),
+      needsThreadReview: z.boolean().optional(),
       limit: z.number().min(1).max(200).default(100),
       offset: z.number().min(0).default(0),
     }).optional())
@@ -1735,6 +1736,7 @@ const ordersRouter = {
         delivered: z.number(),
         exception: z.number(),
       }),
+      pendingThreadReviews: z.number(),
     }))
     .handler(async ({ context, input }) => {
       const { normalizePoNumber } = await import('@/lib/infrastructure/omg/sync')
@@ -1757,13 +1759,17 @@ const ordersRouter = {
         filter: {
           status: input?.status ? statusMap[input.status] : undefined,
           search: input?.search,
+          needsThreadReview: input?.needsThreadReview,
         },
         limit: input?.limit ?? 100,
         offset: input?.offset ?? 0,
       })
       
-      // Get status counts
-      const statusCounts = await repository.countByStatus()
+      // Get status counts and pending thread reviews
+      const [statusCounts, pendingThreadReviews] = await Promise.all([
+        repository.countByStatus(),
+        repository.countPendingThreadReviews(),
+      ])
       
       // Now fetch PO and shipment details for these orders
       const orderNumbers = domainOrders.map(o => o.orderNumber)
@@ -1901,6 +1907,7 @@ const ordersRouter = {
           delivered: statusCounts[OrderStatus.Delivered],
           exception: statusCounts[OrderStatus.Exception],
         },
+        pendingThreadReviews,
       }
     }),
 
