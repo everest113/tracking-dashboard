@@ -24,15 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Delete existing Neon Branch (if exists)
-        uses: neondatabase/delete-branch-action@v3
-        continue-on-error: true
-        with:
-          project_id: ${{ secrets.NEON_PROJECT_ID }}
-          api_key: ${{ secrets.NEON_API_KEY }}
-          branch: preview/pr-${{ github.event.pull_request.number }}
-
-      - name: Create Neon Branch
+      - name: Create or get Neon Branch
         id: create-branch
         uses: neondatabase/create-branch-action@v5
         with:
@@ -54,7 +46,23 @@ jobs:
         run: npx prisma generate
 
       - name: Run migrations on preview branch
+        id: migrate
+        continue-on-error: true
         run: npx prisma migrate deploy
+        env:
+          DATABASE_URL: ${{ steps.create-branch.outputs.db_url }}
+
+      - name: Reset branch if migrations failed
+        if: steps.migrate.outcome == 'failure'
+        run: |
+          echo "Migration failed - resetting Neon branch to parent..."
+          curl -X POST \
+            "https://console.neon.tech/api/v2/projects/${{ secrets.NEON_PROJECT_ID }}/branches/${{ steps.create-branch.outputs.branch_id }}/reset" \
+            -H "Authorization: Bearer ${{ secrets.NEON_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d '{"parent": "main"}'
+          echo "Branch reset. Retrying migrations..."
+          npx prisma migrate deploy
         env:
           DATABASE_URL: ${{ steps.create-branch.outputs.db_url }}
 
