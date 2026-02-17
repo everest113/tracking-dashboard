@@ -125,8 +125,6 @@ export default function OrdersTable() {
     exception: 0,
   })
   const [total, setTotal] = useState(0)
-  const [pendingThreadReviews, setPendingThreadReviews] = useState(0)
-  const [needsThreadReview, setNeedsThreadReview] = useState(false)
   
   // Thread management state
   const [threadPopoverOpen, setThreadPopoverOpen] = useState<string | null>(null)
@@ -147,7 +145,7 @@ export default function OrdersTable() {
   // Fetch orders when filters change
   useEffect(() => {
     fetchOrders()
-  }, [activeStatus, searchQuery, needsThreadReview])
+  }, [activeStatus, searchQuery])
 
   const fetchOrders = useCallback(async () => {
     setLoading(true)
@@ -156,19 +154,17 @@ export default function OrdersTable() {
       const result = await api.orders.list({
         status: activeStatus === 'all' ? undefined : activeStatus as ApiOrderStatus,
         search: searchQuery || undefined,
-        needsThreadReview: needsThreadReview || undefined,
         limit: 100,
       })
       setOrders(result.orders as Order[])
       setTotal(result.total)
       setStatusCounts(result.statusCounts)
-      setPendingThreadReviews(result.pendingThreadReviews)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load orders')
     } finally {
       setLoading(false)
     }
-  }, [activeStatus, searchQuery, needsThreadReview])
+  }, [activeStatus, searchQuery])
 
   const toggleExpanded = (orderNumber: string) => {
     setExpandedOrders((prev) => {
@@ -385,7 +381,7 @@ export default function OrdersTable() {
         })}
       </div>
 
-      {/* Search & Filters */}
+      {/* Search & Refresh */}
       <div className="flex items-center gap-4">
         <Input
           placeholder="Search orders, customers..."
@@ -393,20 +389,6 @@ export default function OrdersTable() {
           onChange={(e) => setSearchInput(e.target.value)}
           className="max-w-sm"
         />
-        <Button
-          variant={needsThreadReview ? "default" : "outline"}
-          size="sm"
-          onClick={() => setNeedsThreadReview(!needsThreadReview)}
-          className="gap-2"
-        >
-          <MessageSquare className="h-4 w-4" />
-          Needs Review
-          {pendingThreadReviews > 0 && (
-            <Badge variant={needsThreadReview ? "secondary" : "default"} className="ml-1">
-              {pendingThreadReviews}
-            </Badge>
-          )}
-        </Button>
         <RefreshNow />
         <div className="ml-auto text-sm text-muted-foreground">
           {loading ? '...' : `${orders.length} of ${total}`} order{total !== 1 ? 's' : ''}
