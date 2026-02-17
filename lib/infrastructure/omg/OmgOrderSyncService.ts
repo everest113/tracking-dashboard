@@ -7,9 +7,11 @@
 
 import type { PrismaClient } from '@prisma/client'
 import { 
-  listOrders, 
+  listOrders,
+  getOrder,
   getPurchaseOrders,
-  type OMGOrder, 
+  type OMGOrder,
+  type OMGOrderListItem,
   type OMGPurchaseOrder 
 } from './client'
 
@@ -88,7 +90,7 @@ export function createOmgOrderSyncService(prisma: PrismaClient): OmgOrderSyncSer
   /**
    * Check if an order should be synced based on approval status
    */
-  function shouldSyncOrder(order: OMGOrder): boolean {
+  function shouldSyncOrder(order: OMGOrderListItem): boolean {
     const approvalStatus = order.status?.approval?.value?.toLowerCase()
     if (!approvalStatus) return true // Sync if no status
     return !EXCLUDED_APPROVAL_STATUSES.includes(approvalStatus)
@@ -127,6 +129,7 @@ export function createOmgOrderSyncService(prisma: PrismaClient): OmgOrderSyncSer
         omg_operations_status: operationsStatus,
         omg_created_at: order.createdAt ? new Date(order.createdAt) : null,
         in_hands_date: order.inHandsDate ? new Date(order.inHandsDate) : null,
+        followup_date: order.followupDate ? new Date(order.followupDate) : null,
         po_count: pos.length,
         last_synced_at: new Date(),
       },
@@ -138,6 +141,7 @@ export function createOmgOrderSyncService(prisma: PrismaClient): OmgOrderSyncSer
         omg_approval_status: order.status?.approval?.value ?? null,
         omg_operations_status: operationsStatus,
         in_hands_date: order.inHandsDate ? new Date(order.inHandsDate) : null,
+        followup_date: order.followupDate ? new Date(order.followupDate) : null,
         po_count: pos.length,
         last_synced_at: new Date(),
       },
@@ -244,11 +248,14 @@ export function createOmgOrderSyncService(prisma: PrismaClient): OmgOrderSyncSer
             }
             
             try {
+              // Fetch full order details (includes inHandsDate, followupDate)
+              const fullOrder = await getOrder(order._id)
+              
               // Fetch POs for this order
               const pos = await getPurchaseOrders(order._id)
               
               // Upsert order and POs
-              const upsertResult = await upsertOrderWithPOs(order, pos)
+              const upsertResult = await upsertOrderWithPOs(fullOrder, pos)
               
               if (upsertResult.orderCreated) {
                 result.ordersCreated++
@@ -334,8 +341,10 @@ export function createOmgOrderSyncService(prisma: PrismaClient): OmgOrderSyncSer
               return null
             }
             
+            // Fetch full order details (includes inHandsDate, followupDate)
+            const fullOrder = await getOrder(order._id)
             const pos = await getPurchaseOrders(order._id)
-            const result = await upsertOrderWithPOs(order, pos)
+            const result = await upsertOrderWithPOs(fullOrder, pos)
             
             return {
               created: result.orderCreated,

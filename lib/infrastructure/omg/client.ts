@@ -166,7 +166,8 @@ async function omgFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
 // API Methods
 // ============================================================================
 
-export interface OMGOrder {
+/** Order from list endpoint (minimal fields) */
+export interface OMGOrderListItem {
   _id: string
   number: string
   name: string
@@ -182,9 +183,14 @@ export interface OMGOrder {
     name: string
     email?: string[]
   }
-  inHandsDate?: string
   createdAt: string
   updatedAt: string
+}
+
+/** Order from detail endpoint (full fields) */
+export interface OMGOrder extends OMGOrderListItem {
+  inHandsDate?: string
+  followupDate?: string
 }
 
 export interface OMGTracking {
@@ -231,19 +237,27 @@ interface OMGListResponse<T> {
 }
 
 /**
- * List orders with pagination
+ * List orders with pagination (returns minimal fields)
  */
 export async function listOrders(
   offset = 0,
   limit = 50
-): Promise<{ orders: OMGOrder[]; total: number }> {
-  const response = await omgFetch<OMGListResponse<OMGOrder>>(
+): Promise<{ orders: OMGOrderListItem[]; total: number }> {
+  const response = await omgFetch<OMGListResponse<OMGOrderListItem>>(
     `/orders?offset=${offset}&limit=${limit}`
   )
   return {
     orders: response.data,
     total: response.results,
   }
+}
+
+/**
+ * Get full order details including inHandsDate and followupDate
+ */
+export async function getOrder(orderId: string): Promise<OMGOrder> {
+  const response = await omgFetch<{ data: OMGOrder }>(`/orders/${orderId}`)
+  return response.data
 }
 
 /**
