@@ -196,36 +196,14 @@ export default function OrdersTable() {
     }
   }
 
-  // Smart status - shows the most relevant status for where the order is
-  const getOrderStatus = (order: Order) => {
-    const { computedStatus, stats, omgOperationsStatus } = order
-    
-    // Exception always takes priority
-    if (computedStatus === 'exception') {
-      return { label: 'Exception', color: 'bg-red-100 text-red-700', icon: AlertCircle }
+  // Production status from OMG - where is the order in vendor workflow
+  const getProductionStatus = (order: Order) => {
+    if (!order.omgOperationsStatus) return null
+    return {
+      label: order.omgOperationsStatus,
+      color: 'bg-muted text-muted-foreground',
+      icon: Factory
     }
-    
-    // If we have shipments, show delivery status
-    if (stats.total > 0) {
-      switch (computedStatus) {
-        case 'delivered':
-          return { label: 'Delivered', color: 'bg-green-100 text-green-700', icon: CheckCircle2 }
-        case 'partially_delivered':
-          return { label: `${stats.delivered}/${stats.total} Delivered`, color: 'bg-green-100 text-green-700', icon: CheckCircle2 }
-        case 'in_transit':
-          return { label: 'In Transit', color: 'bg-blue-100 text-blue-700', icon: Truck }
-        case 'pending':
-          return { label: 'Tracking Pending', color: 'bg-gray-100 text-gray-600', icon: Clock }
-      }
-    }
-    
-    // No shipments yet - show production status from OMG
-    if (omgOperationsStatus) {
-      return { label: omgOperationsStatus, color: 'bg-amber-50 text-amber-700', icon: Factory }
-    }
-    
-    // Fallback
-    return { label: 'Awaiting Info', color: 'bg-gray-100 text-gray-500', icon: Clock }
   }
 
   // Thread management functions
@@ -461,12 +439,13 @@ export default function OrdersTable() {
                         </div>
                       </div>
 
-                      {/* Status Badge */}
+                      {/* Production Status (from OMG) */}
                       {(() => {
-                        const status = getOrderStatus(order)
+                        const status = getProductionStatus(order)
+                        if (!status) return null
                         const StatusIcon = status.icon
                         return (
-                          <Badge className={cn("gap-1 whitespace-nowrap", status.color)}>
+                          <Badge variant="outline" className="gap-1 whitespace-nowrap text-xs">
                             <StatusIcon className="h-3 w-3" />
                             {status.label}
                           </Badge>
