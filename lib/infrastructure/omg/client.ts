@@ -182,6 +182,7 @@ export interface OMGOrder {
     name: string
     email?: string[]
   }
+  inHandsDate?: string
   createdAt: string
   updatedAt: string
 }

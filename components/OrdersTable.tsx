@@ -88,6 +88,7 @@ interface Order {
   // OMG status fields
   omgApprovalStatus: string | null
   omgOperationsStatus: string | null
+  inHandsDate: string | null
   poCount: number
   lastSyncedAt: string | null
   // Purchase Orders with shipments
@@ -207,15 +208,10 @@ export default function OrdersTable() {
     }
   }
   
-  // Get earliest in-hands date from all POs
+  // Get in-hands date from order (synced from OMG)
   const getInHandsDate = (order: Order): Date | null => {
-    const dates = order.purchaseOrders
-      .map(po => po.inHandsDate)
-      .filter((d): d is string => d !== null)
-      .map(d => new Date(d))
-    
-    if (dates.length === 0) return null
-    return dates.reduce((earliest, d) => d < earliest ? d : earliest)
+    if (!order.inHandsDate) return null
+    return new Date(order.inHandsDate)
   }
   
   // Format date as "Mar 15" or "Mar 15, 2025" if different year
