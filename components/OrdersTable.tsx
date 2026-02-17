@@ -527,19 +527,21 @@ export default function OrdersTable() {
                           <PopoverTrigger asChild>
                             <button
                               className={cn(
-                                "flex items-center gap-1 p-1 rounded hover:bg-muted transition-colors",
-                                order.threadStatus === 'linked' && "text-green-600",
-                                order.threadStatus === 'pending' && "text-yellow-600",
-                                (order.threadStatus === 'not_found' || order.threadStatus === 'none') && "text-muted-foreground"
+                                "flex items-center gap-1 px-1.5 py-0.5 rounded transition-colors",
+                                order.frontConversationId 
+                                  ? "bg-green-100 text-green-700 hover:bg-green-200"
+                                  : "text-muted-foreground/40 hover:text-muted-foreground hover:bg-muted"
                               )}
                               onClick={(e) => e.stopPropagation()}
-                              title={
-                                order.threadStatus === 'linked' ? 'Thread linked' :
-                                order.threadStatus === 'pending' ? 'Pending review' :
-                                'No thread - click to link'
-                              }
+                              title={order.frontConversationId ? 'Conversation linked' : 'No conversation - click to link'}
                             >
-                              <MessageSquare className="h-4 w-4" />
+                              <MessageSquare className={cn(
+                                "h-4 w-4",
+                                !order.frontConversationId && "opacity-40"
+                              )} />
+                              {order.frontConversationId && (
+                                <CheckCircle2 className="h-3 w-3" />
+                              )}
                             </button>
                           </PopoverTrigger>
                           <PopoverContent 
@@ -548,14 +550,14 @@ export default function OrdersTable() {
                             onClick={(e) => e.stopPropagation()}
                           >
                             <div className="space-y-3">
-                              <div className="font-medium text-sm">Customer Thread</div>
+                              <div className="font-medium text-sm">Customer Conversation</div>
                               
-                              {/* Current status */}
-                              {order.threadStatus === 'linked' && order.frontConversationId ? (
+                              {/* Show conversation link if we have one */}
+                              {order.frontConversationId ? (
                                 <div className="space-y-2">
                                   <div className="flex items-center gap-2 text-sm text-green-600">
                                     <CheckCircle2 className="h-4 w-4" />
-                                    <span>Linked to Front</span>
+                                    <span>Linked</span>
                                   </div>
                                   <a
                                     href={`https://app.frontapp.com/open/${order.frontConversationId}`}
@@ -564,21 +566,16 @@ export default function OrdersTable() {
                                     className="flex items-center gap-2 text-sm text-primary hover:underline"
                                   >
                                     <ExternalLink className="h-3 w-3" />
-                                    Open conversation
+                                    Open in Front
                                   </a>
                                   <div className="text-xs text-muted-foreground font-mono">
                                     {order.frontConversationId}
                                   </div>
                                 </div>
-                              ) : order.threadStatus === 'pending' ? (
-                                <div className="flex items-center gap-2 text-sm text-yellow-600">
-                                  <AlertCircle className="h-4 w-4" />
-                                  <span>Pending review - approve or change below</span>
-                                </div>
                               ) : (
                                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                                   <MessageSquare className="h-4 w-4" />
-                                  <span>No thread linked</span>
+                                  <span>No conversation linked</span>
                                 </div>
                               )}
                               

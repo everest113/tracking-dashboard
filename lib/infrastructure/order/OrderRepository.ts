@@ -83,6 +83,7 @@ export interface OrderListFilter {
   status?: OrderStatus
   search?: string
   customerEmail?: string
+  needsThreadReview?: boolean
 }
 
 export interface OrderListOptions {
@@ -111,6 +112,7 @@ export interface OrderRepository {
   }): Promise<Order>
   count(filter?: OrderListFilter): Promise<number>
   countByStatus(): Promise<Record<OrderStatus | 'all', number>>
+  countPendingThreadReviews(): Promise<number>
 }
 
 export function createOrderRepository(prisma: PrismaClient): OrderRepository {
@@ -143,6 +145,10 @@ export function createOrderRepository(prisma: PrismaClient): OrderRepository {
           { customer_name: { contains: filter.search, mode: 'insensitive' } },
           { customer_email: { contains: filter.search, mode: 'insensitive' } },
         ]
+      }
+
+      if (filter?.needsThreadReview) {
+        where.thread_match_status = 'pending_review'
       }
 
       const [records, total] = await Promise.all([
@@ -282,6 +288,12 @@ export function createOrderRepository(prisma: PrismaClient): OrderRepository {
       }
 
       return counts
+    },
+
+    async countPendingThreadReviews(): Promise<number> {
+      return prisma.orders.count({
+        where: { thread_match_status: 'pending_review' },
+      })
     },
   }
 }
