@@ -1,6 +1,7 @@
 import { Suspense } from 'react'
 import ThreadReviewQueue from '@/components/ThreadReviewQueue'
 import { DashboardHeader } from '@/components/DashboardHeader'
+import { Skeleton } from '@/components/ui/skeleton'
 
 export default function ThreadsPage() {
   return (
@@ -8,19 +9,27 @@ export default function ThreadsPage() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <DashboardHeader />
         
-        <div className="mt-8">
-          <h2 className="text-2xl font-bold tracking-tight mb-6">
-            Customer Thread Matching
-          </h2>
-          <p className="text-muted-foreground mb-6">
-            Review and approve automatically matched Front conversations for shipment notifications.
+        <div className="mb-6">
+          <h1 className="text-2xl font-bold tracking-tight">Customer Threads</h1>
+          <p className="text-muted-foreground">
+            Review and approve matched Front conversations for tracking notifications
           </p>
-          
-          <Suspense fallback={<div>Loading...</div>}>
-            <ThreadReviewQueue />
-          </Suspense>
         </div>
+        
+        <Suspense fallback={<ThreadsTableSkeleton />}>
+          <ThreadReviewQueue />
+        </Suspense>
       </div>
     </main>
+  )
+}
+
+function ThreadsTableSkeleton() {
+  return (
+    <div className="space-y-4">
+      {[1, 2, 3, 4, 5].map((i) => (
+        <Skeleton key={i} className="h-24 w-full" />
+      ))}
+    </div>
   )
 }
