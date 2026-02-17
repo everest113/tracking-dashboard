@@ -545,19 +545,28 @@ export default function OrdersTable() {
                           <PopoverTrigger asChild>
                             <button
                               className={cn(
-                                "flex items-center gap-1 p-1 rounded hover:bg-muted transition-colors",
-                                order.threadStatus === 'linked' && "text-green-600",
-                                order.threadStatus === 'pending' && "text-yellow-600",
-                                (order.threadStatus === 'not_found' || order.threadStatus === 'none') && "text-muted-foreground"
+                                "flex items-center gap-1 px-1.5 py-0.5 rounded transition-colors",
+                                order.threadStatus === 'linked' && "bg-green-100 text-green-700 hover:bg-green-200",
+                                order.threadStatus === 'pending' && "bg-yellow-100 text-yellow-700 hover:bg-yellow-200",
+                                (order.threadStatus === 'not_found' || order.threadStatus === 'none') && "text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted"
                               )}
                               onClick={(e) => e.stopPropagation()}
                               title={
-                                order.threadStatus === 'linked' ? 'Thread linked' :
-                                order.threadStatus === 'pending' ? 'Pending review' :
+                                order.threadStatus === 'linked' ? 'Thread linked - click to view' :
+                                order.threadStatus === 'pending' ? 'Pending review - click to review' :
                                 'No thread - click to link'
                               }
                             >
-                              <MessageSquare className="h-4 w-4" />
+                              <MessageSquare className={cn(
+                                "h-4 w-4",
+                                (order.threadStatus === 'not_found' || order.threadStatus === 'none') && "opacity-50"
+                              )} />
+                              {order.threadStatus === 'linked' && (
+                                <CheckCircle2 className="h-3 w-3" />
+                              )}
+                              {order.threadStatus === 'pending' && (
+                                <span className="text-xs font-medium">!</span>
+                              )}
                             </button>
                           </PopoverTrigger>
                           <PopoverContent 
