@@ -196,45 +196,36 @@ export default function OrdersTable() {
     }
   }
 
-  // Delivery status badge - based on actual carrier tracking data
-  const getDeliveryStatusBadge = (order: Order) => {
-    const { computedStatus, stats } = order
+  // Smart status - shows the most relevant status for where the order is
+  const getOrderStatus = (order: Order) => {
+    const { computedStatus, stats, omgOperationsStatus } = order
     
-    // Don't show delivery status if no shipments yet
-    if (stats.total === 0) return null
-    
-    const icon = <Truck className="h-3 w-3 mr-1" />
-    
-    switch (computedStatus) {
-      case 'delivered':
-        return <Badge className="bg-green-100 text-green-700" title="Delivery status from carrier tracking">{icon}Delivered</Badge>
-      case 'partially_delivered':
-        return <Badge className="bg-blue-100 text-blue-700" title="Delivery status from carrier tracking">{icon}{stats.delivered}/{stats.total} Delivered</Badge>
-      case 'in_transit':
-        return <Badge className="bg-purple-100 text-purple-700" title="Delivery status from carrier tracking">{icon}In Transit</Badge>
-      case 'exception':
-        return <Badge className="bg-red-100 text-red-700" title="Delivery status from carrier tracking">{icon}Exception</Badge>
-      case 'pending':
-        return <Badge variant="secondary" title="Delivery status from carrier tracking">{icon}Pending</Badge>
-      default:
-        return null
+    // Exception always takes priority
+    if (computedStatus === 'exception') {
+      return { label: 'Exception', color: 'bg-red-100 text-red-700', icon: AlertCircle }
     }
-  }
-  
-  // Production status badge - from OMG/vendor workflow
-  const getProductionStatusBadge = (order: Order) => {
-    if (!order.omgOperationsStatus) return null
     
-    return (
-      <Badge 
-        variant="outline" 
-        className="text-xs gap-1 text-muted-foreground"
-        title="Production status from vendor"
-      >
-        <Factory className="h-3 w-3" />
-        {order.omgOperationsStatus}
-      </Badge>
-    )
+    // If we have shipments, show delivery status
+    if (stats.total > 0) {
+      switch (computedStatus) {
+        case 'delivered':
+          return { label: 'Delivered', color: 'bg-green-100 text-green-700', icon: CheckCircle2 }
+        case 'partially_delivered':
+          return { label: `${stats.delivered}/${stats.total} Delivered`, color: 'bg-green-100 text-green-700', icon: CheckCircle2 }
+        case 'in_transit':
+          return { label: 'In Transit', color: 'bg-blue-100 text-blue-700', icon: Truck }
+        case 'pending':
+          return { label: 'Tracking Pending', color: 'bg-gray-100 text-gray-600', icon: Clock }
+      }
+    }
+    
+    // No shipments yet - show production status from OMG
+    if (omgOperationsStatus) {
+      return { label: omgOperationsStatus, color: 'bg-amber-50 text-amber-700', icon: Factory }
+    }
+    
+    // Fallback
+    return { label: 'Awaiting Info', color: 'bg-gray-100 text-gray-500', icon: Clock }
   }
 
   // Thread management functions
@@ -449,92 +440,38 @@ export default function OrdersTable() {
                         )}
                       </div>
                       
+                      {/* Order Info */}
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="font-semibold">
-                            {order.orderName || `Order #${order.orderNumber}`}
-                          </span>
-                          <span className="text-muted-foreground">
-                            #{order.orderNumber}
-                          </span>
-                          {getProductionStatusBadge(order)}
-                          {getDeliveryStatusBadge(order)}
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-6 w-6"
-                            disabled={refreshingOrder === order.orderNumber}
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              handleRefreshOrder(order.orderNumber)
-                            }}
-                            title="Refresh order from OMG"
-                          >
-                            {refreshingOrder === order.orderNumber ? (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                            ) : (
-                              <RefreshCw className="h-3.5 w-3.5" />
-                            )}
-                          </Button>
-                          <a
-                            href={order.omgOrderUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-muted-foreground hover:text-foreground"
-                            onClick={(e) => e.stopPropagation()}
-                            title="Open in OMG"
-                          >
-                            <ExternalLink className="h-4 w-4" />
-                          </a>
+                        <div className="font-semibold truncate">
+                          {order.orderName || `Order #${order.orderNumber}`}
                         </div>
-                        <div className="text-sm text-muted-foreground flex items-center gap-4 mt-1">
-                          {order.customerName && (
-                            <span>{order.customerName}</span>
-                          )}
-                          {order.customerEmail && (
-                            <span className="flex items-center gap-1">
-                              <Mail className="h-3 w-3" />
-                              {order.customerEmail}
-                            </span>
-                          )}
-                          {order.poCount > 0 && order.stats.total === 0 && (
-                            <span className="text-xs text-yellow-600">
-                              {order.poCount} PO{order.poCount !== 1 ? 's' : ''} · No shipments yet
-                            </span>
-                          )}
+                        <div className="text-sm text-muted-foreground">
+                          {order.customerName || `#${order.orderNumber}`}
                         </div>
                       </div>
 
-                      {/* Stats */}
-                      <div className="flex items-center gap-3 text-sm">
-                        <div className="flex items-center gap-1" title="Total shipments">
-                          <Package className="h-4 w-4 text-muted-foreground" />
-                          <span>{order.stats.total}</span>
+                      {/* Status Badge */}
+                      {(() => {
+                        const status = getOrderStatus(order)
+                        const StatusIcon = status.icon
+                        return (
+                          <Badge className={cn("gap-1 whitespace-nowrap", status.color)}>
+                            <StatusIcon className="h-3 w-3" />
+                            {status.label}
+                          </Badge>
+                        )
+                      })()}
+
+                      {/* Shipment Progress */}
+                      {order.stats.total > 0 ? (
+                        <div className="text-sm text-muted-foreground whitespace-nowrap" title={`${order.stats.delivered} of ${order.stats.total} delivered`}>
+                          {order.stats.delivered}/{order.stats.total}
                         </div>
-                        {order.stats.delivered > 0 && (
-                          <div className="flex items-center gap-1 text-green-600" title="Delivered">
-                            <CheckCircle2 className="h-4 w-4" />
-                            <span>{order.stats.delivered}</span>
-                          </div>
-                        )}
-                        {order.stats.inTransit > 0 && (
-                          <div className="flex items-center gap-1 text-blue-600" title="In transit">
-                            <Truck className="h-4 w-4" />
-                            <span>{order.stats.inTransit}</span>
-                          </div>
-                        )}
-                        {order.stats.exception > 0 && (
-                          <div className="flex items-center gap-1 text-red-600" title="Exception">
-                            <AlertCircle className="h-4 w-4" />
-                            <span>{order.stats.exception}</span>
-                          </div>
-                        )}
-                        {order.stats.pending > 0 && (
-                          <div className="flex items-center gap-1 text-gray-500" title="Pending">
-                            <Clock className="h-4 w-4" />
-                            <span>{order.stats.pending}</span>
-                          </div>
-                        )}
+                      ) : order.poCount > 0 ? (
+                        <div className="text-xs text-muted-foreground whitespace-nowrap">
+                          {order.poCount} PO{order.poCount !== 1 ? 's' : ''}
+                        </div>
+                      ) : null}
                         
                         {/* Thread indicator with popover */}
                         <Popover 
@@ -649,7 +586,6 @@ export default function OrdersTable() {
                             </div>
                           </PopoverContent>
                         </Popover>
-                      </div>
                     </button>
                   </CollapsibleTrigger>
 
