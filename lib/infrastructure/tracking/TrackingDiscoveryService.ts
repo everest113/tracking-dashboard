@@ -122,7 +122,11 @@ export interface TrackingDiscoveryService {
 }
 
 export function createTrackingDiscoveryService(prisma: PrismaClient): TrackingDiscoveryService {
-  const { normalizePoNumber } = require('@/lib/infrastructure/omg/sync')
+  // Helper to get normalizePoNumber (dynamic import to avoid require)
+  const getNormalizePoNumber = async () => {
+    const { normalizePoNumber } = await import('@/lib/infrastructure/omg/sync')
+    return normalizePoNumber
+  }
 
   /**
    * Extract tracking numbers from conversation messages
@@ -168,6 +172,7 @@ export function createTrackingDiscoveryService(prisma: PrismaClient): TrackingDi
    * Search Front for a PO number and extract tracking
    */
   async function searchFrontForPO(poNumber: string): Promise<ExtractedTracking[]> {
+    const normalizePoNumber = await getNormalizePoNumber()
     const results: ExtractedTracking[] = []
     
     // Try both formats: "164-1" and "164-01"
@@ -225,6 +230,8 @@ export function createTrackingDiscoveryService(prisma: PrismaClient): TrackingDi
     poNumber: string,
     conversationId: string
   ): Promise<boolean> {
+    const normalizePoNumber = await getNormalizePoNumber()
+    
     // Check if shipment already exists
     const existing = await prisma.shipments.findUnique({
       where: { tracking_number: trackingNumber },
@@ -260,6 +267,7 @@ export function createTrackingDiscoveryService(prisma: PrismaClient): TrackingDi
 
   return {
     async discoverAll(options = {}): Promise<DiscoveryResult> {
+      const normalizePoNumber = await getNormalizePoNumber()
       const { limit = 50 } = options
       
       const result: DiscoveryResult = {

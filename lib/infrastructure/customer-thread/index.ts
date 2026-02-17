@@ -90,13 +90,15 @@ export function resetCustomerThreadServices(): void {
 // =============================================================================
 
 /** @deprecated Use getOrderThreadRepository instead */
-export function getCustomerThreadRepository() {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function getCustomerThreadRepository(): any {
   console.warn('getCustomerThreadRepository is deprecated. Use getOrderThreadRepository instead.')
-  return getOrderThreadRepository() as any
+  return getOrderThreadRepository()
 }
 
 /** @deprecated Use getOrderThreadDiscoveryService instead */
-export async function getThreadDiscoveryService() {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function getThreadDiscoveryService(): Promise<any> {
   console.warn('getThreadDiscoveryService is deprecated. Use getOrderThreadDiscoveryService instead.')
-  return getOrderThreadDiscoveryService() as any
+  return getOrderThreadDiscoveryService()
 }

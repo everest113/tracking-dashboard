@@ -39,12 +39,12 @@ export interface OrderSyncService {
 }
 
 export function createOrderSyncService(prisma: PrismaClient): OrderSyncService {
-  const { normalizePoNumber } = require('@/lib/infrastructure/omg/sync')
-
   /**
    * Get shipment stats for an order by looking up its POs
    */
   async function getOrderStats(orderNumber: string): Promise<OrderShipmentStats> {
+    const { normalizePoNumber } = await import('@/lib/infrastructure/omg/sync')
+    
     // Get all POs for this order
     const pos = await prisma.purchase_orders.findMany({
       where: { order_number: orderNumber },
@@ -166,6 +166,8 @@ export function createOrderSyncService(prisma: PrismaClient): OrderSyncService {
     },
 
     async syncByShipmentId(shipmentId: number): Promise<void> {
+      const { normalizePoNumber } = await import('@/lib/infrastructure/omg/sync')
+      
       // Get the shipment's PO number
       const shipment = await prisma.shipments.findUnique({
         where: { id: shipmentId },
