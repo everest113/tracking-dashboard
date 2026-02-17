@@ -442,11 +442,22 @@ export default function OrdersTable() {
                       
                       {/* Order Info */}
                       <div className="flex-1 min-w-0">
-                        <div className="font-semibold truncate">
-                          {order.orderName || `Order #${order.orderNumber}`}
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold truncate">
+                            {order.orderName || `Order #${order.orderNumber}`}
+                          </span>
+                          <span className="text-sm text-muted-foreground">
+                            #{order.orderNumber}
+                          </span>
                         </div>
-                        <div className="text-sm text-muted-foreground">
-                          {order.customerName || `#${order.orderNumber}`}
+                        <div className="text-sm text-muted-foreground flex items-center gap-3">
+                          {order.customerName && <span>{order.customerName}</span>}
+                          {order.customerEmail && (
+                            <span className="flex items-center gap-1 text-xs">
+                              <Mail className="h-3 w-3" />
+                              {order.customerEmail}
+                            </span>
+                          )}
                         </div>
                       </div>
 
@@ -462,16 +473,70 @@ export default function OrdersTable() {
                         )
                       })()}
 
-                      {/* Shipment Progress */}
+                      {/* Shipment Stats */}
                       {order.stats.total > 0 ? (
-                        <div className="text-sm text-muted-foreground whitespace-nowrap" title={`${order.stats.delivered} of ${order.stats.total} delivered`}>
-                          {order.stats.delivered}/{order.stats.total}
+                        <div className="flex items-center gap-2 text-sm">
+                          {order.stats.delivered > 0 && (
+                            <span className="flex items-center gap-0.5 text-green-600" title="Delivered">
+                              <CheckCircle2 className="h-3.5 w-3.5" />
+                              {order.stats.delivered}
+                            </span>
+                          )}
+                          {order.stats.inTransit > 0 && (
+                            <span className="flex items-center gap-0.5 text-blue-600" title="In Transit">
+                              <Truck className="h-3.5 w-3.5" />
+                              {order.stats.inTransit}
+                            </span>
+                          )}
+                          {order.stats.pending > 0 && (
+                            <span className="flex items-center gap-0.5 text-gray-500" title="Pending">
+                              <Clock className="h-3.5 w-3.5" />
+                              {order.stats.pending}
+                            </span>
+                          )}
+                          {order.stats.exception > 0 && (
+                            <span className="flex items-center gap-0.5 text-red-600" title="Exception">
+                              <AlertCircle className="h-3.5 w-3.5" />
+                              {order.stats.exception}
+                            </span>
+                          )}
                         </div>
                       ) : order.poCount > 0 ? (
                         <div className="text-xs text-muted-foreground whitespace-nowrap">
                           {order.poCount} PO{order.poCount !== 1 ? 's' : ''}
                         </div>
                       ) : null}
+
+                      {/* Actions */}
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          disabled={refreshingOrder === order.orderNumber}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleRefreshOrder(order.orderNumber)
+                          }}
+                          title="Refresh from OMG"
+                        >
+                          {refreshingOrder === order.orderNumber ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <RefreshCw className="h-3.5 w-3.5" />
+                          )}
+                        </Button>
+                        <a
+                          href={order.omgOrderUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
+                          onClick={(e) => e.stopPropagation()}
+                          title="Open in OMG"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" />
+                        </a>
+                      </div>
                         
                         {/* Thread indicator with popover */}
                         <Popover 
