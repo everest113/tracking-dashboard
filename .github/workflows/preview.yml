@@ -24,7 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Create Neon Branch
+      - name: Create or get Neon Branch
         id: create-branch
         uses: neondatabase/create-branch-action@v5
         with:
@@ -46,9 +46,36 @@ jobs:
         run: npx prisma generate
 
       - name: Run migrations on preview branch
+        id: migrate
+        continue-on-error: true
         run: npx prisma migrate deploy
         env:
           DATABASE_URL: ${{ steps.create-branch.outputs.db_url }}
+
+      - name: Reset branch if migrations failed
+        if: steps.migrate.outcome == 'failure'
+        uses: neondatabase/delete-branch-action@v3
+        with:
+          project_id: ${{ secrets.NEON_PROJECT_ID }}
+          api_key: ${{ secrets.NEON_API_KEY }}
+          branch: preview/pr-${{ github.event.pull_request.number }}
+
+      - name: Recreate branch after reset
+        if: steps.migrate.outcome == 'failure'
+        id: recreate-branch
+        uses: neondatabase/create-branch-action@v5
+        with:
+          project_id: ${{ secrets.NEON_PROJECT_ID }}
+          api_key: ${{ secrets.NEON_API_KEY }}
+          branch_name: preview/pr-${{ github.event.pull_request.number }}
+          parent: main
+          database: neondb
+
+      - name: Retry migrations after reset
+        if: steps.migrate.outcome == 'failure'
+        run: npx prisma migrate deploy
+        env:
+          DATABASE_URL: ${{ steps.recreate-branch.outputs.db_url }}
 
       - name: Comment PR with preview DB info
         uses: actions/github-script@v7

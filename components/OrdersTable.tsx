@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { formatDistanceToNow } from 'date-fns'
 import {
   ChevronDown,
@@ -11,9 +11,16 @@ import {
   CheckCircle2,
   AlertCircle,
   Clock,
-  RefreshCw,
   Mail,
   MessageSquare,
+  PackageCheck,
+  CircleDot,
+  RefreshCw,
+  Pencil,
+  Link2,
+  Search,
+  X,
+  Loader2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -32,19 +39,39 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover'
 import { api } from '@/lib/orpc/client'
 import { cn } from '@/lib/utils'
+import { toast } from 'sonner'
+import RefreshNow from '@/components/RefreshNow'
+
+// Order-level status (matches server-side enum)
+type OrderStatus = 'all' | 'pending' | 'in_transit' | 'partially_delivered' | 'delivered' | 'exception'
+
+// API status type (excludes 'all')
+type ApiOrderStatus = Exclude<OrderStatus, 'all'>
 
 interface Shipment {
   id: number
-  poNumber: string | null
   trackingNumber: string
   carrier: string | null
   status: string
   shippedDate: string | null
   deliveredDate: string | null
   lastChecked: string | null
-  threadStatus: 'linked' | 'pending' | 'not_found' | 'none'
+}
+
+interface PurchaseOrder {
+  poNumber: string
+  supplierName: string | null
+  shipDate: string | null
+  inHandsDate: string | null
+  operationsStatus: string | null
+  shipments: Shipment[]
 }
 
 interface Order {
@@ -53,7 +80,16 @@ interface Order {
   customerName: string | null
   customerEmail: string | null
   omgOrderUrl: string
-  shipments: Shipment[]
+  computedStatus: ApiOrderStatus
+  threadStatus: 'linked' | 'pending' | 'not_found' | 'none'
+  frontConversationId: string | null
+  // OMG status fields
+  omgApprovalStatus: string | null
+  omgOperationsStatus: string | null
+  poCount: number
+  lastSyncedAt: string | null
+  // Purchase Orders with shipments
+  purchaseOrders: PurchaseOrder[]
   stats: {
     total: number
     delivered: number
@@ -63,29 +99,72 @@ interface Order {
   }
 }
 
+interface StatusCounts {
+  all: number
+  pending: number
+  in_transit: number
+  partially_delivered: number
+  delivered: number
+  exception: number
+}
+
 export default function OrdersTable() {
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [expandedOrders, setExpandedOrders] = useState<Set<string>>(new Set())
   const [searchQuery, setSearchQuery] = useState('')
+  const [searchInput, setSearchInput] = useState('') // Debounced input
+  const [activeStatus, setActiveStatus] = useState<OrderStatus>('all')
+  const [statusCounts, setStatusCounts] = useState<StatusCounts>({
+    all: 0,
+    pending: 0,
+    in_transit: 0,
+    partially_delivered: 0,
+    delivered: 0,
+    exception: 0,
+  })
+  const [total, setTotal] = useState(0)
+  
+  // Thread management state
+  const [threadPopoverOpen, setThreadPopoverOpen] = useState<string | null>(null)
+  const [threadLoading, setThreadLoading] = useState<string | null>(null)
+  const [manualConversationId, setManualConversationId] = useState('')
+  
+  // Refresh state
+  const [refreshingOrder, setRefreshingOrder] = useState<string | null>(null)
 
+  // Debounce search input
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSearchQuery(searchInput)
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [searchInput])
+
+  // Fetch orders when filters change
   useEffect(() => {
     fetchOrders()
-  }, [])
+  }, [activeStatus, searchQuery])
 
-  const fetchOrders = async () => {
+  const fetchOrders = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      const result = await api.orders.list({})
-      setOrders(result.orders)
+      const result = await api.orders.list({
+        status: activeStatus === 'all' ? undefined : activeStatus as ApiOrderStatus,
+        search: searchQuery || undefined,
+        limit: 100,
+      })
+      setOrders(result.orders as Order[])
+      setTotal(result.total)
+      setStatusCounts(result.statusCounts)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load orders')
     } finally {
       setLoading(false)
     }
-  }
+  }, [activeStatus, searchQuery])
 
   const toggleExpanded = (orderNumber: string) => {
     setExpandedOrders((prev) => {
@@ -116,29 +195,135 @@ export default function OrdersTable() {
     }
   }
 
-  const getThreadStatusIcon = (status: string) => {
-    switch (status) {
-      case 'linked':
-        return <span title="Thread linked"><MessageSquare className="h-4 w-4 text-green-600" /></span>
+  const getOrderStatusBadge = (order: Order) => {
+    const { computedStatus, stats } = order
+    switch (computedStatus) {
+      case 'delivered':
+        return <Badge className="bg-green-100 text-green-700">Delivered</Badge>
+      case 'partially_delivered':
+        return <Badge className="bg-blue-100 text-blue-700">{stats.delivered}/{stats.total} Delivered</Badge>
+      case 'in_transit':
+        return <Badge className="bg-purple-100 text-purple-700">In Transit</Badge>
+      case 'exception':
+        return <Badge className="bg-red-100 text-red-700">Exception</Badge>
       case 'pending':
-        return <span title="Thread pending review"><MessageSquare className="h-4 w-4 text-yellow-600" /></span>
-      case 'not_found':
-        return <span title="No thread found"><MessageSquare className="h-4 w-4 text-gray-400" /></span>
+        return <Badge variant="secondary">Pending</Badge>
       default:
-        return null
+        return <Badge variant="outline">{computedStatus}</Badge>
     }
   }
 
-  const filteredOrders = orders.filter((order) => {
-    if (!searchQuery) return true
-    const query = searchQuery.toLowerCase()
-    return (
-      order.orderNumber.toLowerCase().includes(query) ||
-      order.orderName?.toLowerCase().includes(query) ||
-      order.customerName?.toLowerCase().includes(query) ||
-      order.customerEmail?.toLowerCase().includes(query)
-    )
-  })
+  // Thread management functions
+  const handleRefreshThread = async (orderNumber: string) => {
+    setThreadLoading(orderNumber)
+    try {
+      const result = await api.customerThread.triggerDiscovery({ orderNumber })
+      
+      if (result.status === 'linked' || result.status === 'already_linked') {
+        toast.success('Thread linked!', {
+          description: result.threadLink?.conversationSubject || `Matched with ${Math.round((result.topScore ?? 0) * 100)}% confidence`,
+          action: result.threadLink?.frontConversationId ? {
+            label: 'Open in Front',
+            onClick: () => window.open(`https://app.frontapp.com/open/${result.threadLink!.frontConversationId}`, '_blank'),
+          } : undefined,
+        })
+        fetchOrders() // Refresh to show updated thread status
+        setThreadPopoverOpen(null)
+      } else if (result.status === 'pending_review') {
+        toast.info('Needs review', {
+          description: `Found ${result.candidatesFound} candidate(s) - review or enter ID manually`,
+        })
+        fetchOrders()
+      } else {
+        toast.warning('No thread found', {
+          description: result.reason || 'Enter a conversation ID manually',
+        })
+      }
+    } catch (err) {
+      toast.error('Discovery failed', {
+        description: err instanceof Error ? err.message : 'Unknown error',
+      })
+    } finally {
+      setThreadLoading(null)
+    }
+  }
+
+  const handleLinkThread = async (orderNumber: string, conversationId: string) => {
+    if (!conversationId.trim()) return
+    
+    // Clean up the conversation ID
+    let cleanId = conversationId.trim()
+    // Extract cnv_ ID if user pasted a Front URL
+    const urlMatch = cleanId.match(/cnv_[a-z0-9]+/i)
+    if (urlMatch) {
+      cleanId = urlMatch[0]
+    }
+    
+    if (!cleanId.startsWith('cnv_')) {
+      toast.error('Invalid conversation ID', {
+        description: 'ID should start with "cnv_" (e.g., cnv_abc123)',
+      })
+      return
+    }
+    
+    setThreadLoading(orderNumber)
+    try {
+      await api.customerThread.linkDifferent({
+        orderNumber,
+        newConversationId: cleanId,
+      })
+      toast.success('Thread linked!', {
+        action: {
+          label: 'Open in Front',
+          onClick: () => window.open(`https://app.frontapp.com/open/${cleanId}`, '_blank'),
+        },
+      })
+      fetchOrders()
+      setThreadPopoverOpen(null)
+      setManualConversationId('')
+    } catch (err) {
+      toast.error('Failed to link thread', {
+        description: err instanceof Error ? err.message : 'Unknown error',
+      })
+    } finally {
+      setThreadLoading(null)
+    }
+  }
+
+  // Refresh single order from OMG
+  const handleRefreshOrder = async (orderNumber: string) => {
+    setRefreshingOrder(orderNumber)
+    try {
+      const result = await api.orders.refreshOne({ orderNumber })
+      
+      if (result.success) {
+        toast.success('Order refreshed', {
+          description: `${result.shipmentCount} shipment(s), status: ${result.computedStatus}`,
+        })
+        fetchOrders() // Refresh the list
+      } else {
+        toast.error('Refresh failed', {
+          description: result.error || 'Unknown error',
+        })
+      }
+    } catch (err) {
+      toast.error('Refresh failed', {
+        description: err instanceof Error ? err.message : 'Unknown error',
+      })
+    } finally {
+      setRefreshingOrder(null)
+    }
+  }
+
+  // Status tab configuration
+  const statusTabs: Array<{ key: OrderStatus; label: string; icon?: React.ReactNode }> = [
+    { key: 'all', label: 'All' },
+    { key: 'pending', label: 'Pending', icon: <Clock className="h-3.5 w-3.5" /> },
+    { key: 'in_transit', label: 'In Transit', icon: <Truck className="h-3.5 w-3.5" /> },
+    { key: 'partially_delivered', label: 'Partial', icon: <CircleDot className="h-3.5 w-3.5" /> },
+    { key: 'delivered', label: 'Delivered', icon: <PackageCheck className="h-3.5 w-3.5" /> },
+    { key: 'exception', label: 'Exception', icon: <AlertCircle className="h-3.5 w-3.5" /> },
+  ]
 
   if (loading) {
     return (
@@ -166,31 +351,58 @@ export default function OrdersTable() {
 
   return (
     <div className="space-y-4">
-      {/* Search */}
+      {/* Status Tabs */}
+      <div className="flex items-center gap-1 border-b overflow-x-auto pb-px">
+        {statusTabs.map((tab) => {
+          const count = statusCounts[tab.key]
+          const isActive = activeStatus === tab.key
+          
+          return (
+            <button
+              key={tab.key}
+              onClick={() => setActiveStatus(tab.key)}
+              className={cn(
+                'flex items-center gap-1.5 px-3 py-2 text-sm font-medium whitespace-nowrap transition-colors border-b-2 -mb-px',
+                isActive
+                  ? 'border-primary text-primary'
+                  : 'border-transparent text-muted-foreground hover:text-foreground hover:border-muted-foreground/30'
+              )}
+            >
+              {tab.icon}
+              <span>{tab.label}</span>
+              <span className={cn(
+                'ml-1 text-xs',
+                isActive ? 'text-primary' : 'text-muted-foreground'
+              )}>
+                ({count})
+              </span>
+            </button>
+          )
+        })}
+      </div>
+
+      {/* Search & Refresh */}
       <div className="flex items-center gap-4">
         <Input
           placeholder="Search orders, customers..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
           className="max-w-sm"
         />
-        <Button variant="outline" size="sm" onClick={fetchOrders}>
-          <RefreshCw className="h-4 w-4 mr-1" />
-          Refresh
-        </Button>
+        <RefreshNow />
         <div className="ml-auto text-sm text-muted-foreground">
-          {filteredOrders.length} order{filteredOrders.length !== 1 ? 's' : ''}
+          {loading ? '...' : `${orders.length} of ${total}`} order{total !== 1 ? 's' : ''}
         </div>
       </div>
 
       {/* Orders List */}
       <div className="border rounded-lg">
-        {filteredOrders.length === 0 ? (
+        {orders.length === 0 ? (
           <div className="p-8 text-center text-muted-foreground">
             No orders found
           </div>
         ) : (
-          filteredOrders.map((order) => {
+          orders.map((order) => {
             const isExpanded = expandedOrders.has(order.orderNumber)
             
             return (
@@ -221,12 +433,31 @@ export default function OrdersTable() {
                           <span className="text-muted-foreground">
                             #{order.orderNumber}
                           </span>
+                          {getOrderStatusBadge(order)}
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6"
+                            disabled={refreshingOrder === order.orderNumber}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleRefreshOrder(order.orderNumber)
+                            }}
+                            title="Refresh order from OMG"
+                          >
+                            {refreshingOrder === order.orderNumber ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <RefreshCw className="h-3.5 w-3.5" />
+                            )}
+                          </Button>
                           <a
                             href={order.omgOrderUrl}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="text-muted-foreground hover:text-foreground"
                             onClick={(e) => e.stopPropagation()}
+                            title="Open in OMG"
                           >
                             <ExternalLink className="h-4 w-4" />
                           </a>
@@ -239,6 +470,16 @@ export default function OrdersTable() {
                             <span className="flex items-center gap-1">
                               <Mail className="h-3 w-3" />
                               {order.customerEmail}
+                            </span>
+                          )}
+                          {order.omgOperationsStatus && (
+                            <Badge variant="outline" className="text-xs">
+                              {order.omgOperationsStatus}
+                            </Badge>
+                          )}
+                          {order.poCount > 0 && order.stats.total === 0 && (
+                            <span className="text-xs text-yellow-600">
+                              {order.poCount} PO{order.poCount !== 1 ? 's' : ''} · No shipments yet
                             </span>
                           )}
                         </div>
@@ -274,59 +515,223 @@ export default function OrdersTable() {
                             <span>{order.stats.pending}</span>
                           </div>
                         )}
+                        
+                        {/* Thread indicator with popover */}
+                        <Popover 
+                          open={threadPopoverOpen === order.orderNumber} 
+                          onOpenChange={(open) => {
+                            setThreadPopoverOpen(open ? order.orderNumber : null)
+                            if (!open) setManualConversationId('')
+                          }}
+                        >
+                          <PopoverTrigger asChild>
+                            <button
+                              className={cn(
+                                "flex items-center gap-1 p-1 rounded hover:bg-muted transition-colors",
+                                order.threadStatus === 'linked' && "text-green-600",
+                                order.threadStatus === 'pending' && "text-yellow-600",
+                                (order.threadStatus === 'not_found' || order.threadStatus === 'none') && "text-muted-foreground"
+                              )}
+                              onClick={(e) => e.stopPropagation()}
+                              title={
+                                order.threadStatus === 'linked' ? 'Thread linked' :
+                                order.threadStatus === 'pending' ? 'Pending review' :
+                                'No thread - click to link'
+                              }
+                            >
+                              <MessageSquare className="h-4 w-4" />
+                            </button>
+                          </PopoverTrigger>
+                          <PopoverContent 
+                            className="w-80" 
+                            align="end"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <div className="space-y-3">
+                              <div className="font-medium text-sm">Customer Thread</div>
+                              
+                              {/* Current status */}
+                              {order.threadStatus === 'linked' && order.frontConversationId ? (
+                                <div className="space-y-2">
+                                  <div className="flex items-center gap-2 text-sm text-green-600">
+                                    <CheckCircle2 className="h-4 w-4" />
+                                    <span>Linked to Front</span>
+                                  </div>
+                                  <a
+                                    href={`https://app.frontapp.com/open/${order.frontConversationId}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="flex items-center gap-2 text-sm text-primary hover:underline"
+                                  >
+                                    <ExternalLink className="h-3 w-3" />
+                                    Open conversation
+                                  </a>
+                                  <div className="text-xs text-muted-foreground font-mono">
+                                    {order.frontConversationId}
+                                  </div>
+                                </div>
+                              ) : order.threadStatus === 'pending' ? (
+                                <div className="flex items-center gap-2 text-sm text-yellow-600">
+                                  <AlertCircle className="h-4 w-4" />
+                                  <span>Pending review - approve or change below</span>
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                  <MessageSquare className="h-4 w-4" />
+                                  <span>No thread linked</span>
+                                </div>
+                              )}
+                              
+                              <div className="border-t pt-3 space-y-2">
+                                {/* Refresh/discover button */}
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="w-full justify-start"
+                                  onClick={() => handleRefreshThread(order.orderNumber)}
+                                  disabled={threadLoading === order.orderNumber}
+                                >
+                                  {threadLoading === order.orderNumber ? (
+                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                  ) : (
+                                    <RefreshCw className="h-4 w-4 mr-2" />
+                                  )}
+                                  {order.threadStatus === 'none' || order.threadStatus === 'not_found' 
+                                    ? 'Search for thread' 
+                                    : 'Re-discover thread'}
+                                </Button>
+                                
+                                {/* Manual link input */}
+                                <div className="space-y-1">
+                                  <label className="text-xs text-muted-foreground">
+                                    Or enter conversation ID manually:
+                                  </label>
+                                  <div className="flex gap-2">
+                                    <Input
+                                      placeholder="cnv_abc123..."
+                                      value={manualConversationId}
+                                      onChange={(e) => setManualConversationId(e.target.value)}
+                                      className="h-8 text-sm font-mono"
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter') {
+                                          handleLinkThread(order.orderNumber, manualConversationId)
+                                        }
+                                      }}
+                                    />
+                                    <Button
+                                      size="sm"
+                                      className="h-8 px-2"
+                                      onClick={() => handleLinkThread(order.orderNumber, manualConversationId)}
+                                      disabled={!manualConversationId.trim() || threadLoading === order.orderNumber}
+                                    >
+                                      <Link2 className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </PopoverContent>
+                        </Popover>
                       </div>
                     </button>
                   </CollapsibleTrigger>
 
-                  {/* Shipments Table */}
+                  {/* Purchase Orders Table */}
                   <CollapsibleContent>
                     <div className="px-4 pb-4">
                       <Table>
                         <TableHeader>
                           <TableRow>
                             <TableHead>PO</TableHead>
+                            <TableHead>Supplier</TableHead>
                             <TableHead>Tracking</TableHead>
                             <TableHead>Carrier</TableHead>
                             <TableHead>Status</TableHead>
-                            <TableHead>Thread</TableHead>
                             <TableHead>Last Update</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {order.shipments.map((shipment) => (
-                            <TableRow key={shipment.id}>
-                              <TableCell className="font-mono text-sm">
-                                {shipment.poNumber || '—'}
-                              </TableCell>
-                              <TableCell>
-                                <a
-                                  href={`https://www.google.com/search?q=${encodeURIComponent(shipment.trackingNumber)}+tracking`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="font-mono text-sm text-primary hover:underline flex items-center gap-1"
-                                >
-                                  {shipment.trackingNumber}
-                                  <ExternalLink className="h-3 w-3" />
-                                </a>
-                              </TableCell>
-                              <TableCell className="text-sm text-muted-foreground uppercase">
-                                {shipment.carrier || '—'}
-                              </TableCell>
-                              <TableCell>
-                                {getStatusBadge(shipment.status)}
-                              </TableCell>
-                              <TableCell>
-                                {getThreadStatusIcon(shipment.threadStatus)}
-                              </TableCell>
-                              <TableCell className="text-sm text-muted-foreground">
-                                {shipment.lastChecked ? (
-                                  formatDistanceToNow(new Date(shipment.lastChecked), { addSuffix: true })
-                                ) : (
-                                  '—'
-                                )}
+                          {order.purchaseOrders.length === 0 ? (
+                            <TableRow>
+                              <TableCell colSpan={6} className="text-center text-muted-foreground py-4">
+                                No purchase orders
                               </TableCell>
                             </TableRow>
-                          ))}
+                          ) : (
+                            order.purchaseOrders.map((po) => {
+                              // If PO has shipments, show one row per shipment
+                              if (po.shipments.length > 0) {
+                                return po.shipments.map((shipment, idx) => (
+                                  <TableRow key={`${po.poNumber}-${shipment.id}`}>
+                                    <TableCell className="font-mono text-sm">
+                                      {idx === 0 ? po.poNumber : ''}
+                                    </TableCell>
+                                    <TableCell className="text-sm text-muted-foreground">
+                                      {idx === 0 ? (po.supplierName || '—') : ''}
+                                    </TableCell>
+                                    <TableCell>
+                                      <a
+                                        href={`https://www.google.com/search?q=${encodeURIComponent(shipment.trackingNumber)}+tracking`}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="font-mono text-sm text-primary hover:underline flex items-center gap-1"
+                                      >
+                                        {shipment.trackingNumber}
+                                        <ExternalLink className="h-3 w-3" />
+                                      </a>
+                                    </TableCell>
+                                    <TableCell className="text-sm text-muted-foreground uppercase">
+                                      {shipment.carrier || '—'}
+                                    </TableCell>
+                                    <TableCell>
+                                      {getStatusBadge(shipment.status)}
+                                    </TableCell>
+                                    <TableCell className="text-sm text-muted-foreground">
+                                      {shipment.lastChecked ? (
+                                        formatDistanceToNow(new Date(shipment.lastChecked), { addSuffix: true })
+                                      ) : (
+                                        '—'
+                                      )}
+                                    </TableCell>
+                                  </TableRow>
+                                ))
+                              }
+                              
+                              // PO with no shipments - show empty row
+                              return (
+                                <TableRow key={po.poNumber} className="bg-muted/30">
+                                  <TableCell className="font-mono text-sm">
+                                    {po.poNumber}
+                                  </TableCell>
+                                  <TableCell className="text-sm text-muted-foreground">
+                                    {po.supplierName || '—'}
+                                  </TableCell>
+                                  <TableCell className="text-sm text-muted-foreground italic">
+                                    No tracking yet
+                                  </TableCell>
+                                  <TableCell>—</TableCell>
+                                  <TableCell>
+                                    {po.operationsStatus ? (
+                                      <Badge variant="outline" className="text-xs">
+                                        {po.operationsStatus}
+                                      </Badge>
+                                    ) : (
+                                      <Badge variant="secondary" className="text-xs">Awaiting</Badge>
+                                    )}
+                                  </TableCell>
+                                  <TableCell className="text-sm text-muted-foreground">
+                                    {po.shipDate ? (
+                                      <span title="Ship date">
+                                        Ships {formatDistanceToNow(new Date(po.shipDate), { addSuffix: true })}
+                                      </span>
+                                    ) : (
+                                      '—'
+                                    )}
+                                  </TableCell>
+                                </TableRow>
+                              )
+                            })
+                          )}
                         </TableBody>
                       </Table>
                     </div>

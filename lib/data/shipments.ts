@@ -133,21 +133,22 @@ export async function getShipments(params: ShipmentQueryParams) {
 
   const serialized = serializeShipments(shipments)
 
-  // Fetch OMG data for shipments with PO numbers
+  // Fetch PO data with order info for shipments with PO numbers
   const rawPoNumbers = shipments.map(s => s.po_number).filter(Boolean) as string[]
   const normalizedPoNumbers = [...new Set(rawPoNumbers.map(normalizePoNumber))]
-  const omgRecords = normalizedPoNumbers.length > 0
-    ? await prisma.omg_purchase_orders.findMany({
+  const poRecords = normalizedPoNumbers.length > 0
+    ? await prisma.purchase_orders.findMany({
         where: { po_number: { in: normalizedPoNumbers } },
+        include: { order: { select: { order_name: true, customer_name: true } } },
       })
     : []
-  const omgByPo = new Map(omgRecords.map(r => [r.po_number, r]))
+  const poByNumber = new Map(poRecords.map(r => [r.po_number, r]))
 
   // Format for API response
   const items = serialized.map((s, index) => {
     const poNumber = shipments[index].po_number
     const normalizedPo = poNumber ? normalizePoNumber(poNumber) : null
-    const omgPo = normalizedPo ? omgByPo.get(normalizedPo) : null
+    const poRecord = normalizedPo ? poByNumber.get(normalizedPo) : null
 
     return {
       id: s.id,
@@ -172,13 +173,13 @@ export async function getShipments(params: ShipmentQueryParams) {
         message: e.message,
         eventTime: e.eventTime?.toISOString() ?? null,
       })),
-      omgData: omgPo
+      omgData: poRecord
         ? {
-            orderNumber: omgPo.order_number,
-            orderName: omgPo.order_name,
-            customerName: omgPo.customer_name,
-            orderUrl: getOmgUrls(omgPo.omg_order_id, omgPo.omg_po_id).order,
-            poUrl: getOmgUrls(omgPo.omg_order_id, omgPo.omg_po_id).purchaseOrder,
+            orderNumber: poRecord.order_number,
+            orderName: poRecord.order?.order_name ?? null,
+            customerName: poRecord.order?.customer_name ?? null,
+            orderUrl: getOmgUrls(poRecord.omg_order_id, poRecord.omg_po_id).order,
+            poUrl: getOmgUrls(poRecord.omg_order_id, poRecord.omg_po_id).purchaseOrder,
           }
         : null,
     }

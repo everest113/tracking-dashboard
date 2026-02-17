@@ -39,8 +39,8 @@ model shipments {
   ship24_status         String?               @db.VarChar(100)
   ship24_last_update    DateTime?
   tracking_events       tracking_events[]
-  customer_thread       shipment_customer_threads?
   // Note: OMG data is now joined by po_number, not by relation
+  // Note: Customer thread is now stored at the order level, not shipment level
 
   @@index([front_conversation_id], map: "idx_front_conversation")
   @@index([po_number], map: "idx_po_number")
@@ -48,35 +48,120 @@ model shipments {
   @@index([ship24_tracker_id], map: "idx_ship24_tracker")
 }
 
-// OMG Orders data - separate from shipments to avoid polluting the shipment model
-model omg_purchase_orders {
-  id             Int       @id @default(autoincrement())
-  shipment_id    Int?      // Nullable - kept for backwards compat but not used for joins
-  po_number      String    @unique @db.VarChar(50) // Normalized format (e.g., "189-1") - used for joining
+// =============================================================================
+// ORDERS
+// Orders synced directly from OMG API. Contains order-level data and thread info.
+// =============================================================================
 
+enum OrderComputedStatus {
+  pending              // All shipments pending
+  in_transit           // Any shipment in transit, none delivered yet
+  partially_delivered  // Some shipments delivered, some not
+  delivered            // All shipments delivered
+  exception            // Any shipment has an exception (takes priority)
+}
+
+model orders {
+  id             Int                  @id @default(autoincrement())
+  order_number   String               @unique @db.VarChar(50) // Human-readable order number (e.g., "164")
+  
+  // Core order data from OMG
+  order_name     String?              @db.VarChar(255)
+  customer_name  String?              @db.VarChar(255)
+  customer_email String?              @db.VarChar(255)
+  omg_order_id   String               @db.VarChar(50) // For generating OMG URLs
+  
+  // OMG status fields (synced directly from OMG)
+  omg_approval_status   String?       @db.VarChar(50)  // "approved", "pending_approval", etc.
+  omg_operations_status String?       @db.VarChar(50)  // Overall order ops status
+  omg_created_at        DateTime?                      // When order was created in OMG
+  
+  // Computed status for server-side filtering
+  computed_status OrderComputedStatus @default(pending)
+  
+  // PO count (for display)
+  po_count         Int                @default(0)
+  
+  // Denormalized shipment stats (for display without joins)
+  shipment_count   Int                @default(0)
+  delivered_count  Int                @default(0)
+  in_transit_count Int                @default(0)
+  pending_count    Int                @default(0)
+  exception_count  Int                @default(0)
+  
+  // Last sync timestamp
+  last_synced_at   DateTime?
+  
+  // Customer thread linking (for tracking notifications)
+  front_conversation_id   String?           @db.VarChar(100)
+  thread_match_status     ThreadMatchStatus @default(not_found)
+  thread_confidence_score Float?
+  
+  // Thread scoring breakdown (for debugging/audit)
+  thread_email_matched      Boolean @default(false)
+  thread_order_in_subject   Boolean @default(false)
+  thread_order_in_body      Boolean @default(false)
+  thread_days_since_message Int?
+  thread_matched_email      String? @db.VarChar(255)
+  thread_conversation_subject String?
+  
+  // Thread review tracking
+  thread_reviewed_at DateTime?
+  thread_reviewed_by String?    @db.VarChar(100)
+  
+  // Timestamps
+  created_at     DateTime             @default(now())
+  updated_at     DateTime             @default(now()) @updatedAt
+  
+  // Relations
+  purchase_orders purchase_orders[]
+  
+  @@index([computed_status], map: "idx_order_status")
+  @@index([customer_email], map: "idx_order_customer_email")
+  @@index([created_at(sort: Desc)], map: "idx_order_created")
+  @@index([front_conversation_id], map: "idx_order_conversation")
+  @@index([thread_match_status], map: "idx_order_thread_status")
+  @@index([omg_approval_status], map: "idx_order_approval_status")
+  @@index([last_synced_at], map: "idx_order_last_synced")
+}
+
+// =============================================================================
+// PURCHASE ORDERS
+// Individual POs within an order, synced from OMG.
+// Links orders to shipments via po_number matching.
+// =============================================================================
+
+model purchase_orders {
+  id              Int      @id @default(autoincrement())
+  po_number       String   @unique @db.VarChar(50)  // e.g., "164-1"
+  order_number    String   @db.VarChar(50)          // FK to orders
+  
   // OMG identifiers
-  order_number   String    @db.VarChar(50) // Human-readable order number (e.g., "164")
-  omg_order_id   String    @db.VarChar(50) // MongoDB ObjectID for URLs
-  omg_po_id      String    @db.VarChar(50) // MongoDB ObjectID for URLs
-
-  // Denormalized order data
-  order_name     String?   @db.VarChar(255) // e.g., "Sample Order"
-  customer_name  String?   @db.VarChar(255)
-  customer_email String?   @db.VarChar(255) // Primary email for Front thread matching
-
-  // Recipients as JSONB array
-  recipients     Json?     @default("[]") // Array of { name, address, city, state, zip, country }
-
-  // Sync metadata
-  synced_at      DateTime  @default(now())
-  raw_data       Json?     // Full OMG response for debugging
-
-  // Note: shipment_id kept for backwards compat but join is now by po_number
-
-  @@unique([omg_po_id]) // Each OMG PO should only appear once
-  @@index([po_number], map: "idx_omg_po_number")
-  @@index([order_number], map: "idx_omg_order_number")
-  @@index([customer_email], map: "idx_omg_customer_email")
+  omg_po_id       String   @unique @db.VarChar(50)
+  omg_order_id    String   @db.VarChar(50)
+  
+  // Supplier info
+  supplier_name   String?  @db.VarChar(255)
+  
+  // Dates from OMG
+  ship_date       DateTime?
+  in_hands_date   DateTime?
+  
+  // Operations status from OMG (e.g., "In Production", "Shipped")
+  operations_status String? @db.VarChar(50)
+  
+  // Tracking numbers from OMG (JSON array of {number, carrier})
+  tracking_numbers Json    @default("[]")
+  
+  // Timestamps
+  created_at      DateTime @default(now())
+  updated_at      DateTime @default(now()) @updatedAt
+  synced_at       DateTime @default(now())
+  
+  // Relations
+  order           orders   @relation(fields: [order_number], references: [order_number])
+  
+  @@index([order_number], map: "idx_po_order_number")
 }
 
 model sync_history {
@@ -180,8 +265,8 @@ model audit_history {
 
 // =============================================================================
 // CUSTOMER THREAD MATCHING
-// Links shipments to Front customer conversations for tracking notifications.
-// Uses confidence scoring to auto-match or queue for manual review.
+// Thread matching is now stored on the orders table (front_conversation_id, thread_match_status, etc.)
+// The old shipment_customer_threads table has been removed - threads are per-order, not per-shipment.
 // =============================================================================
 
 enum ThreadMatchStatus {
@@ -190,37 +275,4 @@ enum ThreadMatchStatus {
   manually_linked  // Human confirmed the match
   rejected         // Human rejected this match
   not_found        // No matching thread found
-}
-
-model shipment_customer_threads {
-  id                    Int               @id @default(autoincrement())
-  shipment_id           Int               @unique // One thread link per shipment
-  front_conversation_id String            @db.VarChar(100)
-  
-  // Confidence scoring
-  confidence_score      Float
-  match_status          ThreadMatchStatus @default(pending_review)
-  
-  // Scoring breakdown (for debugging/audit)
-  email_matched           Boolean           @default(false)
-  order_in_subject        Boolean           @default(false)
-  order_in_body           Boolean           @default(false)
-  days_since_last_message Int?
-  
-  // Metadata
-  matched_email         String?           @db.VarChar(255)
-  conversation_subject  String?
-  
-  // Timestamps
-  created_at            DateTime          @default(now())
-  updated_at            DateTime          @default(now()) @updatedAt
-  reviewed_at           DateTime?
-  reviewed_by           String?           @db.VarChar(100)
-  
-  // Relations
-  shipment              shipments         @relation(fields: [shipment_id], references: [id], onDelete: Cascade)
-  
-  @@index([front_conversation_id], map: "idx_sct_conversation")
-  @@index([match_status], map: "idx_sct_status")
-  @@index([confidence_score(sort: Desc)], map: "idx_sct_confidence")
 }

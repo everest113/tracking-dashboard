@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { formatDistanceToNow } from 'date-fns'
 import {
   CheckCircle2,
   XCircle,
@@ -13,6 +12,7 @@ import {
   Mail,
   Package,
   AlertCircle,
+  ExternalLink,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -41,30 +41,31 @@ import {
 import { Input } from '@/components/ui/input'
 import { api } from '@/lib/orpc/client'
 import { cn } from '@/lib/utils'
+import { toast } from 'sonner'
 
-interface PendingReviewItem {
-  threadLink: {
-    id: number
-    shipmentId: number
-    frontConversationId: string
-    confidenceScore: number
-    matchStatus: 'pending_review' | 'not_found' | 'not_discovered' | string
+interface OrderReviewItem {
+  order: {
+    orderNumber: string
+    orderName: string | null
+    customerName: string | null
+    customerEmail: string | null
+    shipmentCount: number
+    computedStatus: string
+  }
+  thread: {
+    orderNumber: string
+    frontConversationId: string | null
+    matchStatus: 'pending_review' | 'not_found' | 'auto_matched' | 'manually_linked' | 'rejected'
+    confidenceScore: number | null
     emailMatched: boolean
     orderInSubject: boolean
     orderInBody: boolean
     daysSinceLastMessage: number | null
     matchedEmail: string | null
     conversationSubject: string | null
+    reviewedAt: string | null
+    reviewedBy: string | null
   }
-  shipment: {
-    id: number
-    poNumber: string | null
-    trackingNumber: string
-    carrier: string | null
-    status: string
-  }
-  customerEmail: string | null
-  customerName: string | null
 }
 
 interface Conversation {
@@ -75,15 +76,15 @@ interface Conversation {
 }
 
 export default function ThreadReviewQueue() {
-  const [items, setItems] = useState<PendingReviewItem[]>([])
+  const [items, setItems] = useState<OrderReviewItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set())
-  const [actionLoading, setActionLoading] = useState<number | null>(null)
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
+  const [actionLoading, setActionLoading] = useState<string | null>(null)
   
   // Manual link dialog state
   const [linkDialogOpen, setLinkDialogOpen] = useState(false)
-  const [linkingItem, setLinkingItem] = useState<PendingReviewItem | null>(null)
+  const [linkingItem, setLinkingItem] = useState<OrderReviewItem | null>(null)
   const [searchEmail, setSearchEmail] = useState('')
   const [searchResults, setSearchResults] = useState<Conversation[]>([])
   const [searching, setSearching] = useState(false)
@@ -105,108 +106,102 @@ export default function ThreadReviewQueue() {
     }
   }
 
-  const toggleExpanded = (id: number) => {
+  const toggleExpanded = (orderNumber: string) => {
     setExpandedRows((prev) => {
       const next = new Set(prev)
-      if (next.has(id)) {
-        next.delete(id)
+      if (next.has(orderNumber)) {
+        next.delete(orderNumber)
       } else {
-        next.add(id)
+        next.add(orderNumber)
       }
       return next
     })
   }
 
-  const handleApprove = async (item: PendingReviewItem) => {
-    setActionLoading(item.shipment.id)
+  const handleApprove = async (item: OrderReviewItem) => {
+    setActionLoading(item.order.orderNumber)
     try {
-      await api.customerThread.approve({ shipmentId: item.shipment.id })
-      // Remove from list
-      setItems((prev) => prev.filter((i) => i.shipment.id !== item.shipment.id))
-    } catch (err) {
-      console.error('Failed to approve:', err)
-    } finally {
-      setActionLoading(null)
-    }
-  }
-
-  const handleReject = async (item: PendingReviewItem) => {
-    setActionLoading(item.shipment.id)
-    try {
-      await api.customerThread.reject({ shipmentId: item.shipment.id })
-      // Remove from list
-      setItems((prev) => prev.filter((i) => i.shipment.id !== item.shipment.id))
-    } catch (err) {
-      console.error('Failed to reject:', err)
-    } finally {
-      setActionLoading(null)
-    }
-  }
-
-  const openLinkDialog = (item: PendingReviewItem) => {
-    setLinkingItem(item)
-    setSearchEmail(item.customerEmail ?? '')
-    setSearchResults([])
-    setLinkDialogOpen(true)
-  }
-
-  /**
-   * Handle search/link button click:
-   * 1. For not_discovered/not_found: trigger auto-discovery first
-   * 2. If discovery finds match (linked), remove from list
-   * 3. If discovery finds candidates (pending_review), refresh list  
-   * 4. If discovery fails (not_found), open manual link dialog
-   */
-  const handleSearchOrLink = async (item: PendingReviewItem) => {
-    // If already has a candidate (pending_review), go straight to link dialog
-    if (item.threadLink.matchStatus === 'pending_review') {
-      openLinkDialog(item)
-      return
-    }
-
-    // For not_discovered or not_found, try auto-discovery first
-    setActionLoading(item.shipment.id)
-    try {
-      const result = await api.customerThread.triggerDiscovery({ 
-        shipmentId: item.shipment.id 
+      await api.customerThread.approve({ orderNumber: item.order.orderNumber })
+      toast.success('Thread approved', {
+        description: `Linked to conversation`,
+        action: item.thread.frontConversationId ? {
+          label: 'Open in Front',
+          onClick: () => window.open(`https://app.frontapp.com/open/${item.thread.frontConversationId}`, '_blank'),
+        } : undefined,
       })
-
-      if (result.status === 'linked') {
-        // Auto-matched! Remove from list
-        setItems((prev) => prev.filter((i) => i.shipment.id !== item.shipment.id))
-      } else if (result.status === 'pending_review') {
-        // Found candidates - refresh to show updated item with candidates
-        await fetchPendingReviews()
-      } else if (result.status === 'already_linked') {
-        // Successfully linked previously - remove from list
-        setItems((prev) => prev.filter((i) => i.shipment.id !== item.shipment.id))
-      } else {
-        // not_found - update UI and open manual link dialog
-        setItems((prev) => prev.map((i) => 
-          i.shipment.id === item.shipment.id 
-            ? { ...i, threadLink: { ...i.threadLink, matchStatus: 'not_found' as const } }
-            : i
-        ))
-        // Clear loading state BEFORE opening dialog so button is enabled
-        setActionLoading(null)
-        openLinkDialog(item)
-        return // Early return to avoid clearing loading state twice
-      }
+      fetchPendingReviews()
     } catch (err) {
-      console.error('Failed to discover thread:', err)
-      // On error, fall back to manual link dialog
+      toast.error('Failed to approve', {
+        description: err instanceof Error ? err.message : 'Unknown error',
+      })
+    } finally {
       setActionLoading(null)
-      openLinkDialog(item)
-      return
     }
-    setActionLoading(null)
+  }
+
+  const handleReject = async (item: OrderReviewItem) => {
+    setActionLoading(item.order.orderNumber)
+    try {
+      await api.customerThread.reject({ orderNumber: item.order.orderNumber })
+      toast.success('Thread rejected')
+      fetchPendingReviews()
+    } catch (err) {
+      toast.error('Failed to reject', {
+        description: err instanceof Error ? err.message : 'Unknown error',
+      })
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  const handleSearch = async (item: OrderReviewItem) => {
+    // If it's a not_found item, trigger discovery first
+    if (item.thread.matchStatus === 'not_found') {
+      setActionLoading(item.order.orderNumber)
+      try {
+        const result = await api.customerThread.triggerDiscovery({
+          orderNumber: item.order.orderNumber,
+        })
+        
+        if (result.status === 'linked') {
+          toast.success('Thread found!', {
+            description: `Auto-matched with ${Math.round((result.topScore ?? 0) * 100)}% confidence`,
+          })
+          fetchPendingReviews()
+          return
+        } else if (result.status === 'pending_review') {
+          toast.info('Candidates found', {
+            description: `${result.candidatesFound} candidate(s) found. Review below.`,
+          })
+          fetchPendingReviews()
+          return
+        } else {
+          // Open manual link dialog
+          setLinkingItem(item)
+          setSearchEmail(item.order.customerEmail || '')
+          setLinkDialogOpen(true)
+        }
+      } catch (err) {
+        toast.error('Discovery failed', {
+          description: err instanceof Error ? err.message : 'Unknown error',
+        })
+      } finally {
+        setActionLoading(null)
+      }
+    } else {
+      // Open manual link dialog for pending_review items
+      setLinkingItem(item)
+      setSearchEmail(item.order.customerEmail || '')
+      setLinkDialogOpen(true)
+    }
   }
 
   const searchConversations = async () => {
-    if (!searchEmail) return
+    if (!searchEmail.trim()) return
     
-    // If input looks like a conversation ID, link directly
+    // Check if it's a conversation ID
     if (searchEmail.startsWith('cnv_')) {
+      // Direct link by ID
       handleLinkDifferent(searchEmail)
       return
     }
@@ -216,7 +211,9 @@ export default function ThreadReviewQueue() {
       const result = await api.customerThread.searchConversations({ email: searchEmail })
       setSearchResults(result.conversations)
     } catch (err) {
-      console.error('Failed to search:', err)
+      toast.error('Search failed', {
+        description: err instanceof Error ? err.message : 'Unknown error',
+      })
     } finally {
       setSearching(false)
     }
@@ -224,45 +221,50 @@ export default function ThreadReviewQueue() {
 
   const handleLinkDifferent = async (conversationId: string) => {
     if (!linkingItem) return
-    setActionLoading(linkingItem.shipment.id)
+    
+    setSearching(true)
     try {
       await api.customerThread.linkDifferent({
-        shipmentId: linkingItem.shipment.id,
+        orderNumber: linkingItem.order.orderNumber,
         newConversationId: conversationId,
       })
-      // Remove from list
-      setItems((prev) => prev.filter((i) => i.shipment.id !== linkingItem.shipment.id))
+      toast.success('Thread linked', {
+        action: {
+          label: 'Open in Front',
+          onClick: () => window.open(`https://app.frontapp.com/open/${conversationId}`, '_blank'),
+        },
+      })
       setLinkDialogOpen(false)
       setLinkingItem(null)
+      setSearchEmail('')
+      setSearchResults([])
+      fetchPendingReviews()
     } catch (err) {
-      console.error('Failed to link:', err)
+      toast.error('Failed to link', {
+        description: err instanceof Error ? err.message : 'Unknown error',
+      })
     } finally {
-      setActionLoading(null)
+      setSearching(false)
     }
   }
 
-  const getConfidenceBadge = (score: number) => {
-    const percent = Math.round(score * 100)
-    if (score >= 0.7) {
-      return <Badge variant="default" className="bg-green-500">{percent}%</Badge>
-    } else if (score >= 0.5) {
-      return <Badge variant="default" className="bg-yellow-500">{percent}%</Badge>
-    } else {
-      return <Badge variant="secondary">{percent}%</Badge>
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case 'pending_review':
+        return <Badge className="bg-yellow-100 text-yellow-700">Pending Review</Badge>
+      case 'not_found':
+        return <Badge variant="secondary">Not Found</Badge>
+      default:
+        return <Badge variant="outline">{status}</Badge>
     }
   }
 
   if (loading) {
     return (
       <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Thread Review Queue</h2>
-        </div>
-        <div className="space-y-2">
-          {[1, 2, 3].map((i) => (
-            <Skeleton key={i} className="h-16 w-full" />
-          ))}
-        </div>
+        {[1, 2, 3].map((i) => (
+          <Skeleton key={i} className="h-16 w-full" />
+        ))}
       </div>
     )
   }
@@ -281,22 +283,12 @@ export default function ThreadReviewQueue() {
     )
   }
 
-  if (items.length === 0) {
-    return (
-      <div className="text-center py-12 text-muted-foreground">
-        <CheckCircle2 className="h-12 w-12 mx-auto mb-4 text-green-500" />
-        <h3 className="text-lg font-medium">All caught up!</h3>
-        <p className="text-sm">No pending thread matches to review.</p>
-      </div>
-    )
-  }
-
   return (
     <div className="space-y-4">
+      {/* Header */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <h2 className="text-lg font-semibold">Thread Review Queue</h2>
-          <Badge variant="secondary">{items.length} pending</Badge>
+        <div className="text-sm text-muted-foreground">
+          {items.length} order{items.length !== 1 ? 's' : ''} need thread review
         </div>
         <Button variant="outline" size="sm" onClick={fetchPendingReviews}>
           <RefreshCw className="h-4 w-4 mr-1" />
@@ -304,269 +296,208 @@ export default function ThreadReviewQueue() {
         </Button>
       </div>
 
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead className="w-[50px]"></TableHead>
-            <TableHead>Shipment</TableHead>
-            <TableHead>Customer</TableHead>
-            <TableHead>Matched Thread</TableHead>
-            <TableHead>Confidence</TableHead>
-            <TableHead className="text-right">Actions</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {items.map((item) => {
-            const isExpanded = expandedRows.has(item.shipment.id)
-            const isLoading = actionLoading === item.shipment.id
-
-            return (
-              <Collapsible key={item.shipment.id} asChild open={isExpanded}>
-                <>
-                  <TableRow className={cn(isExpanded && 'bg-muted/50')}>
-                    <TableCell>
-                      <CollapsibleTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 w-8 p-0"
-                          onClick={() => toggleExpanded(item.shipment.id)}
-                        >
-                          {isExpanded ? (
-                            <ChevronUp className="h-4 w-4" />
-                          ) : (
-                            <ChevronDown className="h-4 w-4" />
-                          )}
-                        </Button>
-                      </CollapsibleTrigger>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <Package className="h-4 w-4 text-muted-foreground" />
-                        <div>
-                          <div className="font-medium">
-                            {item.shipment.poNumber ?? item.shipment.trackingNumber}
-                          </div>
-                          <div className="text-xs text-muted-foreground">
-                            {item.shipment.carrier} • {item.shipment.status}
-                          </div>
+      {/* Table */}
+      {items.length === 0 ? (
+        <div className="text-center py-8 text-muted-foreground">
+          <CheckCircle2 className="h-12 w-12 mx-auto mb-2 text-green-500" />
+          <p>All caught up! No orders need thread review.</p>
+        </div>
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-[40px]"></TableHead>
+              <TableHead>Order</TableHead>
+              <TableHead>Customer</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Confidence</TableHead>
+              <TableHead className="text-right">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {items.map((item) => {
+              const isExpanded = expandedRows.has(item.order.orderNumber)
+              const isLoading = actionLoading === item.order.orderNumber
+              
+              return (
+                <Collapsible key={item.order.orderNumber} open={isExpanded} asChild>
+                  <>
+                    <TableRow className={cn(isExpanded && 'bg-muted/50')}>
+                      <TableCell>
+                        <CollapsibleTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => toggleExpanded(item.order.orderNumber)}
+                          >
+                            {isExpanded ? (
+                              <ChevronUp className="h-4 w-4" />
+                            ) : (
+                              <ChevronDown className="h-4 w-4" />
+                            )}
+                          </Button>
+                        </CollapsibleTrigger>
+                      </TableCell>
+                      <TableCell>
+                        <div className="font-medium">
+                          {item.order.orderName || `Order #${item.order.orderNumber}`}
                         </div>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <Mail className="h-4 w-4 text-muted-foreground" />
-                        <div>
-                          <div className="font-medium">{item.customerName ?? '—'}</div>
-                          <div className="text-xs text-muted-foreground">
-                            {item.customerEmail ?? 'No email'}
-                          </div>
+                        <div className="text-sm text-muted-foreground">
+                          #{item.order.orderNumber} · {item.order.shipmentCount} shipment{item.order.shipmentCount !== 1 ? 's' : ''}
                         </div>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      {item.threadLink.matchStatus === 'not_found' ? (
-                        <span className="text-muted-foreground italic">No thread found</span>
-                      ) : item.threadLink.matchStatus === 'not_discovered' ? (
-                        <span className="text-muted-foreground italic">Not yet searched</span>
-                      ) : (
-                        <div className="max-w-[200px] truncate" title={item.threadLink.conversationSubject ?? ''}>
-                          {item.threadLink.conversationSubject ?? 'No subject'}
-                        </div>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {item.threadLink.matchStatus === 'not_found' ? (
-                        <Badge variant="outline" className="text-orange-600 border-orange-300">
-                          Not Found
-                        </Badge>
-                      ) : item.threadLink.matchStatus === 'not_discovered' ? (
-                        <Badge variant="outline" className="text-gray-500 border-gray-300">
-                          Not Searched
-                        </Badge>
-                      ) : (
-                        getConfidenceBadge(item.threadLink.confidenceScore)
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        {/* Only show Approve/Reject if there's a candidate to review */}
-                        {item.threadLink.matchStatus === 'pending_review' && (
-                          <>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 w-8 p-0 text-green-600 hover:text-green-700 hover:bg-green-50"
-                              onClick={() => handleApprove(item)}
-                              disabled={isLoading}
-                              title="Approve"
-                            >
-                              <CheckCircle2 className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
-                              onClick={() => handleReject(item)}
-                              disabled={isLoading}
-                              title="Reject"
-                            >
-                              <XCircle className="h-4 w-4" />
-                            </Button>
-                          </>
+                      </TableCell>
+                      <TableCell>
+                        {item.order.customerName && (
+                          <div className="font-medium">{item.order.customerName}</div>
                         )}
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 w-8 p-0 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
-                          onClick={() => handleSearchOrLink(item)}
-                          disabled={isLoading}
-                          title={
-                            item.threadLink.matchStatus === 'not_discovered' 
-                              ? 'Auto-search & Link Thread' 
-                              : item.threadLink.matchStatus === 'not_found' 
-                                ? 'Search Again or Link Manually' 
-                                : 'Link Different Thread'
-                          }
-                        >
-                          {item.threadLink.matchStatus === 'not_discovered' ? (
-                            <Search className="h-4 w-4" />
-                          ) : item.threadLink.matchStatus === 'not_found' ? (
-                            <RefreshCw className="h-4 w-4" />
-                          ) : (
-                            <Link2 className="h-4 w-4" />
+                        {item.order.customerEmail && (
+                          <div className="text-sm text-muted-foreground flex items-center gap-1">
+                            <Mail className="h-3 w-3" />
+                            {item.order.customerEmail}
+                          </div>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {getStatusBadge(item.thread.matchStatus)}
+                      </TableCell>
+                      <TableCell>
+                        {item.thread.confidenceScore !== null ? (
+                          <span className={cn(
+                            'font-mono',
+                            item.thread.confidenceScore >= 0.7 && 'text-green-600',
+                            item.thread.confidenceScore >= 0.3 && item.thread.confidenceScore < 0.7 && 'text-yellow-600',
+                            item.thread.confidenceScore < 0.3 && 'text-red-600'
+                          )}>
+                            {Math.round(item.thread.confidenceScore * 100)}%
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          {item.thread.matchStatus === 'pending_review' && item.thread.frontConversationId && (
+                            <>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleApprove(item)}
+                                disabled={isLoading}
+                              >
+                                <CheckCircle2 className="h-4 w-4 mr-1" />
+                                Approve
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleReject(item)}
+                                disabled={isLoading}
+                              >
+                                <XCircle className="h-4 w-4" />
+                              </Button>
+                            </>
                           )}
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                  <CollapsibleContent asChild>
-                    <TableRow className="bg-muted/30">
-                      <TableCell colSpan={6}>
-                        <div className="py-2 px-4">
-                          <h4 className="text-sm font-medium mb-2">Confidence Breakdown</h4>
-                          <div className="grid grid-cols-4 gap-4 text-sm">
-                            <div>
-                              <span className="text-muted-foreground">Email Match:</span>{' '}
-                              {item.threadLink.emailMatched ? (
-                                <Badge variant="default" className="bg-green-500 ml-1">Yes</Badge>
-                              ) : (
-                                <Badge variant="secondary" className="ml-1">No</Badge>
-                              )}
-                            </div>
-                            <div>
-                              <span className="text-muted-foreground">Order in Subject:</span>{' '}
-                              {item.threadLink.orderInSubject ? (
-                                <Badge variant="default" className="bg-green-500 ml-1">Yes</Badge>
-                              ) : (
-                                <Badge variant="secondary" className="ml-1">No</Badge>
-                              )}
-                            </div>
-                            <div>
-                              <span className="text-muted-foreground">Order in Body:</span>{' '}
-                              {item.threadLink.orderInBody ? (
-                                <Badge variant="default" className="bg-green-500 ml-1">Yes</Badge>
-                              ) : (
-                                <Badge variant="secondary" className="ml-1">No</Badge>
-                              )}
-                            </div>
-                            <div>
-                              <span className="text-muted-foreground">Days Since Message:</span>{' '}
-                              <span className="ml-1">
-                                {item.threadLink.daysSinceLastMessage ?? '—'}
-                              </span>
-                            </div>
-                          </div>
-                          <div className="mt-2 text-xs text-muted-foreground">
-                            Conversation ID: {item.threadLink.frontConversationId}
-                          </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleSearch(item)}
+                            disabled={isLoading}
+                          >
+                            <Search className="h-4 w-4 mr-1" />
+                            {item.thread.matchStatus === 'not_found' ? 'Search' : 'Link Different'}
+                          </Button>
                         </div>
                       </TableCell>
                     </TableRow>
-                  </CollapsibleContent>
-                </>
-              </Collapsible>
-            )
-          })}
-        </TableBody>
-      </Table>
+                    <CollapsibleContent asChild>
+                      <TableRow className="bg-muted/30">
+                        <TableCell colSpan={6}>
+                          <div className="py-2 px-4 space-y-2">
+                            {item.thread.frontConversationId && (
+                              <div className="flex items-center gap-2 text-sm">
+                                <span className="text-muted-foreground">Conversation:</span>
+                                <a
+                                  href={`https://app.frontapp.com/open/${item.thread.frontConversationId}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-primary hover:underline flex items-center gap-1"
+                                >
+                                  {item.thread.conversationSubject || item.thread.frontConversationId}
+                                  <ExternalLink className="h-3 w-3" />
+                                </a>
+                              </div>
+                            )}
+                            <div className="flex gap-4 text-sm">
+                              <span className={cn(
+                                'flex items-center gap-1',
+                                item.thread.emailMatched ? 'text-green-600' : 'text-muted-foreground'
+                              )}>
+                                {item.thread.emailMatched ? '✓' : '✗'} Email matched
+                              </span>
+                              <span className={cn(
+                                'flex items-center gap-1',
+                                item.thread.orderInSubject ? 'text-green-600' : 'text-muted-foreground'
+                              )}>
+                                {item.thread.orderInSubject ? '✓' : '✗'} Order in subject
+                              </span>
+                              {item.thread.daysSinceLastMessage !== null && (
+                                <span className="text-muted-foreground">
+                                  Last message: {item.thread.daysSinceLastMessage} days ago
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    </CollapsibleContent>
+                  </>
+                </Collapsible>
+              )
+            })}
+          </TableBody>
+        </Table>
+      )}
 
       {/* Manual Link Dialog */}
       <Dialog open={linkDialogOpen} onOpenChange={setLinkDialogOpen}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent>
           <DialogHeader>
-            <DialogTitle>Link to Conversation</DialogTitle>
+            <DialogTitle>Link to Front Conversation</DialogTitle>
             <DialogDescription>
-              Link shipment{' '}
-              <strong>{linkingItem?.shipment.poNumber ?? linkingItem?.shipment.trackingNumber}</strong>
-              {' '}to a Front conversation
+              Search by customer email or paste a conversation ID (cnv_...)
             </DialogDescription>
           </DialogHeader>
-
           <div className="space-y-4">
             <div className="flex gap-2">
               <Input
-                placeholder="Email address or conversation ID (cnv_...)"
+                placeholder="Email or conversation ID (cnv_...)"
                 value={searchEmail}
                 onChange={(e) => setSearchEmail(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && searchConversations()}
               />
               <Button onClick={searchConversations} disabled={searching}>
-                {searchEmail.startsWith('cnv_') ? (
-                  <>
-                    <Link2 className="h-4 w-4 mr-1" />
-                    Link
-                  </>
-                ) : (
-                  <>
-                    <Search className="h-4 w-4 mr-1" />
-                    Search
-                  </>
-                )}
+                <Search className="h-4 w-4" />
               </Button>
             </div>
-            <p className="text-xs text-muted-foreground">
-              Enter an email to search, or paste a conversation ID (cnv_xxx) to link directly.
-            </p>
-
-            {searching && (
-              <div className="space-y-2">
-                {[1, 2, 3].map((i) => (
-                  <Skeleton key={i} className="h-12 w-full" />
-                ))}
-              </div>
-            )}
-
-            {!searching && searchResults.length > 0 && (
-              <div className="border rounded-md max-h-[300px] overflow-auto">
+            {searchResults.length > 0 && (
+              <div className="border rounded-md max-h-64 overflow-y-auto">
                 {searchResults.map((conv) => (
-                  <div
+                  <button
                     key={conv.id}
-                    className="flex items-center justify-between p-3 border-b last:border-b-0 hover:bg-muted/50 cursor-pointer"
+                    className="w-full text-left px-4 py-3 hover:bg-muted border-b last:border-b-0 transition-colors"
                     onClick={() => handleLinkDifferent(conv.id)}
                   >
-                    <div>
-                      <div className="font-medium">{conv.subject ?? 'No subject'}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {conv.recipientEmail} •{' '}
-                        {formatDistanceToNow(new Date(conv.createdAt), { addSuffix: true })}
-                      </div>
+                    <div className="font-medium text-sm">
+                      {conv.subject || '(No subject)'}
                     </div>
-                    <Button variant="ghost" size="sm">
-                      <Link2 className="h-4 w-4" />
-                    </Button>
-                  </div>
+                    <div className="text-xs text-muted-foreground">
+                      {conv.recipientEmail} · {conv.id}
+                    </div>
+                  </button>
                 ))}
-              </div>
-            )}
-
-            {!searching && searchResults.length === 0 && searchEmail && (
-              <div className="text-center py-6 text-muted-foreground">
-                No conversations found for this email.
               </div>
             )}
           </div>
-
           <DialogFooter>
             <Button variant="outline" onClick={() => setLinkDialogOpen(false)}>
               Cancel

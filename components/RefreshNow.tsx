@@ -76,28 +76,36 @@ export default function RefreshNow() {
     setProgressEvents([])
 
     try {
-      // Step 1: Scan Front inbox for new shipments
-      addProgress('processing', 'Scanning Front inbox for new tracking numbers...')
-      const startDate = await getStartDate()
-      const formattedDate = new Date(startDate).toLocaleDateString()
-      addProgress('processing', `Checking conversations from ${formattedDate}`)
-
-      const scanResult = await api.front.scan({
-        after: startDate,
-        forceRescan: forceRescan && forceRescanEnabled,
-      })
-
-      if (scanResult.summary.shipmentsAdded > 0) {
-        addProgress('found', `${scanResult.summary.shipmentsAdded} new shipment${scanResult.summary.shipmentsAdded !== 1 ? 's' : ''} found!`)
+      // Step 1: Sync orders from OMG (get all orders first)
+      addProgress('processing', 'Syncing orders from OMG...')
+      const omgOrdersResult = await api.orders.syncFromOmg({ sinceDays: 14 })
+      
+      if (omgOrdersResult.ordersCreated > 0) {
+        addProgress('found', `${omgOrdersResult.ordersCreated} new order${omgOrdersResult.ordersCreated !== 1 ? 's' : ''} from OMG`)
+      }
+      if (omgOrdersResult.ordersUpdated > 0) {
+        addProgress('found', `${omgOrdersResult.ordersUpdated} order${omgOrdersResult.ordersUpdated !== 1 ? 's' : ''} updated`)
+      }
+      if (omgOrdersResult.ordersSkipped > 0) {
+        addProgress('skipped', `${omgOrdersResult.ordersSkipped} pending orders skipped`)
+      }
+      if (omgOrdersResult.ordersCreated === 0 && omgOrdersResult.ordersUpdated === 0) {
+        addProgress('skipped', 'Orders already up to date')
+      }
+      
+      // Step 2: Discover tracking from Front for POs missing shipments
+      addProgress('processing', 'Searching Front for tracking numbers...')
+      const discoveryResult = await api.orders.discoverTracking({ limit: 100 })
+      
+      if (discoveryResult.shipmentsCreated > 0) {
+        addProgress('found', `${discoveryResult.shipmentsCreated} shipment${discoveryResult.shipmentsCreated !== 1 ? 's' : ''} discovered from ${discoveryResult.posSearched} PO${discoveryResult.posSearched !== 1 ? 's' : ''}`)
+      } else if (discoveryResult.posSearched > 0) {
+        addProgress('skipped', `Searched ${discoveryResult.posSearched} PO${discoveryResult.posSearched !== 1 ? 's' : ''} - no new tracking`)
       } else {
-        addProgress('skipped', 'No new shipments found')
+        addProgress('skipped', 'All POs have shipments')
       }
 
-      if (scanResult.summary.conversationsAlreadyScanned > 0) {
-        addProgress('skipped', `${scanResult.summary.conversationsAlreadyScanned} conversation${scanResult.summary.conversationsAlreadyScanned !== 1 ? 's' : ''} already scanned`)
-      }
-
-      // Step 2: Backfill untracked shipments (register with Ship24)
+      // Step 3: Enroll new shipments in Ship24 tracking
       addProgress('processing', 'Enrolling shipments in tracking...')
       const backfillResult = await api.trackers.backfill()
 
@@ -107,42 +115,38 @@ export default function RefreshNow() {
         addProgress('skipped', 'All shipments already enrolled')
       }
 
-      // Step 3: Update all tracking statuses (fetch latest from Ship24)
+      // Step 4: Update all tracking statuses (fetch latest from Ship24)
       addProgress('processing', 'Fetching latest tracking statuses...')
       const updateResult = await api.manualUpdateTracking.update()
 
-      addProgress('complete', `Refreshed ${updateResult.checked} shipment${updateResult.checked !== 1 ? 's' : ''}`)
-      
       if (updateResult.updated > 0) {
         addProgress('found', `${updateResult.updated} status change${updateResult.updated !== 1 ? 's' : ''} detected`)
       }
-
-      // Step 4: Sync unlinked shipments with OMG Orders
-      addProgress('processing', 'Linking shipments to OMG Orders...')
-      const omgResult = await api.omg.batchSync({ limit: 50 })
-
-      if (omgResult.synced > 0) {
-        addProgress('found', `${omgResult.synced} shipment${omgResult.synced !== 1 ? 's' : ''} linked to OMG`)
+      addProgress('complete', `Refreshed ${updateResult.checked} shipment${updateResult.checked !== 1 ? 's' : ''}`)
+      
+      // Step 5: Recompute order stats from shipments
+      addProgress('processing', 'Computing order stats...')
+      const statsResult = await api.orders.recomputeStats()
+      
+      if (statsResult.updated > 0) {
+        addProgress('found', `${statsResult.updated} order${statsResult.updated !== 1 ? 's' : ''} stats updated`)
       } else {
-        addProgress('skipped', 'All shipments already linked to OMG')
-      }
-
-      if (omgResult.failed > 0) {
-        addProgress('skipped', `${omgResult.failed} shipment${omgResult.failed !== 1 ? 's' : ''} not found in OMG`)
+        addProgress('skipped', 'Order stats already current')
       }
 
       addProgress('complete', 'Refresh complete!')
 
       // Show summary toast
       const messages: string[] = []
-      if (scanResult.summary.shipmentsAdded > 0) {
-        messages.push(`${scanResult.summary.shipmentsAdded} new`)
+      const totalOrders = omgOrdersResult.ordersCreated + omgOrdersResult.ordersUpdated
+      if (totalOrders > 0) {
+        messages.push(`${totalOrders} orders`)
+      }
+      if (discoveryResult.shipmentsCreated > 0) {
+        messages.push(`${discoveryResult.shipmentsCreated} discovered`)
       }
       if (backfillResult.registered > 0) {
         messages.push(`${backfillResult.registered} enrolled`)
-      }
-      if (omgResult.synced > 0) {
-        messages.push(`${omgResult.synced} linked to OMG`)
       }
       messages.push(`${updateResult.checked} refreshed`)
 
