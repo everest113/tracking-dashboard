@@ -210,19 +210,19 @@ export default function OrdersTable() {
   // Priority: Exception > Delivery status (if shipped) > Production status
   const getSmartStatus = (order: Order): { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline'; icon: React.ElementType } => {
     // Exception takes priority
-    if (order.stats.exception > 0) {
+    if (order?.stats?.exception > 0) {
       return { label: 'Exception', variant: 'destructive', icon: AlertCircle }
     }
     
     // If we have tracking, show delivery status
-    if (order.stats.total > 0) {
-      if (order.stats.delivered === order.stats.total) {
+    if (order?.stats?.total > 0) {
+      if (order?.stats?.delivered === order?.stats?.total) {
         return { label: 'Delivered', variant: 'default', icon: PackageCheck }
       }
-      if (order.stats.delivered > 0) {
+      if (order?.stats?.delivered > 0) {
         return { label: 'Partial', variant: 'secondary', icon: CircleDot }
       }
-      if (order.stats.inTransit > 0) {
+      if (order?.stats?.inTransit > 0) {
         return { label: 'In Transit', variant: 'secondary', icon: Truck }
       }
       return { label: 'Pending', variant: 'outline', icon: Clock }
@@ -253,10 +253,10 @@ export default function OrdersTable() {
 
   // Format tracking progress
   const formatTracking = (order: Order): string => {
-    if (order.stats.total === 0) {
+    if (order?.stats?.total === 0) {
       return order.poCount > 0 ? `${order.poCount} PO${order.poCount !== 1 ? 's' : ''}` : '—'
     }
-    return `${order.stats.delivered}/${order.stats.total}`
+    return `${order?.stats?.delivered}/${order?.stats?.total}`
   }
 
   // Thread management functions
@@ -557,9 +557,9 @@ export default function OrdersTable() {
                           <TableCell className="py-2">
                             <span className={cn(
                               'text-sm',
-                              order.stats.total > 0 && order.stats.delivered === order.stats.total && 'text-green-600',
-                              order.stats.total > 0 && order.stats.delivered < order.stats.total && 'text-blue-600',
-                              order.stats.total === 0 && 'text-muted-foreground'
+                              order?.stats?.total > 0 && order?.stats?.delivered === order?.stats?.total && 'text-green-600',
+                              order?.stats?.total > 0 && order?.stats?.delivered < order?.stats?.total && 'text-blue-600',
+                              order?.stats?.total === 0 && 'text-muted-foreground'
                             )}>
                               {formatTracking(order)}
                             </span>
@@ -636,7 +636,7 @@ export default function OrdersTable() {
                                                     size="sm"
                                                     className="w-full"
                                                     onClick={() => handleCreateOrderDraft(order.orderNumber, 'shipped')}
-                                                    disabled={creatingDraftOrderId === order.orderNumber || order.stats.total === 0}
+                                                    disabled={creatingDraftOrderId === order.orderNumber || order?.stats?.total === 0}
                                                   >
                                                     {creatingDraftOrderId === order.orderNumber ? (
                                                       <Loader2 className="h-3 w-3 mr-1 animate-spin" />
@@ -647,7 +647,7 @@ export default function OrdersTable() {
                                                   </Button>
                                                 </span>
                                               </TooltipTrigger>
-                                              {order.stats.total === 0 && (
+                                              {order?.stats?.total === 0 && (
                                                 <TooltipContent>
                                                   <p>No shipments with tracking yet</p>
                                                 </TooltipContent>
@@ -661,7 +661,7 @@ export default function OrdersTable() {
                                                     size="sm"
                                                     className="w-full"
                                                     onClick={() => handleCreateOrderDraft(order.orderNumber, 'delivered')}
-                                                    disabled={creatingDraftOrderId === order.orderNumber || order.stats.total === 0}
+                                                    disabled={creatingDraftOrderId === order.orderNumber || order?.stats?.total === 0}
                                                   >
                                                     {creatingDraftOrderId === order.orderNumber ? (
                                                       <Loader2 className="h-3 w-3 mr-1 animate-spin" />
@@ -672,7 +672,7 @@ export default function OrdersTable() {
                                                   </Button>
                                                 </span>
                                               </TooltipTrigger>
-                                              {order.stats.total === 0 && (
+                                              {order?.stats?.total === 0 && (
                                                 <TooltipContent>
                                                   <p>No shipments with tracking yet</p>
                                                 </TooltipContent>
@@ -1026,7 +1026,7 @@ export default function OrdersTable() {
                                       size="sm"
                                       className="w-full"
                                       onClick={() => handleCreateOrderDraft(detailOrder.orderNumber, 'shipped')}
-                                      disabled={creatingDraftOrderId === detailOrder.orderNumber || detailOrder.stats.total === 0}
+                                      disabled={creatingDraftOrderId === detailOrder.orderNumber || detailOrder?.stats?.total === 0}
                                     >
                                       {creatingDraftOrderId === detailOrder.orderNumber ? (
                                         <Loader2 className="h-3 w-3 mr-1 animate-spin" />
@@ -1037,7 +1037,7 @@ export default function OrdersTable() {
                                     </Button>
                                   </span>
                                 </TooltipTrigger>
-                                {detailOrder.stats.total === 0 && (
+                                {detailOrder?.stats?.total === 0 && (
                                   <TooltipContent>
                                     <p>No shipments with tracking yet</p>
                                   </TooltipContent>
@@ -1051,7 +1051,7 @@ export default function OrdersTable() {
                                       size="sm"
                                       className="w-full"
                                       onClick={() => handleCreateOrderDraft(detailOrder.orderNumber, 'delivered')}
-                                      disabled={creatingDraftOrderId === detailOrder.orderNumber || detailOrder.stats.total === 0}
+                                      disabled={creatingDraftOrderId === detailOrder.orderNumber || detailOrder?.stats?.total === 0}
                                     >
                                       {creatingDraftOrderId === detailOrder.orderNumber ? (
                                         <Loader2 className="h-3 w-3 mr-1 animate-spin" />
@@ -1062,7 +1062,7 @@ export default function OrdersTable() {
                                     </Button>
                                   </span>
                                 </TooltipTrigger>
-                                {detailOrder.stats.total === 0 && (
+                                {detailOrder?.stats?.total === 0 && (
                                   <TooltipContent>
                                     <p>No shipments with tracking yet</p>
                                   </TooltipContent>
