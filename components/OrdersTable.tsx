@@ -143,15 +143,12 @@ export default function OrdersTable() {
   const [threadPopoverOpen, setThreadPopoverOpen] = useState<string | null>(null)
   const [threadLoading, setThreadLoading] = useState<string | null>(null)
   const [manualConversationId, setManualConversationId] = useState('')
-  const [popoverShowEdit, setPopoverShowEdit] = useState<string | null>(null)
   const [drawerConversationId, setDrawerConversationId] = useState('')
   const [detailOrder, setDetailOrder] = useState<Order | null>(null)
   const [showThreadEdit, setShowThreadEdit] = useState(false)
   
   // Refresh state
   const [refreshingOrder, setRefreshingOrder] = useState<string | null>(null)
-  
-  // Notification draft state
   const [creatingDraftOrderId, setCreatingDraftOrderId] = useState<string | null>(null)
 
   // Debounce search input
@@ -210,19 +207,19 @@ export default function OrdersTable() {
   // Priority: Exception > Delivery status (if shipped) > Production status
   const getSmartStatus = (order: Order): { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline'; icon: React.ElementType } => {
     // Exception takes priority
-    if (order?.stats?.exception > 0) {
+    if (order.stats.exception > 0) {
       return { label: 'Exception', variant: 'destructive', icon: AlertCircle }
     }
     
     // If we have tracking, show delivery status
-    if (order?.stats?.total > 0) {
-      if (order?.stats?.delivered === order?.stats?.total) {
+    if (order.stats.total > 0) {
+      if (order.stats.delivered === order.stats.total) {
         return { label: 'Delivered', variant: 'default', icon: PackageCheck }
       }
-      if (order?.stats?.delivered > 0) {
+      if (order.stats.delivered > 0) {
         return { label: 'Partial', variant: 'secondary', icon: CircleDot }
       }
-      if (order?.stats?.inTransit > 0) {
+      if (order.stats.inTransit > 0) {
         return { label: 'In Transit', variant: 'secondary', icon: Truck }
       }
       return { label: 'Pending', variant: 'outline', icon: Clock }
@@ -253,10 +250,10 @@ export default function OrdersTable() {
 
   // Format tracking progress
   const formatTracking = (order: Order): string => {
-    if (order?.stats?.total === 0) {
+    if (order.stats.total === 0) {
       return order.poCount > 0 ? `${order.poCount} PO${order.poCount !== 1 ? 's' : ''}` : '—'
     }
-    return `${order?.stats?.delivered}/${order?.stats?.total}`
+    return `${order.stats.delivered}/${order.stats.total}`
   }
 
   // Thread management functions
@@ -351,21 +348,16 @@ export default function OrdersTable() {
         orderNumber,
         templateType,
       })
-      
       if (result.success) {
         toast.success('Draft created in Front', {
-          description: `${templateType === 'shipped' ? 'Shipped' : 'Delivered'} notification draft ready`,
+          description: templateType === 'shipped' ? 'Shipped notification draft ready' : 'Delivered notification draft ready',
         })
       } else {
-        toast.error('Failed to create draft', {
-          description: result.error || 'Unknown error',
-        })
+        toast.error('Failed to create draft', { description: result.error || 'Unknown error' })
       }
     } catch (error) {
       console.error('Failed to create order draft:', error)
-      toast.error('Draft creation failed', {
-        description: error instanceof Error ? error.message : 'Check console for details',
-      })
+      toast.error('Draft creation failed')
     } finally {
       setCreatingDraftOrderId(null)
     }
@@ -482,7 +474,7 @@ export default function OrdersTable() {
                   const inHands = formatInHandsDate(order.inHandsDate)
                   
                   return (
-                    <Collapsible key={order.orderNumber} asChild open={isExpanded}>
+                    <Collapsible key={order.orderNumber} open={isExpanded}>
                       <>
                         {/* Main Row */}
                         <TableRow 
@@ -557,9 +549,9 @@ export default function OrdersTable() {
                           <TableCell className="py-2">
                             <span className={cn(
                               'text-sm',
-                              order?.stats?.total > 0 && order?.stats?.delivered === order?.stats?.total && 'text-green-600',
-                              order?.stats?.total > 0 && order?.stats?.delivered < order?.stats?.total && 'text-blue-600',
-                              order?.stats?.total === 0 && 'text-muted-foreground'
+                              order.stats.total > 0 && order.stats.delivered === order.stats.total && 'text-green-600',
+                              order.stats.total > 0 && order.stats.delivered < order.stats.total && 'text-blue-600',
+                              order.stats.total === 0 && 'text-muted-foreground'
                             )}>
                               {formatTracking(order)}
                             </span>
@@ -571,7 +563,6 @@ export default function OrdersTable() {
                               open={threadPopoverOpen === order.orderNumber} 
                               onOpenChange={(open) => {
                                 setThreadPopoverOpen(open ? order.orderNumber : null)
-                                if (!open) setPopoverShowEdit(null)
                                 if (!open) setManualConversationId('')
                               }}
                             >
@@ -597,22 +588,10 @@ export default function OrdersTable() {
                                   <div className="font-medium text-sm">Customer Thread</div>
                                   
                                   {order.frontConversationId ? (
-                                    <div className="space-y-3">
-                                      <div className="flex items-center justify-between">
-                                        <div className="flex items-center gap-2 text-sm text-green-600">
-                                          <CheckCircle2 className="h-4 w-4" />
-                                          <span>Linked</span>
-                                        </div>
-                                        {popoverShowEdit !== order.orderNumber && (
-                                          <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            className="h-6 px-2 text-xs text-muted-foreground"
-                                            onClick={() => setPopoverShowEdit(order.orderNumber)}
-                                          >
-                                            Change
-                                          </Button>
-                                        )}
+                                    <div className="space-y-2">
+                                      <div className="flex items-center gap-2 text-sm text-green-600">
+                                        <CheckCircle2 className="h-4 w-4" />
+                                        <span>Linked</span>
                                       </div>
                                       <a
                                         href={`https://app.frontapp.com/open/${order.frontConversationId}`}
@@ -623,63 +602,27 @@ export default function OrdersTable() {
                                         <ExternalLink className="h-3 w-3" />
                                         Open in Front
                                       </a>
-                                      
-                                      <div className="border-t pt-3 space-y-2">
-                                        <div className="text-xs font-medium text-muted-foreground">Create Draft</div>
-                                        <TooltipProvider>
-                                          <div className="flex gap-2">
-                                            <Tooltip>
-                                              <TooltipTrigger asChild>
-                                                <span className="flex-1">
-                                                  <Button
-                                                    variant="outline"
-                                                    size="sm"
-                                                    className="w-full"
-                                                    onClick={() => handleCreateOrderDraft(order.orderNumber, 'shipped')}
-                                                    disabled={creatingDraftOrderId === order.orderNumber || order?.stats?.total === 0}
-                                                  >
-                                                    {creatingDraftOrderId === order.orderNumber ? (
-                                                      <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                                                    ) : (
-                                                      <Truck className="h-3 w-3 mr-1" />
-                                                    )}
-                                                    Shipped
-                                                  </Button>
-                                                </span>
-                                              </TooltipTrigger>
-                                              {order?.stats?.total === 0 && (
-                                                <TooltipContent>
-                                                  <p>No shipments with tracking yet</p>
-                                                </TooltipContent>
-                                              )}
-                                            </Tooltip>
-                                            <Tooltip>
-                                              <TooltipTrigger asChild>
-                                                <span className="flex-1">
-                                                  <Button
-                                                    variant="outline"
-                                                    size="sm"
-                                                    className="w-full"
-                                                    onClick={() => handleCreateOrderDraft(order.orderNumber, 'delivered')}
-                                                    disabled={creatingDraftOrderId === order.orderNumber || order?.stats?.total === 0}
-                                                  >
-                                                    {creatingDraftOrderId === order.orderNumber ? (
-                                                      <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                                                    ) : (
-                                                      <PackageCheck className="h-3 w-3 mr-1" />
-                                                    )}
-                                                    Delivered
-                                                  </Button>
-                                                </span>
-                                              </TooltipTrigger>
-                                              {order?.stats?.total === 0 && (
-                                                <TooltipContent>
-                                                  <p>No shipments with tracking yet</p>
-                                                </TooltipContent>
-                                              )}
-                                            </Tooltip>
-                                          </div>
-                                        </TooltipProvider>
+                                      <div className="flex gap-2 pt-2">
+                                        <Button
+                                          variant="outline"
+                                          size="sm"
+                                          className="flex-1"
+                                          onClick={() => handleCreateOrderDraft(order.orderNumber, 'shipped')}
+                                          disabled={creatingDraftOrderId === order.orderNumber}
+                                        >
+                                          <Truck className="h-3 w-3 mr-1" />
+                                          Shipped
+                                        </Button>
+                                        <Button
+                                          variant="outline"
+                                          size="sm"
+                                          className="flex-1"
+                                          onClick={() => handleCreateOrderDraft(order.orderNumber, 'delivered')}
+                                          disabled={creatingDraftOrderId === order.orderNumber}
+                                        >
+                                          <PackageCheck className="h-3 w-3 mr-1" />
+                                          Delivered
+                                        </Button>
                                       </div>
                                     </div>
                                   ) : (
@@ -688,57 +631,44 @@ export default function OrdersTable() {
                                     </div>
                                   )}
                                   
-                                  {(!order.frontConversationId || popoverShowEdit === order.orderNumber) && (
-                                    <div className="border-t pt-3 space-y-2">
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        className="w-full"
-                                        onClick={() => handleRefreshThread(order.orderNumber)}
-                                        disabled={threadLoading === order.orderNumber}
-                                      >
-                                        {threadLoading === order.orderNumber ? (
-                                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                        ) : (
-                                          <RefreshCw className="h-4 w-4 mr-2" />
-                                        )}
-                                        Search for thread
-                                      </Button>
-                                      
-                                      <div className="flex gap-2">
-                                        <Input
-                                          placeholder="cnv_..."
-                                          value={manualConversationId}
-                                          onChange={(e) => setManualConversationId(e.target.value)}
-                                          className="h-8 text-xs font-mono"
-                                          onKeyDown={(e) => {
-                                            if (e.key === 'Enter') {
-                                              handleLinkThread(order.orderNumber, manualConversationId)
-                                            }
-                                          }}
-                                        />
-                                        <Button
-                                          size="sm"
-                                          className="h-8 px-2"
-                                          onClick={() => handleLinkThread(order.orderNumber, manualConversationId)}
-                                          disabled={!manualConversationId.trim() || threadLoading === order.orderNumber}
-                                        >
-                                          <Link2 className="h-4 w-4" />
-                                        </Button>
-                                      </div>
-                                      
-                                      {popoverShowEdit === order.orderNumber && (
-                                        <Button
-                                          variant="ghost"
-                                          size="sm"
-                                          className="w-full text-xs text-muted-foreground"
-                                          onClick={() => setPopoverShowEdit(null)}
-                                        >
-                                          Cancel
-                                        </Button>
+                                  <div className="border-t pt-3 space-y-2">
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="w-full"
+                                      onClick={() => handleRefreshThread(order.orderNumber)}
+                                      disabled={threadLoading === order.orderNumber}
+                                    >
+                                      {threadLoading === order.orderNumber ? (
+                                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                      ) : (
+                                        <RefreshCw className="h-4 w-4 mr-2" />
                                       )}
+                                      Search for thread
+                                    </Button>
+                                    
+                                    <div className="flex gap-2">
+                                      <Input
+                                        placeholder="cnv_..."
+                                        value={manualConversationId}
+                                        onChange={(e) => setManualConversationId(e.target.value)}
+                                        className="h-8 text-xs font-mono"
+                                        onKeyDown={(e) => {
+                                          if (e.key === 'Enter') {
+                                            handleLinkThread(order.orderNumber, manualConversationId)
+                                          }
+                                        }}
+                                      />
+                                      <Button
+                                        size="sm"
+                                        className="h-8 px-2"
+                                        onClick={() => handleLinkThread(order.orderNumber, manualConversationId)}
+                                        disabled={!manualConversationId.trim() || threadLoading === order.orderNumber}
+                                      >
+                                        <Link2 className="h-4 w-4" />
+                                      </Button>
                                     </div>
-                                  )}
+                                  </div>
                                 </div>
                               </PopoverContent>
                             </Popover>
@@ -987,7 +917,7 @@ export default function OrdersTable() {
                     </h3>
                     
                     {detailOrder.frontConversationId ? (
-                      <div className="space-y-3">
+                      <div className="space-y-2">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2 text-sm text-green-600">
                             <CheckCircle2 className="h-4 w-4" />
@@ -1013,64 +943,6 @@ export default function OrdersTable() {
                           <ExternalLink className="h-3 w-3" />
                           Open in Front
                         </a>
-                        
-                        <div className="border-t pt-3 space-y-2">
-                          <div className="text-xs font-medium text-muted-foreground">Create Draft</div>
-                          <TooltipProvider>
-                            <div className="flex gap-2">
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <span className="flex-1">
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      className="w-full"
-                                      onClick={() => handleCreateOrderDraft(detailOrder.orderNumber, 'shipped')}
-                                      disabled={creatingDraftOrderId === detailOrder.orderNumber || detailOrder?.stats?.total === 0}
-                                    >
-                                      {creatingDraftOrderId === detailOrder.orderNumber ? (
-                                        <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                                      ) : (
-                                        <Truck className="h-3 w-3 mr-1" />
-                                      )}
-                                      Shipped
-                                    </Button>
-                                  </span>
-                                </TooltipTrigger>
-                                {detailOrder?.stats?.total === 0 && (
-                                  <TooltipContent>
-                                    <p>No shipments with tracking yet</p>
-                                  </TooltipContent>
-                                )}
-                              </Tooltip>
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <span className="flex-1">
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      className="w-full"
-                                      onClick={() => handleCreateOrderDraft(detailOrder.orderNumber, 'delivered')}
-                                      disabled={creatingDraftOrderId === detailOrder.orderNumber || detailOrder?.stats?.total === 0}
-                                    >
-                                      {creatingDraftOrderId === detailOrder.orderNumber ? (
-                                        <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                                      ) : (
-                                        <PackageCheck className="h-3 w-3 mr-1" />
-                                      )}
-                                      Delivered
-                                    </Button>
-                                  </span>
-                                </TooltipTrigger>
-                                {detailOrder?.stats?.total === 0 && (
-                                  <TooltipContent>
-                                    <p>No shipments with tracking yet</p>
-                                  </TooltipContent>
-                                )}
-                              </Tooltip>
-                            </div>
-                          </TooltipProvider>
-                        </div>
                       </div>
                     ) : (
                       <div className="text-sm text-muted-foreground">
