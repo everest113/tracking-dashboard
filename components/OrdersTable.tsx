@@ -143,6 +143,7 @@ export default function OrdersTable() {
   const [threadPopoverOpen, setThreadPopoverOpen] = useState<string | null>(null)
   const [threadLoading, setThreadLoading] = useState<string | null>(null)
   const [manualConversationId, setManualConversationId] = useState('')
+  const [popoverShowEdit, setPopoverShowEdit] = useState<string | null>(null)
   const [drawerConversationId, setDrawerConversationId] = useState('')
   const [detailOrder, setDetailOrder] = useState<Order | null>(null)
   const [showThreadEdit, setShowThreadEdit] = useState(false)
@@ -570,6 +571,7 @@ export default function OrdersTable() {
                               open={threadPopoverOpen === order.orderNumber} 
                               onOpenChange={(open) => {
                                 setThreadPopoverOpen(open ? order.orderNumber : null)
+                                if (!open) setPopoverShowEdit(null)
                                 if (!open) setManualConversationId('')
                               }}
                             >
@@ -596,9 +598,21 @@ export default function OrdersTable() {
                                   
                                   {order.frontConversationId ? (
                                     <div className="space-y-3">
-                                      <div className="flex items-center gap-2 text-sm text-green-600">
-                                        <CheckCircle2 className="h-4 w-4" />
-                                        <span>Linked</span>
+                                      <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-2 text-sm text-green-600">
+                                          <CheckCircle2 className="h-4 w-4" />
+                                          <span>Linked</span>
+                                        </div>
+                                        {popoverShowEdit !== order.orderNumber && (
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-6 px-2 text-xs text-muted-foreground"
+                                            onClick={() => setPopoverShowEdit(order.orderNumber)}
+                                          >
+                                            Change
+                                          </Button>
+                                        )}
                                       </div>
                                       <a
                                         href={`https://app.frontapp.com/open/${order.frontConversationId}`}
@@ -674,44 +688,57 @@ export default function OrdersTable() {
                                     </div>
                                   )}
                                   
-                                  <div className="border-t pt-3 space-y-2">
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      className="w-full"
-                                      onClick={() => handleRefreshThread(order.orderNumber)}
-                                      disabled={threadLoading === order.orderNumber}
-                                    >
-                                      {threadLoading === order.orderNumber ? (
-                                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                      ) : (
-                                        <RefreshCw className="h-4 w-4 mr-2" />
-                                      )}
-                                      Search for thread
-                                    </Button>
-                                    
-                                    <div className="flex gap-2">
-                                      <Input
-                                        placeholder="cnv_..."
-                                        value={manualConversationId}
-                                        onChange={(e) => setManualConversationId(e.target.value)}
-                                        className="h-8 text-xs font-mono"
-                                        onKeyDown={(e) => {
-                                          if (e.key === 'Enter') {
-                                            handleLinkThread(order.orderNumber, manualConversationId)
-                                          }
-                                        }}
-                                      />
+                                  {(!order.frontConversationId || popoverShowEdit === order.orderNumber) && (
+                                    <div className="border-t pt-3 space-y-2">
                                       <Button
+                                        variant="outline"
                                         size="sm"
-                                        className="h-8 px-2"
-                                        onClick={() => handleLinkThread(order.orderNumber, manualConversationId)}
-                                        disabled={!manualConversationId.trim() || threadLoading === order.orderNumber}
+                                        className="w-full"
+                                        onClick={() => handleRefreshThread(order.orderNumber)}
+                                        disabled={threadLoading === order.orderNumber}
                                       >
-                                        <Link2 className="h-4 w-4" />
+                                        {threadLoading === order.orderNumber ? (
+                                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                        ) : (
+                                          <RefreshCw className="h-4 w-4 mr-2" />
+                                        )}
+                                        Search for thread
                                       </Button>
+                                      
+                                      <div className="flex gap-2">
+                                        <Input
+                                          placeholder="cnv_..."
+                                          value={manualConversationId}
+                                          onChange={(e) => setManualConversationId(e.target.value)}
+                                          className="h-8 text-xs font-mono"
+                                          onKeyDown={(e) => {
+                                            if (e.key === 'Enter') {
+                                              handleLinkThread(order.orderNumber, manualConversationId)
+                                            }
+                                          }}
+                                        />
+                                        <Button
+                                          size="sm"
+                                          className="h-8 px-2"
+                                          onClick={() => handleLinkThread(order.orderNumber, manualConversationId)}
+                                          disabled={!manualConversationId.trim() || threadLoading === order.orderNumber}
+                                        >
+                                          <Link2 className="h-4 w-4" />
+                                        </Button>
+                                      </div>
+                                      
+                                      {popoverShowEdit === order.orderNumber && (
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          className="w-full text-xs text-muted-foreground"
+                                          onClick={() => setPopoverShowEdit(null)}
+                                        >
+                                          Cancel
+                                        </Button>
+                                      )}
                                     </div>
-                                  </div>
+                                  )}
                                 </div>
                               </PopoverContent>
                             </Popover>
