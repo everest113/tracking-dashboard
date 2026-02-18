@@ -66,9 +66,10 @@ export async function middleware(request: NextRequest) {
     return authResponse
   }
 
-  // Allow cron jobs with valid CRON_SECRET to bypass auth
+  // Allow cron jobs with valid CRON_SECRET to bypass auth completely
+  // (bypasses Auth0's redirect behavior for unauthenticated requests)
   if (request.nextUrl.pathname.startsWith('/api/orpc') && hasCronAuth(request)) {
-    return authResponse
+    return NextResponse.next()
   }
 
   // Protected routes: check for session
