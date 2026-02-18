@@ -149,6 +149,9 @@ export default function OrdersTable() {
   
   // Refresh state
   const [refreshingOrder, setRefreshingOrder] = useState<string | null>(null)
+  
+  // Notification draft state
+  const [creatingDraftShipmentId, setCreatingDraftShipmentId] = useState<number | null>(null)
 
   // Debounce search input
   useEffect(() => {
@@ -337,6 +340,46 @@ export default function OrdersTable() {
       })
     } finally {
       setRefreshingOrder(null)
+    }
+  }
+
+  const handleCreateNotificationDraft = async (shipmentId: number, status: string) => {
+    setCreatingDraftShipmentId(shipmentId)
+    try {
+      // Map status to notification type
+      const statusLower = status.toLowerCase()
+      let notificationType: 'shipped' | 'out_for_delivery' | 'delivered' | 'exception' = 'shipped'
+      
+      if (statusLower === 'delivered') notificationType = 'delivered'
+      else if (statusLower.includes('out_for_delivery') || statusLower.includes('out for delivery')) notificationType = 'out_for_delivery'
+      else if (statusLower.includes('exception')) notificationType = 'exception'
+      else if (statusLower.includes('in_transit') || statusLower.includes('shipped')) notificationType = 'shipped'
+      
+      const result = await api.customerThread.createNotificationDraft({
+        shipmentId,
+        notificationType,
+      })
+      
+      if (result.success) {
+        toast.success('Draft created in Front', {
+          description: `${notificationType} notification draft ready for review`,
+        })
+      } else if (result.skippedReason) {
+        toast.info('Notification skipped', {
+          description: result.skippedReason,
+        })
+      } else {
+        toast.error('Failed to create draft', {
+          description: result.error || 'Unknown error',
+        })
+      }
+    } catch (error) {
+      console.error('Failed to create notification draft:', error)
+      toast.error('Draft creation failed', {
+        description: error instanceof Error ? error.message : 'Check console for details',
+      })
+    } finally {
+      setCreatingDraftShipmentId(null)
     }
   }
 
@@ -709,12 +752,13 @@ export default function OrdersTable() {
                                       <TableHead>Carrier</TableHead>
                                       <TableHead>Status</TableHead>
                                       <TableHead>Updated</TableHead>
+                                      <TableHead className="w-[80px]">Actions</TableHead>
                                     </TableRow>
                                   </TableHeader>
                                   <TableBody>
                                     {order.purchaseOrders.length === 0 ? (
                                       <TableRow>
-                                        <TableCell colSpan={6} className="text-center text-muted-foreground py-4">
+                                        <TableCell colSpan={7} className="text-center text-muted-foreground py-4">
                                           No purchase orders
                                         </TableCell>
                                       </TableRow>
@@ -760,6 +804,34 @@ export default function OrdersTable() {
                                                   ? formatDistanceToNow(new Date(shipment.lastChecked), { addSuffix: true })
                                                   : '—'}
                                               </TableCell>
+                                              <TableCell>
+                                                {order.frontConversationId ? (
+                                                  <TooltipProvider>
+                                                    <Tooltip>
+                                                      <TooltipTrigger asChild>
+                                                        <Button
+                                                          variant="ghost"
+                                                          size="sm"
+                                                          className="h-7 w-7 p-0"
+                                                          onClick={() => handleCreateNotificationDraft(shipment.id, shipment.status)}
+                                                          disabled={creatingDraftShipmentId === shipment.id}
+                                                        >
+                                                          {creatingDraftShipmentId === shipment.id ? (
+                                                            <Loader2 className="h-4 w-4 animate-spin" />
+                                                          ) : (
+                                                            <MailCheck className="h-4 w-4" />
+                                                          )}
+                                                        </Button>
+                                                      </TooltipTrigger>
+                                                      <TooltipContent>
+                                                        <p>Create notification draft</p>
+                                                      </TooltipContent>
+                                                    </Tooltip>
+                                                  </TooltipProvider>
+                                                ) : (
+                                                  <span className="text-xs text-muted-foreground">—</span>
+                                                )}
+                                              </TableCell>
                                             </TableRow>
                                           ))
                                         }
@@ -784,6 +856,7 @@ export default function OrdersTable() {
                                               )}
                                             </TableCell>
                                             <TableCell className="text-sm text-muted-foreground">—</TableCell>
+                                            <TableCell>—</TableCell>
                                           </TableRow>
                                         )]
                                       })
