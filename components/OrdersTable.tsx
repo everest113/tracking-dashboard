@@ -475,7 +475,7 @@ export default function OrdersTable() {
                   
                   return (
                     <Collapsible key={order.orderNumber} open={isExpanded}>
-                      <>
+                      <div>
                         {/* Main Row */}
                         <TableRow 
                           className={cn(
@@ -839,7 +839,7 @@ export default function OrdersTable() {
                             </TableCell>
                           </TableRow>
                         </CollapsibleContent>
-                      </>
+                      </div>
                     </Collapsible>
                   )
                 })
