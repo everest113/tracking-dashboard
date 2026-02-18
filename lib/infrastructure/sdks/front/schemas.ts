@@ -103,7 +103,8 @@ export const FrontSendReplyRequestSchema = z.object({
  */
 export const FrontCreateDraftRequestSchema = z.object({
   body: z.string(), // HTML content of the draft
-  author_id: z.string().optional(), // Teammate ID to create draft as
+  author_id: z.string(), // Teammate ID to create draft as (required)
+  channel_id: z.string(), // Channel to send from (required - use cha_xxx format)
   subject: z.string().optional(), // Override subject
   mode: z.enum(['shared', 'private']).optional(), // Draft visibility (default: shared)
   signature_id: z.string().optional(), // Custom signature

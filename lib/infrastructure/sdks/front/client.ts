@@ -229,13 +229,13 @@ export class FrontClient extends BaseSdkClient {
    * 
    * @param conversationId - The conversation ID (cnv_xxx format)
    * @param body - HTML content of the draft
-   * @param options - Optional settings (author_id, mode, etc.)
+   * @param options - Required settings (author_id, channel_id) plus optional overrides
    * @returns The created draft message
    */
   async createDraft(
     conversationId: string,
     body: string,
-    options: Omit<FrontCreateDraftRequest, 'body'> = {}
+    options: Omit<FrontCreateDraftRequest, 'body'>
   ): Promise<FrontCreateDraftResponse> {
     const payload: FrontCreateDraftRequest = {
       body,
@@ -322,13 +322,13 @@ export async function sendReply(
  * 
  * @param conversationId - The conversation ID (cnv_xxx format)
  * @param body - HTML content of the draft
- * @param options - Optional settings (author_id, mode, etc.)
+ * @param options - Required settings (author_id, channel_id) plus optional overrides
  * @returns The created draft message
  */
 export async function createDraft(
   conversationId: string,
   body: string,
-  options?: Omit<FrontCreateDraftRequest, 'body'>
+  options: Omit<FrontCreateDraftRequest, 'body'>
 ): Promise<FrontCreateDraftResponse> {
   const client = getFrontClient()
   return client.createDraft(conversationId, body, options)
