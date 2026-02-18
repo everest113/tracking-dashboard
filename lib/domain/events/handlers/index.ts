@@ -7,6 +7,7 @@
 
 import { registerOmgSyncHandler } from './omg-sync.handler'
 import { registerOrderStatusSyncHandler } from './order-status-sync.handler'
+import { registerAuditLoggingHandler } from './audit-logging.handler'
 
 let initialized = false
 
@@ -24,9 +25,7 @@ export function registerAllEventHandlers(): void {
   // Register individual handlers
   registerOmgSyncHandler()
   registerOrderStatusSyncHandler()
-  // Add more handlers here as needed:
-  // registerNotificationHandler()
-  // registerAuditLogHandler()
+  registerAuditLoggingHandler()
   
   initialized = true
   console.log('[Domain Events] All handlers registered')

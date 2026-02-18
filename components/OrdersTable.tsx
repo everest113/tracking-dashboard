@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { formatDistanceToNow } from 'date-fns'
+import { formatDistanceToNow, format } from 'date-fns'
 import {
   ChevronDown,
   ChevronRight,
@@ -19,6 +19,9 @@ import {
   Loader2,
   Factory,
   Package,
+  Info,
+  ClipboardList,
+  MailCheck,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -48,10 +51,19 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+} from '@/components/ui/sheet'
+import { Separator } from '@/components/ui/separator'
 import { api } from '@/lib/orpc/client'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import RefreshNow from '@/components/RefreshNow'
+import AuditTimeline from '@/components/AuditTimeline'
 
 // Order-level status (matches server-side enum)
 type OrderStatus = 'all' | 'pending' | 'in_transit' | 'partially_delivered' | 'delivered' | 'exception'
@@ -131,6 +143,9 @@ export default function OrdersTable() {
   const [threadPopoverOpen, setThreadPopoverOpen] = useState<string | null>(null)
   const [threadLoading, setThreadLoading] = useState<string | null>(null)
   const [manualConversationId, setManualConversationId] = useState('')
+  const [drawerConversationId, setDrawerConversationId] = useState('')
+  const [detailOrder, setDetailOrder] = useState<Order | null>(null)
+  const [showThreadEdit, setShowThreadEdit] = useState(false)
   
   // Refresh state
   const [refreshingOrder, setRefreshingOrder] = useState<string | null>(null)
@@ -174,6 +189,17 @@ export default function OrdersTable() {
       }
       return next
     })
+  }
+
+  const openOrderDrawer = (order: Order) => {
+    setDetailOrder(order)
+    setDrawerConversationId(order.frontConversationId ?? '')
+  }
+
+  const closeOrderDrawer = () => {
+    setDetailOrder(null)
+    setDrawerConversationId('')
+    setShowThreadEdit(false)
   }
 
   // Get single smart status for an order
@@ -284,6 +310,7 @@ export default function OrdersTable() {
       fetchOrders()
       setThreadPopoverOpen(null)
       setManualConversationId('')
+      setDrawerConversationId('')
     } catch (err) {
       toast.error('Failed to link thread', {
         description: err instanceof Error ? err.message : 'Unknown error',
@@ -611,6 +638,19 @@ export default function OrdersTable() {
                                     variant="ghost"
                                     size="icon"
                                     className="h-7 w-7"
+                                    onClick={() => openOrderDrawer(order)}
+                                  >
+                                    <Info className="h-3.5 w-3.5" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>View details</TooltipContent>
+                              </Tooltip>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7"
                                     disabled={refreshingOrder === order.orderNumber}
                                     onClick={() => handleRefreshOrder(order.orderNumber)}
                                   >
@@ -763,6 +803,262 @@ export default function OrdersTable() {
           </Table>
         </div>
       </div>
+
+      {/* Order Details Drawer */}
+      <Sheet open={!!detailOrder} onOpenChange={(open) => !open && closeOrderDrawer()}>
+        <SheetContent className="w-[540px] sm:max-w-[540px] overflow-y-auto">
+          {detailOrder && (() => {
+            const status = getSmartStatus(detailOrder)
+            const StatusIcon = status.icon
+            const inHands = formatInHandsDate(detailOrder.inHandsDate)
+            
+            return (
+              <div className="p-6 pt-8">
+                <SheetHeader className="pb-4 p-0">
+                  <SheetTitle className="flex items-center gap-2">
+                    <span className="font-mono">{detailOrder.orderNumber}</span>
+                    <Badge variant={status.variant as 'default' | 'secondary' | 'outline' | 'destructive'}>
+                      <StatusIcon className="h-3 w-3 mr-1" />
+                      {status.label}
+                    </Badge>
+                  </SheetTitle>
+                  <SheetDescription>
+                    {detailOrder.orderName || detailOrder.customerName || 'Order details'}
+                  </SheetDescription>
+                </SheetHeader>
+
+                <div className="space-y-6">
+                  {/* Overview Section */}
+                  <div className="space-y-3">
+                    <h3 className="text-sm font-medium flex items-center gap-2">
+                      <ClipboardList className="h-4 w-4" />
+                      Overview
+                    </h3>
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <div>
+                        <div className="text-muted-foreground">Customer</div>
+                        <div>{detailOrder.customerName || '—'}</div>
+                      </div>
+                      <div>
+                        <div className="text-muted-foreground">Email</div>
+                        <div>
+                          {detailOrder.customerEmail ? (
+                            <a href={`mailto:${detailOrder.customerEmail}`} className="text-primary hover:underline">
+                              {detailOrder.customerEmail}
+                            </a>
+                          ) : '—'}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-muted-foreground">In-Hands Date</div>
+                        <div className={inHands?.isPast ? 'text-red-600 font-medium' : ''}>
+                          {inHands?.text || '—'}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-muted-foreground">Tracking</div>
+                        <div>{formatTracking(detailOrder)}</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <Separator />
+
+                  {/* Customer Thread Section */}
+                  <div className="space-y-3">
+                    <h3 className="text-sm font-medium flex items-center gap-2">
+                      <MailCheck className="h-4 w-4" />
+                      Customer Thread
+                    </h3>
+                    
+                    {detailOrder.frontConversationId ? (
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2 text-sm text-green-600">
+                            <CheckCircle2 className="h-4 w-4" />
+                            <span>Linked</span>
+                          </div>
+                          {!showThreadEdit && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 px-2 text-xs text-muted-foreground"
+                              onClick={() => setShowThreadEdit(true)}
+                            >
+                              Change
+                            </Button>
+                          )}
+                        </div>
+                        <a
+                          href={`https://app.frontapp.com/open/${detailOrder.frontConversationId}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1 text-sm text-primary hover:underline"
+                        >
+                          <ExternalLink className="h-3 w-3" />
+                          Open in Front
+                        </a>
+                      </div>
+                    ) : (
+                      <div className="text-sm text-muted-foreground">
+                        No conversation linked
+                      </div>
+                    )}
+                    
+                    {/* Show edit controls: always if not linked, or if user clicked Change */}
+                    {(!detailOrder.frontConversationId || showThreadEdit) && (
+                      <div className="space-y-2 pt-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="w-full"
+                          onClick={() => handleRefreshThread(detailOrder.orderNumber)}
+                          disabled={threadLoading === detailOrder.orderNumber}
+                        >
+                          {threadLoading === detailOrder.orderNumber ? (
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          ) : (
+                            <RefreshCw className="h-4 w-4 mr-2" />
+                          )}
+                          Search for thread
+                        </Button>
+                        
+                        <div className="flex gap-2">
+                          <Input
+                            placeholder="cnv_..."
+                            value={drawerConversationId}
+                            onChange={(e) => setDrawerConversationId(e.target.value)}
+                            className="h-8 text-xs font-mono"
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                handleLinkThread(detailOrder.orderNumber, drawerConversationId)
+                              }
+                            }}
+                          />
+                          <Button
+                            size="sm"
+                            className="h-8 px-2"
+                            onClick={() => handleLinkThread(detailOrder.orderNumber, drawerConversationId)}
+                            disabled={!drawerConversationId.trim() || threadLoading === detailOrder.orderNumber}
+                          >
+                            <Link2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                        
+                        {showThreadEdit && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="w-full text-xs text-muted-foreground"
+                            onClick={() => setShowThreadEdit(false)}
+                          >
+                            Cancel
+                          </Button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  <Separator />
+
+                  {/* Purchase Orders Section */}
+                  <div className="space-y-3">
+                    <h3 className="text-sm font-medium flex items-center gap-2">
+                      <Factory className="h-4 w-4" />
+                      Purchase Orders ({detailOrder.purchaseOrders.length})
+                    </h3>
+                    
+                    {detailOrder.purchaseOrders.length === 0 ? (
+                      <div className="text-sm text-muted-foreground">No POs yet</div>
+                    ) : (
+                      <div className="space-y-2">
+                        {detailOrder.purchaseOrders.map((po) => (
+                          <div key={po.poNumber} className="border rounded-lg p-3 space-y-2">
+                            <div className="flex items-center justify-between">
+                              <span className="font-mono text-sm">{po.poNumber}</span>
+                              {po.operationsStatus && (
+                                <Badge variant="outline" className="text-xs">
+                                  {po.operationsStatus}
+                                </Badge>
+                              )}
+                            </div>
+                            {po.supplierName && (
+                              <div className="text-sm text-muted-foreground">{po.supplierName}</div>
+                            )}
+                            {po.shipments.length > 0 && (
+                              <div className="pt-1 space-y-1">
+                                {po.shipments.map((shipment) => (
+                                  <div key={shipment.id} className="flex items-center gap-2 text-xs">
+                                    <Truck className="h-3 w-3 text-muted-foreground" />
+                                    <span className="font-mono">{shipment.trackingNumber}</span>
+                                    <Badge variant="secondary" className="text-xs">
+                                      {shipment.status}
+                                    </Badge>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <Separator />
+
+                  {/* Audit Timeline Section */}
+                  <div className="space-y-3">
+                    <h3 className="text-sm font-medium flex items-center gap-2">
+                      <ClipboardList className="h-4 w-4" />
+                      Activity
+                    </h3>
+                    <AuditTimeline 
+                      entityType="order" 
+                      entityId={detailOrder.orderNumber} 
+                    />
+                  </div>
+
+                  <Separator />
+
+                  {/* Actions Section */}
+                  <div className="space-y-3">
+                    <h3 className="text-sm font-medium">Actions</h3>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={refreshingOrder === detailOrder.orderNumber}
+                        onClick={() => handleRefreshOrder(detailOrder.orderNumber)}
+                      >
+                        {refreshingOrder === detailOrder.orderNumber ? (
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        ) : (
+                          <RefreshCw className="h-4 w-4 mr-2" />
+                        )}
+                        Refresh from OMG
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        asChild
+                      >
+                        <a
+                          href={detailOrder.omgOrderUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          <ExternalLink className="h-4 w-4 mr-2" />
+                          Open in OMG
+                        </a>
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )
+          })()}
+        </SheetContent>
+      </Sheet>
     </TooltipProvider>
   )
 }

@@ -1987,8 +1987,17 @@ const ordersRouter = {
     }))
     .handler(async ({ context, input }) => {
       const { orderNumber } = input
+      const { getAuditService } = await import('@/lib/infrastructure/audit')
+      const { AuditEntityTypes, AuditActions } = await import('@/lib/domain/audit')
+      const audit = getAuditService()
       
       console.log(`=== Refreshing order: ${orderNumber} ===`)
+      
+      // Get previous state for audit
+      const previousOrder = await context.prisma.orders.findUnique({
+        where: { order_number: orderNumber },
+      })
+      const previousStatus = previousOrder?.computed_status
       
       try {
         // Step 1: Re-sync order from OMG
@@ -2003,6 +2012,13 @@ const ordersRouter = {
           })
           
           if (!localOrder) {
+            await audit.recordFailure({
+              entityType: AuditEntityTypes.Order,
+              entityId: orderNumber,
+              action: AuditActions.OrderRefreshed,
+              error: 'Order not found in OMG or local database',
+            })
+            
             return {
               success: false,
               orderNumber,
@@ -2029,6 +2045,13 @@ const ordersRouter = {
         })
         
         if (!updatedOrder) {
+          await audit.recordFailure({
+            entityType: AuditEntityTypes.Order,
+            entityId: orderNumber,
+            action: AuditActions.OrderRefreshed,
+            error: 'Order not found after sync',
+          })
+          
           return {
             success: false,
             orderNumber,
@@ -2042,6 +2065,35 @@ const ordersRouter = {
         
         console.log(`✅ Order ${orderNumber} refreshed: ${updatedOrder.shipment_count} shipments, status=${updatedOrder.computed_status}`)
         
+        // Record successful refresh
+        await audit.recordSuccess({
+          entityType: AuditEntityTypes.Order,
+          entityId: orderNumber,
+          action: AuditActions.OrderRefreshed,
+          metadata: {
+            synced: syncResult !== null,
+            posCount: updatedOrder.po_count,
+            shipmentCount: updatedOrder.shipment_count,
+            previousStatus,
+            newStatus: updatedOrder.computed_status,
+            statusChanged: previousStatus !== updatedOrder.computed_status,
+          },
+        })
+        
+        // If status changed, record that separately
+        if (previousStatus && previousStatus !== updatedOrder.computed_status) {
+          await audit.recordSuccess({
+            entityType: AuditEntityTypes.Order,
+            entityId: orderNumber,
+            action: AuditActions.OrderStatusChanged,
+            metadata: {
+              previousStatus,
+              newStatus: updatedOrder.computed_status,
+              trigger: 'refresh',
+            },
+          })
+        }
+        
         return {
           success: true,
           orderNumber,
@@ -2053,6 +2105,13 @@ const ordersRouter = {
       } catch (error) {
         const errorMsg = getErrorMessage(error)
         console.error(`❌ Error refreshing order ${orderNumber}:`, errorMsg)
+        
+        await audit.recordFailure({
+          entityType: AuditEntityTypes.Order,
+          entityId: orderNumber,
+          action: AuditActions.OrderRefreshed,
+          error: errorMsg,
+        })
         
         return {
           success: false,

@@ -26,6 +26,7 @@ type EventPayloads = {
     shipmentId: number
     trackingNumber: string
     poNumber?: string | null
+    carrier?: string | null
   }
   
   /** Emitted when a shipment's tracking status changes */
@@ -33,6 +34,35 @@ type EventPayloads = {
     shipmentId: number
     oldStatus: string
     newStatus: string
+  }
+  
+  /** Emitted when a Ship24 tracker is successfully registered */
+  ShipmentTrackerRegistered: {
+    shipmentId: number
+    trackingNumber: string
+    trackerId: string
+  }
+  
+  /** Emitted when Ship24 tracker registration fails */
+  ShipmentTrackerFailed: {
+    shipmentId: number
+    trackingNumber: string
+    error: string
+  }
+  
+  /** Emitted when an order's computed status changes */
+  OrderStatusChanged: {
+    orderNumber: string
+    oldStatus: string
+    newStatus: string
+    trigger: 'shipment_change' | 'refresh' | 'sync' | 'manual'
+  }
+  
+  /** Emitted when an order is synced from OMG */
+  OrderSynced: {
+    orderNumber: string
+    created: boolean
+    posCount: number
   }
 }
 

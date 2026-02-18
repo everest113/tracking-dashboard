@@ -33,12 +33,22 @@ export const AuditActions = {
   ShipmentCreated: 'shipment.created',
   ShipmentStatusChanged: 'shipment.status_changed',
   ShipmentDeleted: 'shipment.deleted',
+  ShipmentTrackerRegistered: 'shipment.tracker_registered',
+  ShipmentTrackerFailed: 'shipment.tracker_failed',
   
   // Customer thread actions
   ThreadSearched: 'thread.searched',
   ThreadAutoMatched: 'thread.auto_matched',
   ThreadManuallyLinked: 'thread.manually_linked',
+  ThreadRejected: 'thread.rejected',
   ThreadNoMatch: 'thread.no_match',
+  ThreadCleared: 'thread.cleared',
+  
+  // Order actions
+  OrderSynced: 'order.synced',
+  OrderRefreshed: 'order.refreshed',
+  OrderStatusChanged: 'order.status_changed',
+  OrderCreated: 'order.created',
   
   // Notification actions
   NotificationSent: 'notification.sent',
