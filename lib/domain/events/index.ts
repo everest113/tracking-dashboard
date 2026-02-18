@@ -64,6 +64,15 @@ type EventPayloads = {
     created: boolean
     posCount: number
   }
+  
+  /** Emitted when a customer thread is linked to an order */
+  ThreadLinked: {
+    orderNumber: string
+    conversationId: string
+    matchType: 'auto_matched' | 'manually_linked'
+    /** Previous conversation ID if re-linking */
+    previousConversationId?: string | null
+  }
 }
 
 type EventName = keyof EventPayloads
