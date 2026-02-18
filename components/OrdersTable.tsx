@@ -144,6 +144,7 @@ export default function OrdersTable() {
   const [threadLoading, setThreadLoading] = useState<string | null>(null)
   const [manualConversationId, setManualConversationId] = useState('')
   const [popoverShowEdit, setPopoverShowEdit] = useState<string | null>(null)
+  const [creatingDraftOrderId, setCreatingDraftOrderId] = useState<string | null>(null)
   const [drawerConversationId, setDrawerConversationId] = useState('')
   const [detailOrder, setDetailOrder] = useState<Order | null>(null)
   const [showThreadEdit, setShowThreadEdit] = useState(false)
@@ -338,6 +339,25 @@ export default function OrdersTable() {
       })
     } finally {
       setRefreshingOrder(null)
+    }
+  }
+
+  const handleCreateOrderDraft = async (orderNumber: string, templateType: 'shipped' | 'delivered') => {
+    setCreatingDraftOrderId(orderNumber)
+    try {
+      const result = await api.customerThread.createOrderDraft({ orderNumber, templateType })
+      if (result.success) {
+        toast.success('Draft created in Front', {
+          description: templateType === 'shipped' ? 'Shipped notification draft ready' : 'Delivered notification draft ready',
+        })
+      } else {
+        toast.error('Failed to create draft', { description: result.error || 'Unknown error' })
+      }
+    } catch (error) {
+      console.error('Failed to create order draft:', error)
+      toast.error('Draft creation failed')
+    } finally {
+      setCreatingDraftOrderId(null)
     }
   }
 
@@ -593,6 +613,42 @@ export default function OrdersTable() {
                                         <ExternalLink className="h-3 w-3" />
                                         Open in Front
                                       </a>
+                                      <div className="border-t pt-3 space-y-2">
+                                        <div className="text-xs font-medium text-muted-foreground">Create Draft</div>
+                                        <div className="flex gap-2">
+                                          <Button
+                                            variant="outline"
+                                            size="sm"
+                                            className="flex-1"
+                                            onClick={() => handleCreateOrderDraft(order.orderNumber, 'shipped')}
+                                            disabled={creatingDraftOrderId === order.orderNumber || order.stats.total === 0}
+                                          >
+                                            {creatingDraftOrderId === order.orderNumber ? (
+                                              <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                            ) : (
+                                              <Truck className="h-3 w-3 mr-1" />
+                                            )}
+                                            Shipped
+                                          </Button>
+                                          <Button
+                                            variant="outline"
+                                            size="sm"
+                                            className="flex-1"
+                                            onClick={() => handleCreateOrderDraft(order.orderNumber, 'delivered')}
+                                            disabled={creatingDraftOrderId === order.orderNumber || order.stats.total === 0}
+                                          >
+                                            {creatingDraftOrderId === order.orderNumber ? (
+                                              <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                            ) : (
+                                              <PackageCheck className="h-3 w-3 mr-1" />
+                                            )}
+                                            Delivered
+                                          </Button>
+                                        </div>
+                                        {order.stats.total === 0 && (
+                                          <p className="text-xs text-muted-foreground">No tracking numbers yet</p>
+                                        )}
+                                      </div>
                                     </div>
                                   ) : (
                                     <div className="text-sm text-muted-foreground">
