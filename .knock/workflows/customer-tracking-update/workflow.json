@@ -1,0 +1,30 @@
+{
+  "name": "Customer Tracking Update",
+  "steps": [
+    {
+      "name": "Send notification via Front",
+      "ref": "send_to_front",
+      "settings": {
+        "body": "{\"id\":\"{{workflow_run_id}}\",\"workflow\":\"{{workflow}}\",\"recipient\":{\"id\":\"{{recipient.id}}\",\"collection\":\"{{recipient.collection}}\"},\"data\":{{data | json}}}",
+        "headers": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "method": "post",
+        "url": "{{vars.app_base_url}}/api/webhooks/knock/customer-notification"
+      },
+      "type": "http_fetch"
+    }
+  ],
+  "trigger_frequency": "every_trigger",
+  "__readonly": {
+    "environment": "development",
+    "key": "customer-tracking-update",
+    "active": true,
+    "valid": true,
+    "created_at": "2026-02-18T01:14:54.863428Z"
+  },
+  "$schema": "https://schemas.knock.app/cli/workflow.json"
+}
