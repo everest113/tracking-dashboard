@@ -5,14 +5,10 @@
  * Knock then calls our webhook which sends via Front.
  * 
  * This runs in parallel with the internal team notification handlers.
- * 
- * In local development (no KNOCK_API_KEY), bypasses Knock and calls
- * TrackingNotificationService directly.
  */
 
 import { registerEventHandler } from '@/lib/application/events/registry'
-import { getNotificationService, isKnockConfigured } from '@/lib/infrastructure/notifications/knock'
-import { getTrackingNotificationService } from '@/lib/infrastructure/customer-thread'
+import { getNotificationService } from '@/lib/infrastructure/notifications/knock'
 import { ShipmentEventTopics } from './topics'
 import type { QueuedEvent } from '@/lib/application/events/types'
 import type { ShipmentEventPayload } from './buildShipmentEvents'
@@ -58,10 +54,10 @@ function getNotificationType(
 }
 
 /**
- * Trigger customer notification.
+ * Trigger customer notification via Knock.
  * 
- * If Knock is configured, triggers via Knock workflow (production/staging).
- * If not, calls TrackingNotificationService directly (local development).
+ * Knock handles idempotency and calls our webhook to send via Front.
+ * Without KNOCK_API_KEY, Knock mocks the trigger (logs but doesn't send).
  */
 async function triggerCustomerNotification(
   shipmentId: number,
@@ -69,27 +65,6 @@ async function triggerCustomerNotification(
   eventId: string,
   exceptionReason?: string
 ): Promise<void> {
-  // In local development, bypass Knock and send directly
-  if (!isKnockConfigured()) {
-    console.log(`[Customer Notification] Knock not configured, sending directly`)
-    const trackingService = getTrackingNotificationService()
-    const result = await trackingService.sendNotification({
-      shipmentId,
-      notificationType,
-      exceptionReason,
-    })
-    
-    if (result.success) {
-      console.log(`[Customer Notification] Sent ${notificationType} for shipment ${shipmentId}`)
-    } else if (result.skippedReason) {
-      console.log(`[Customer Notification] Skipped: ${result.skippedReason}`)
-    } else {
-      console.error(`[Customer Notification] Failed: ${result.error}`)
-    }
-    return
-  }
-  
-  // Production/staging: trigger via Knock for idempotency
   const notificationService = getNotificationService()
   
   const result = await notificationService.triggerForObject(

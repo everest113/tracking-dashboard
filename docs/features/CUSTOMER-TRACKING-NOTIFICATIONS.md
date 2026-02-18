@@ -48,18 +48,11 @@ Email/Slack/Push            Webhook Channel
 
 ## Environment Setup
 
-### Local Development
+### All Environments
 
-**No Knock required.** When `KNOCK_API_KEY` is not set, the handler bypasses Knock and calls `TrackingNotificationService` directly.
+The same code path runs everywhere. Knock handles the workflow trigger; our webhook sends via Front.
 
-```bash
-# .env.local (optional - for testing Knock locally)
-# KNOCK_API_KEY=sk_your_secret_key
-```
-
-### Staging / Production
-
-#### 1. Knock Workflow (already created via CLI)
+### 1. Knock Workflow (already created via CLI)
 
 The workflow `customer-tracking-update` is defined in `.knock/workflows/` and pushed via:
 
@@ -67,18 +60,18 @@ The workflow `customer-tracking-update` is defined in `.knock/workflows/` and pu
 npx knock workflow push customer-tracking-update
 ```
 
-#### 2. Set Environment Variable in Knock Dashboard
+### 2. Set `app_base_url` Variable in Knock Dashboard
 
 In [Knock Dashboard](https://dashboard.knock.app) → Settings → Variables:
 
 | Environment | Variable | Value |
 |-------------|----------|-------|
-| Development | `app_base_url` | `https://staging.example.com` |
+| Development | `app_base_url` | `https://your-ngrok-url.ngrok.io` (or staging URL) |
 | Production | `app_base_url` | `https://app.example.com` |
 
 This variable is used in the workflow's HTTP fetch step URL.
 
-#### 3. Commit & Promote
+### 3. Commit & Promote
 
 ```bash
 # Commit changes in development
@@ -88,12 +81,23 @@ npx knock commit -m "Add customer tracking workflow"
 npx knock commit promote --to production
 ```
 
-#### 4. Environment Variables (App)
+### 4. Environment Variables (App)
 
 ```bash
-# .env (staging/production)
+# .env.local / .env
 KNOCK_API_KEY=sk_your_secret_key
 ```
+
+### Local Development with Full Flow
+
+To test the complete Knock → webhook → Front flow locally:
+
+1. **Start ngrok**: `ngrok http 3000`
+2. **Set `app_base_url`** in Knock dashboard (Development) to your ngrok URL
+3. **Set `KNOCK_API_KEY`** in `.env.local`
+4. Trigger a shipment status change
+
+Without `KNOCK_API_KEY`, Knock mocks the trigger (logs but doesn't call webhook).
 
 ## Requirements
 
