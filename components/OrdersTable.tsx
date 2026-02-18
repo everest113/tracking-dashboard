@@ -149,7 +149,6 @@ export default function OrdersTable() {
   
   // Refresh state
   const [refreshingOrder, setRefreshingOrder] = useState<string | null>(null)
-  const [creatingDraftOrderId, setCreatingDraftOrderId] = useState<string | null>(null)
 
   // Debounce search input
   useEffect(() => {
@@ -341,28 +340,6 @@ export default function OrdersTable() {
     }
   }
 
-  const handleCreateOrderDraft = async (orderNumber: string, templateType: 'shipped' | 'delivered') => {
-    setCreatingDraftOrderId(orderNumber)
-    try {
-      const result = await api.customerThread.createOrderDraft({
-        orderNumber,
-        templateType,
-      })
-      if (result.success) {
-        toast.success('Draft created in Front', {
-          description: templateType === 'shipped' ? 'Shipped notification draft ready' : 'Delivered notification draft ready',
-        })
-      } else {
-        toast.error('Failed to create draft', { description: result.error || 'Unknown error' })
-      }
-    } catch (error) {
-      console.error('Failed to create order draft:', error)
-      toast.error('Draft creation failed')
-    } finally {
-      setCreatingDraftOrderId(null)
-    }
-  }
-
   // Status tabs
   const statusTabs: Array<{ key: OrderStatus; label: string; icon?: React.ReactNode }> = [
     { key: 'all', label: 'All' },
@@ -474,8 +451,8 @@ export default function OrdersTable() {
                   const inHands = formatInHandsDate(order.inHandsDate)
                   
                   return (
-                    <Collapsible key={order.orderNumber} open={isExpanded}>
-                      <div>
+                    <Collapsible key={order.orderNumber} asChild open={isExpanded}>
+                      <>
                         {/* Main Row */}
                         <TableRow 
                           className={cn(
@@ -602,28 +579,6 @@ export default function OrdersTable() {
                                         <ExternalLink className="h-3 w-3" />
                                         Open in Front
                                       </a>
-                                      <div className="flex gap-2 pt-2">
-                                        <Button
-                                          variant="outline"
-                                          size="sm"
-                                          className="flex-1"
-                                          onClick={() => handleCreateOrderDraft(order.orderNumber, 'shipped')}
-                                          disabled={creatingDraftOrderId === order.orderNumber}
-                                        >
-                                          <Truck className="h-3 w-3 mr-1" />
-                                          Shipped
-                                        </Button>
-                                        <Button
-                                          variant="outline"
-                                          size="sm"
-                                          className="flex-1"
-                                          onClick={() => handleCreateOrderDraft(order.orderNumber, 'delivered')}
-                                          disabled={creatingDraftOrderId === order.orderNumber}
-                                        >
-                                          <PackageCheck className="h-3 w-3 mr-1" />
-                                          Delivered
-                                        </Button>
-                                      </div>
                                     </div>
                                   ) : (
                                     <div className="text-sm text-muted-foreground">
@@ -839,7 +794,7 @@ export default function OrdersTable() {
                             </TableCell>
                           </TableRow>
                         </CollapsibleContent>
-                      </div>
+                      </>
                     </Collapsible>
                   )
                 })
