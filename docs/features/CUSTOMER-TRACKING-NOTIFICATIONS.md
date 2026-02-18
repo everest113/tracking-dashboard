@@ -46,33 +46,53 @@ Email/Slack/Push            Webhook Channel
 | `delivered` | Status becomes `delivered` | "Your package has been delivered!" |
 | `exception` | Status becomes `exception` | "There's been a delivery update..." |
 
-## Knock Setup
+## Environment Setup
 
-### 1. Create Workflow
+### Local Development
 
-In [Knock Dashboard](https://dashboard.knock.app):
-
-1. Create workflow: `customer-tracking-update`
-2. Add a **Webhook** channel step
-3. Configure the webhook:
-   - **URL**: `https://your-domain.com/api/webhooks/knock/customer-notification`
-   - **Method**: `POST`
-   - **Headers**: `Content-Type: application/json`
-   - **Body**: Use Knock's default payload (includes `data`, `recipient`, etc.)
-
-### 2. Environment Variables
+**No Knock required.** When `KNOCK_API_KEY` is not set, the handler bypasses Knock and calls `TrackingNotificationService` directly.
 
 ```bash
-# .env.local
-KNOCK_API_KEY=sk_your_secret_key
+# .env.local (optional - for testing Knock locally)
+# KNOCK_API_KEY=sk_your_secret_key
 ```
 
-### 3. Webhook Security (Optional)
+### Staging / Production
 
-To verify Knock webhook signatures, add:
+#### 1. Knock Workflow (already created via CLI)
+
+The workflow `customer-tracking-update` is defined in `.knock/workflows/` and pushed via:
 
 ```bash
-KNOCK_WEBHOOK_SECRET=your_webhook_signing_secret
+npx knock workflow push customer-tracking-update
+```
+
+#### 2. Set Environment Variable in Knock Dashboard
+
+In [Knock Dashboard](https://dashboard.knock.app) → Settings → Variables:
+
+| Environment | Variable | Value |
+|-------------|----------|-------|
+| Development | `app_base_url` | `https://staging.example.com` |
+| Production | `app_base_url` | `https://app.example.com` |
+
+This variable is used in the workflow's HTTP fetch step URL.
+
+#### 3. Commit & Promote
+
+```bash
+# Commit changes in development
+npx knock commit -m "Add customer tracking workflow"
+
+# Promote to production
+npx knock commit promote --to production
+```
+
+#### 4. Environment Variables (App)
+
+```bash
+# .env (staging/production)
+KNOCK_API_KEY=sk_your_secret_key
 ```
 
 ## Requirements
