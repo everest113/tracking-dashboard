@@ -48,56 +48,61 @@ Email/Slack/Push            Webhook Channel
 
 ## Environment Setup
 
-### All Environments
+### URL Configuration
 
-The same code path runs everywhere. Knock handles the workflow trigger; our webhook sends via Front.
+| Environment | App URL | Knock `app_base_url` |
+|-------------|---------|---------------------|
+| Production | `https://tracking.stitchi.co` | Same |
+| Preview/Staging | `https://tracking-dashboard-git-*.vercel.app` | Vercel preview URL |
+| Local | `http://localhost:3000` | `https://stitchi-tracking-dev.ngrok.app` |
 
-### 1. Knock Workflow (already created via CLI)
+### 1. Vercel Environment Variables
 
-The workflow `customer-tracking-update` is defined in `.knock/workflows/` and pushed via:
+Already configured:
+- `KNOCK_API_KEY` — Knock secret key (all environments)
+- `APP_BASE_URL` — App's public URL (all environments)
+
+### 2. Knock Dashboard Variables
+
+Set in [Knock Dashboard](https://dashboard.knock.app/stitchi/settings/variables):
+
+| Knock Environment | `app_base_url` Value |
+|-------------------|---------------------|
+| Development | `https://stitchi-tracking-dev.ngrok.app` |
+| Production | `https://tracking.stitchi.co` |
+
+### 3. Knock Workflow
+
+The workflow `customer-tracking-update` is defined in `.knock/workflows/` and managed via CLI:
 
 ```bash
+# Push workflow to Knock
 npx knock workflow push customer-tracking-update
-```
 
-### 2. Set `app_base_url` Variable in Knock Dashboard
-
-In [Knock Dashboard](https://dashboard.knock.app) → Settings → Variables:
-
-| Environment | Variable | Value |
-|-------------|----------|-------|
-| Development | `app_base_url` | `https://your-ngrok-url.ngrok.io` (or staging URL) |
-| Production | `app_base_url` | `https://app.example.com` |
-
-This variable is used in the workflow's HTTP fetch step URL.
-
-### 3. Commit & Promote
-
-```bash
-# Commit changes in development
+# Commit changes
 npx knock commit -m "Add customer tracking workflow"
 
 # Promote to production
 npx knock commit promote --to production
 ```
 
-### 4. Environment Variables (App)
+### Local Development
+
+Start ngrok with stable domain:
 
 ```bash
-# .env.local / .env
-KNOCK_API_KEY=sk_your_secret_key
+ngrok http 3000 --domain=stitchi-tracking-dev.ngrok.app
 ```
 
-### Local Development with Full Flow
+This exposes `localhost:3000` at `https://stitchi-tracking-dev.ngrok.app`, which matches the Knock Development environment's `app_base_url`.
 
-To test the complete Knock → webhook → Front flow locally:
+### How It Works
 
-1. **Start ngrok**: `ngrok http 3000`
-2. **Set `app_base_url`** in Knock dashboard (Development) to your ngrok URL
-3. **Set `KNOCK_API_KEY`** in `.env.local`
-4. Trigger a shipment status change
+1. Shipment status changes → triggers Knock workflow
+2. Knock's HTTP fetch step calls `{{vars.app_base_url}}/api/webhooks/knock/customer-notification`
+3. Our webhook sends notification via Front
 
-Without `KNOCK_API_KEY`, Knock mocks the trigger (logs but doesn't call webhook).
+The `app_base_url` variable resolves differently per Knock environment, so the same workflow works everywhere.
 
 ## Requirements
 
