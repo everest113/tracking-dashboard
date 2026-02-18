@@ -218,6 +218,14 @@ export function createOrderThreadDiscoveryService(
             searchMethod,
           },
         })
+        
+        // Emit domain event for catch-up notifications
+        const { domainEvents } = await import('@/lib/domain/events')
+        domainEvents.emit('ThreadLinked', {
+          orderNumber,
+          conversationId: topCandidate.conversationId,
+          matchType: 'auto_matched',
+        })
       }
 
       return {

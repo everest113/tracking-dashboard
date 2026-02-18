@@ -199,6 +199,14 @@ export const customerThreadRouter = {
         },
       })
       
+      // Emit domain event for catch-up notifications
+      const { domainEvents } = await import('@/lib/domain/events')
+      domainEvents.emit('ThreadLinked', {
+        orderNumber: input.orderNumber,
+        conversationId: updated.frontConversationId!,
+        matchType: 'manually_linked',
+      })
+      
       return {
         success: true,
         threadLink: {
@@ -295,6 +303,15 @@ export const customerThreadRouter = {
           previousStatus: current?.matchStatus,
           newStatus: 'manually_linked',
         },
+      })
+      
+      // Emit domain event for catch-up notifications
+      const { domainEvents } = await import('@/lib/domain/events')
+      domainEvents.emit('ThreadLinked', {
+        orderNumber: input.orderNumber,
+        conversationId: input.newConversationId,
+        matchType: 'manually_linked',
+        previousConversationId: current?.frontConversationId,
       })
       
       return {
