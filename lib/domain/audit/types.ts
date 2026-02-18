@@ -51,6 +51,7 @@ export const AuditActions = {
   OrderCreated: 'order.created',
   
   // Notification actions
+  NotificationDraftCreated: 'notification.draft_created',
   NotificationSent: 'notification.sent',
   NotificationFailed: 'notification.failed',
   NotificationSkipped: 'notification.skipped',

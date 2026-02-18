@@ -151,6 +151,7 @@ export default function AuditTimeline({
     'thread.no_match': 'No Thread Found',
     'thread.cleared': 'Thread Unlinked',
     // Notification actions
+    'notification.draft_created': 'Draft Created',
     'notification.sent': 'Notification Sent',
     'notification.failed': 'Notification Failed',
     'notification.skipped': 'Notification Skipped',
