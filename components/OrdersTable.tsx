@@ -610,39 +610,41 @@ export default function OrdersTable() {
                                         Open in Front
                                       </a>
                                       
-                                      <div className="border-t pt-3 space-y-2">
-                                        <div className="text-xs font-medium text-muted-foreground">Create Draft</div>
-                                        <div className="flex gap-2">
-                                          <Button
-                                            variant="outline"
-                                            size="sm"
-                                            className="flex-1"
-                                            onClick={() => handleCreateOrderDraft(order.orderNumber, 'shipped')}
-                                            disabled={creatingDraftOrderId === order.orderNumber}
-                                          >
-                                            {creatingDraftOrderId === order.orderNumber ? (
-                                              <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                                            ) : (
-                                              <Truck className="h-3 w-3 mr-1" />
-                                            )}
-                                            Shipped
-                                          </Button>
-                                          <Button
-                                            variant="outline"
-                                            size="sm"
-                                            className="flex-1"
-                                            onClick={() => handleCreateOrderDraft(order.orderNumber, 'delivered')}
-                                            disabled={creatingDraftOrderId === order.orderNumber}
-                                          >
-                                            {creatingDraftOrderId === order.orderNumber ? (
-                                              <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                                            ) : (
-                                              <PackageCheck className="h-3 w-3 mr-1" />
-                                            )}
-                                            Delivered
-                                          </Button>
+                                      {order.stats.total > 0 && (
+                                        <div className="border-t pt-3 space-y-2">
+                                          <div className="text-xs font-medium text-muted-foreground">Create Draft</div>
+                                          <div className="flex gap-2">
+                                            <Button
+                                              variant="outline"
+                                              size="sm"
+                                              className="flex-1"
+                                              onClick={() => handleCreateOrderDraft(order.orderNumber, 'shipped')}
+                                              disabled={creatingDraftOrderId === order.orderNumber}
+                                            >
+                                              {creatingDraftOrderId === order.orderNumber ? (
+                                                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                              ) : (
+                                                <Truck className="h-3 w-3 mr-1" />
+                                              )}
+                                              Shipped
+                                            </Button>
+                                            <Button
+                                              variant="outline"
+                                              size="sm"
+                                              className="flex-1"
+                                              onClick={() => handleCreateOrderDraft(order.orderNumber, 'delivered')}
+                                              disabled={creatingDraftOrderId === order.orderNumber}
+                                            >
+                                              {creatingDraftOrderId === order.orderNumber ? (
+                                                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                              ) : (
+                                                <PackageCheck className="h-3 w-3 mr-1" />
+                                              )}
+                                              Delivered
+                                            </Button>
+                                          </div>
                                         </div>
-                                      </div>
+                                      )}
                                     </div>
                                   ) : (
                                     <div className="text-sm text-muted-foreground">
