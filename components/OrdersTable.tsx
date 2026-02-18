@@ -960,7 +960,7 @@ export default function OrdersTable() {
                     </h3>
                     
                     {detailOrder.frontConversationId ? (
-                      <div className="space-y-2">
+                      <div className="space-y-3">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2 text-sm text-green-600">
                             <CheckCircle2 className="h-4 w-4" />
@@ -986,6 +986,64 @@ export default function OrdersTable() {
                           <ExternalLink className="h-3 w-3" />
                           Open in Front
                         </a>
+                        
+                        <div className="border-t pt-3 space-y-2">
+                          <div className="text-xs font-medium text-muted-foreground">Create Draft</div>
+                          <TooltipProvider>
+                            <div className="flex gap-2">
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <span className="flex-1">
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="w-full"
+                                      onClick={() => handleCreateOrderDraft(detailOrder.orderNumber, 'shipped')}
+                                      disabled={creatingDraftOrderId === detailOrder.orderNumber || detailOrder.stats.total === 0}
+                                    >
+                                      {creatingDraftOrderId === detailOrder.orderNumber ? (
+                                        <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                      ) : (
+                                        <Truck className="h-3 w-3 mr-1" />
+                                      )}
+                                      Shipped
+                                    </Button>
+                                  </span>
+                                </TooltipTrigger>
+                                {detailOrder.stats.total === 0 && (
+                                  <TooltipContent>
+                                    <p>No shipments with tracking yet</p>
+                                  </TooltipContent>
+                                )}
+                              </Tooltip>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <span className="flex-1">
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="w-full"
+                                      onClick={() => handleCreateOrderDraft(detailOrder.orderNumber, 'delivered')}
+                                      disabled={creatingDraftOrderId === detailOrder.orderNumber || detailOrder.stats.total === 0}
+                                    >
+                                      {creatingDraftOrderId === detailOrder.orderNumber ? (
+                                        <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                      ) : (
+                                        <PackageCheck className="h-3 w-3 mr-1" />
+                                      )}
+                                      Delivered
+                                    </Button>
+                                  </span>
+                                </TooltipTrigger>
+                                {detailOrder.stats.total === 0 && (
+                                  <TooltipContent>
+                                    <p>No shipments with tracking yet</p>
+                                  </TooltipContent>
+                                )}
+                              </Tooltip>
+                            </div>
+                          </TooltipProvider>
+                        </div>
                       </div>
                     ) : (
                       <div className="text-sm text-muted-foreground">
