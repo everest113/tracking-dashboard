@@ -38,6 +38,7 @@ import {
   Truck,
   MessageSquare,
   Link2,
+  Mail,
 } from 'lucide-react'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import {
@@ -232,6 +233,7 @@ export default function ShipmentTable({
   const [syncingToOmgId, setSyncingToOmgId] = useState<number | null>(null)
   const [findingThreadId, setFindingThreadId] = useState<number | null>(null)
   const [threadLinks, setThreadLinks] = useState<Record<number, ThreadLink | null>>({})
+  const [creatingDraftId, setCreatingDraftId] = useState<number | null>(null)
 
   // Get current sort from URL
   const sortField = searchParams.get('sortField') as SortField | null
@@ -428,6 +430,46 @@ export default function ShipmentTable({
       })
     } finally {
       setFindingThreadId(null)
+    }
+  }
+
+  const handleCreateNotificationDraft = async (shipmentId: number, status: string) => {
+    setCreatingDraftId(shipmentId)
+    try {
+      // Map status to notification type
+      const statusLower = status.toLowerCase()
+      let notificationType: 'shipped' | 'out_for_delivery' | 'delivered' | 'exception' = 'shipped'
+      
+      if (statusLower === 'delivered') notificationType = 'delivered'
+      else if (statusLower.includes('out_for_delivery') || statusLower.includes('out for delivery')) notificationType = 'out_for_delivery'
+      else if (statusLower.includes('exception')) notificationType = 'exception'
+      else if (statusLower.includes('in_transit') || statusLower.includes('shipped')) notificationType = 'shipped'
+      
+      const result = await api.customerThread.createNotificationDraft({
+        shipmentId,
+        notificationType,
+      })
+      
+      if (result.success) {
+        toast.success('Draft created in Front', {
+          description: `${notificationType} notification draft ready for review`,
+        })
+      } else if (result.skippedReason) {
+        toast.info('Notification skipped', {
+          description: result.skippedReason,
+        })
+      } else {
+        toast.error('Failed to create draft', {
+          description: result.error || 'Unknown error',
+        })
+      }
+    } catch (error) {
+      console.error('Failed to create notification draft:', error)
+      toast.error('Draft creation failed', {
+        description: 'Check console for details',
+      })
+    } finally {
+      setCreatingDraftId(null)
     }
   }
 
@@ -825,16 +867,25 @@ export default function ShipmentTable({
                                 Find Customer Thread
                               </DropdownMenuItem>
                               {threadLink && threadLink.frontConversationId && (
-                                <DropdownMenuItem asChild>
-                                  <a
-                                    href={`https://app.frontapp.com/open/${threadLink.frontConversationId}`}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
+                                <>
+                                  <DropdownMenuItem asChild>
+                                    <a
+                                      href={`https://app.frontapp.com/open/${threadLink.frontConversationId}`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                    >
+                                      <Link2 className="h-4 w-4 mr-2" />
+                                      Open in Front
+                                    </a>
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    onClick={() => handleCreateNotificationDraft(shipment.id, shipment.status)}
+                                    disabled={creatingDraftId === shipment.id}
                                   >
-                                    <Link2 className="h-4 w-4 mr-2" />
-                                    Open in Front
-                                  </a>
-                                </DropdownMenuItem>
+                                    <Mail className="h-4 w-4 mr-2" />
+                                    {creatingDraftId === shipment.id ? 'Creating...' : 'Create Notification Draft'}
+                                  </DropdownMenuItem>
+                                </>
                               )}
                               <DropdownMenuSeparator />
                               <DropdownMenuItem
