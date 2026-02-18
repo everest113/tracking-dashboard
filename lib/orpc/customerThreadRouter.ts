@@ -413,4 +413,99 @@ export const customerThreadRouter = {
         skippedReason: result.skippedReason ?? null,
       }
     }),
+
+  /**
+   * Create an order-level notification draft using Front templates
+   * Templates: "4 Order - Shipped" or "5 Order - Delivered (Feedback)"
+   */
+  createOrderDraft: publicProcedure
+    .input(z.object({
+      orderNumber: z.string(),
+      templateType: z.enum(['shipped', 'delivered']),
+    }))
+    .output(z.object({
+      success: z.boolean(),
+      draftId: z.string().nullable(),
+      error: z.string().nullable(),
+    }))
+    .handler(async ({ context, input }) => {
+      const { getFrontClient } = await import('@/lib/infrastructure/sdks/front/client')
+      
+      // Template IDs from Front
+      const TEMPLATE_IDS = {
+        shipped: 'rsp_rqx9j',   // "4 Order - Shipped"
+        delivered: 'rsp_rv607', // "5 Order - Delivered (Feedback)"
+      }
+      
+      try {
+        // 1. Get order with conversation ID
+        const order = await context.prisma.orders.findUnique({
+          where: { order_number: input.orderNumber },
+          select: {
+            order_number: true,
+            order_name: true,
+            customer_name: true,
+            front_conversation_id: true,
+          },
+        })
+        
+        if (!order) {
+          return { success: false, draftId: null, error: 'Order not found' }
+        }
+        
+        if (!order.front_conversation_id) {
+          return { success: false, draftId: null, error: 'No Front thread linked to this order' }
+        }
+        
+        // 2. Fetch template from Front
+        const frontClient = getFrontClient()
+        const templateId = TEMPLATE_IDS[input.templateType]
+        
+        const templateResponse = await fetch(
+          `https://api2.frontapp.com/message_templates/${templateId}`,
+          {
+            headers: {
+              'Authorization': `Bearer ${process.env.FRONT_API_TOKEN}`,
+            },
+          }
+        )
+        
+        if (!templateResponse.ok) {
+          return { success: false, draftId: null, error: `Failed to fetch template: ${templateResponse.status}` }
+        }
+        
+        const template = await templateResponse.json() as { body: string; subject?: string }
+        
+        // 3. Get env vars for draft creation
+        const authorId = process.env.FRONT_AUTHOR_ID
+        const channelId = process.env.FRONT_CHANNEL_ID
+        
+        if (!authorId || !channelId) {
+          return { success: false, draftId: null, error: 'Missing FRONT_AUTHOR_ID or FRONT_CHANNEL_ID' }
+        }
+        
+        // 4. Create draft with template body
+        const draft = await frontClient.createDraft(
+          order.front_conversation_id,
+          template.body,
+          {
+            author_id: authorId,
+            channel_id: channelId,
+          }
+        )
+        
+        return {
+          success: true,
+          draftId: draft.id,
+          error: null,
+        }
+      } catch (error) {
+        console.error('[createOrderDraft] Error:', error)
+        return {
+          success: false,
+          draftId: null,
+          error: error instanceof Error ? error.message : 'Unknown error',
+        }
+      }
+    }),
 }

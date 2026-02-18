@@ -151,7 +151,7 @@ export default function OrdersTable() {
   const [refreshingOrder, setRefreshingOrder] = useState<string | null>(null)
   
   // Notification draft state
-  const [creatingDraftShipmentId, setCreatingDraftShipmentId] = useState<number | null>(null)
+  const [creatingDraftOrderId, setCreatingDraftOrderId] = useState<string | null>(null)
 
   // Debounce search input
   useEffect(() => {
@@ -343,30 +343,17 @@ export default function OrdersTable() {
     }
   }
 
-  const handleCreateNotificationDraft = async (shipmentId: number, status: string) => {
-    setCreatingDraftShipmentId(shipmentId)
+  const handleCreateOrderDraft = async (orderNumber: string, templateType: 'shipped' | 'delivered') => {
+    setCreatingDraftOrderId(orderNumber)
     try {
-      // Map status to notification type
-      const statusLower = status.toLowerCase()
-      let notificationType: 'shipped' | 'out_for_delivery' | 'delivered' | 'exception' = 'shipped'
-      
-      if (statusLower === 'delivered') notificationType = 'delivered'
-      else if (statusLower.includes('out_for_delivery') || statusLower.includes('out for delivery')) notificationType = 'out_for_delivery'
-      else if (statusLower.includes('exception')) notificationType = 'exception'
-      else if (statusLower.includes('in_transit') || statusLower.includes('shipped')) notificationType = 'shipped'
-      
-      const result = await api.customerThread.createNotificationDraft({
-        shipmentId,
-        notificationType,
+      const result = await api.customerThread.createOrderDraft({
+        orderNumber,
+        templateType,
       })
       
       if (result.success) {
         toast.success('Draft created in Front', {
-          description: `${notificationType} notification draft ready for review`,
-        })
-      } else if (result.skippedReason) {
-        toast.info('Notification skipped', {
-          description: result.skippedReason,
+          description: `${templateType === 'shipped' ? 'Shipped' : 'Delivered'} notification draft ready`,
         })
       } else {
         toast.error('Failed to create draft', {
@@ -374,12 +361,12 @@ export default function OrdersTable() {
         })
       }
     } catch (error) {
-      console.error('Failed to create notification draft:', error)
+      console.error('Failed to create order draft:', error)
       toast.error('Draft creation failed', {
         description: error instanceof Error ? error.message : 'Check console for details',
       })
     } finally {
-      setCreatingDraftShipmentId(null)
+      setCreatingDraftOrderId(null)
     }
   }
 
@@ -608,7 +595,7 @@ export default function OrdersTable() {
                                   <div className="font-medium text-sm">Customer Thread</div>
                                   
                                   {order.frontConversationId ? (
-                                    <div className="space-y-2">
+                                    <div className="space-y-3">
                                       <div className="flex items-center gap-2 text-sm text-green-600">
                                         <CheckCircle2 className="h-4 w-4" />
                                         <span>Linked</span>
@@ -622,6 +609,40 @@ export default function OrdersTable() {
                                         <ExternalLink className="h-3 w-3" />
                                         Open in Front
                                       </a>
+                                      
+                                      <div className="border-t pt-3 space-y-2">
+                                        <div className="text-xs font-medium text-muted-foreground">Create Draft</div>
+                                        <div className="flex gap-2">
+                                          <Button
+                                            variant="outline"
+                                            size="sm"
+                                            className="flex-1"
+                                            onClick={() => handleCreateOrderDraft(order.orderNumber, 'shipped')}
+                                            disabled={creatingDraftOrderId === order.orderNumber}
+                                          >
+                                            {creatingDraftOrderId === order.orderNumber ? (
+                                              <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                            ) : (
+                                              <Truck className="h-3 w-3 mr-1" />
+                                            )}
+                                            Shipped
+                                          </Button>
+                                          <Button
+                                            variant="outline"
+                                            size="sm"
+                                            className="flex-1"
+                                            onClick={() => handleCreateOrderDraft(order.orderNumber, 'delivered')}
+                                            disabled={creatingDraftOrderId === order.orderNumber}
+                                          >
+                                            {creatingDraftOrderId === order.orderNumber ? (
+                                              <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                            ) : (
+                                              <PackageCheck className="h-3 w-3 mr-1" />
+                                            )}
+                                            Delivered
+                                          </Button>
+                                        </div>
+                                      </div>
                                     </div>
                                   ) : (
                                     <div className="text-sm text-muted-foreground">
@@ -752,13 +773,12 @@ export default function OrdersTable() {
                                       <TableHead>Carrier</TableHead>
                                       <TableHead>Status</TableHead>
                                       <TableHead>Updated</TableHead>
-                                      <TableHead className="w-[80px]">Actions</TableHead>
                                     </TableRow>
                                   </TableHeader>
                                   <TableBody>
                                     {order.purchaseOrders.length === 0 ? (
                                       <TableRow>
-                                        <TableCell colSpan={7} className="text-center text-muted-foreground py-4">
+                                        <TableCell colSpan={6} className="text-center text-muted-foreground py-4">
                                           No purchase orders
                                         </TableCell>
                                       </TableRow>
@@ -804,34 +824,6 @@ export default function OrdersTable() {
                                                   ? formatDistanceToNow(new Date(shipment.lastChecked), { addSuffix: true })
                                                   : '—'}
                                               </TableCell>
-                                              <TableCell>
-                                                {order.frontConversationId ? (
-                                                  <TooltipProvider>
-                                                    <Tooltip>
-                                                      <TooltipTrigger asChild>
-                                                        <Button
-                                                          variant="ghost"
-                                                          size="sm"
-                                                          className="h-7 w-7 p-0"
-                                                          onClick={() => handleCreateNotificationDraft(shipment.id, shipment.status)}
-                                                          disabled={creatingDraftShipmentId === shipment.id}
-                                                        >
-                                                          {creatingDraftShipmentId === shipment.id ? (
-                                                            <Loader2 className="h-4 w-4 animate-spin" />
-                                                          ) : (
-                                                            <MailCheck className="h-4 w-4" />
-                                                          )}
-                                                        </Button>
-                                                      </TooltipTrigger>
-                                                      <TooltipContent>
-                                                        <p>Create notification draft</p>
-                                                      </TooltipContent>
-                                                    </Tooltip>
-                                                  </TooltipProvider>
-                                                ) : (
-                                                  <span className="text-xs text-muted-foreground">—</span>
-                                                )}
-                                              </TableCell>
                                             </TableRow>
                                           ))
                                         }
@@ -856,7 +848,6 @@ export default function OrdersTable() {
                                               )}
                                             </TableCell>
                                             <TableCell className="text-sm text-muted-foreground">—</TableCell>
-                                            <TableCell>—</TableCell>
                                           </TableRow>
                                         )]
                                       })
