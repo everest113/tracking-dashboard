@@ -173,13 +173,31 @@ export const customerThreadRouter = {
     }))
     .handler(async ({ context, input }) => {
       const { getOrderThreadRepository } = await import('@/lib/infrastructure/customer-thread')
+      const { getAuditService } = await import('@/lib/infrastructure/audit')
+      const { AuditEntityTypes, AuditActions } = await import('@/lib/domain/audit')
       
       const repository = getOrderThreadRepository()
+      const audit = getAuditService()
+      
       const updated = await repository.updateStatus(
         input.orderNumber,
         'manually_linked',
         input.reviewedBy
       )
+      
+      // Record audit entry
+      await audit.recordSuccess({
+        entityType: AuditEntityTypes.Order,
+        entityId: input.orderNumber,
+        action: AuditActions.ThreadManuallyLinked,
+        actor: `user:${input.reviewedBy}`,
+        metadata: {
+          conversationId: updated.frontConversationId,
+          previousStatus: 'pending_review',
+          newStatus: 'manually_linked',
+          confidenceScore: updated.confidenceScore,
+        },
+      })
       
       return {
         success: true,
@@ -203,13 +221,34 @@ export const customerThreadRouter = {
     }))
     .handler(async ({ context, input }) => {
       const { getOrderThreadRepository } = await import('@/lib/infrastructure/customer-thread')
+      const { getAuditService } = await import('@/lib/infrastructure/audit')
+      const { AuditEntityTypes, AuditActions } = await import('@/lib/domain/audit')
       
       const repository = getOrderThreadRepository()
+      const audit = getAuditService()
+      
+      // Get current state before update
+      const current = await repository.getByOrderNumber(input.orderNumber)
+      
       await repository.updateStatus(
         input.orderNumber,
         'rejected',
         input.reviewedBy
       )
+      
+      // Record audit entry
+      await audit.recordSuccess({
+        entityType: AuditEntityTypes.Order,
+        entityId: input.orderNumber,
+        action: AuditActions.ThreadRejected,
+        actor: `user:${input.reviewedBy}`,
+        metadata: {
+          conversationId: current?.frontConversationId,
+          previousStatus: current?.matchStatus,
+          newStatus: 'rejected',
+          confidenceScore: current?.confidenceScore,
+        },
+      })
       
       return { success: true }
     }),
@@ -229,13 +268,34 @@ export const customerThreadRouter = {
     }))
     .handler(async ({ context, input }) => {
       const { getOrderThreadRepository } = await import('@/lib/infrastructure/customer-thread')
+      const { getAuditService } = await import('@/lib/infrastructure/audit')
+      const { AuditEntityTypes, AuditActions } = await import('@/lib/domain/audit')
       
       const repository = getOrderThreadRepository()
+      const audit = getAuditService()
+      
+      // Get current state before update
+      const current = await repository.getByOrderNumber(input.orderNumber)
+      
       const updated = await repository.linkConversation(
         input.orderNumber,
         input.newConversationId,
         input.reviewedBy
       )
+      
+      // Record audit entry
+      await audit.recordSuccess({
+        entityType: AuditEntityTypes.Order,
+        entityId: input.orderNumber,
+        action: AuditActions.ThreadManuallyLinked,
+        actor: `user:${input.reviewedBy}`,
+        metadata: {
+          previousConversationId: current?.frontConversationId,
+          newConversationId: input.newConversationId,
+          previousStatus: current?.matchStatus,
+          newStatus: 'manually_linked',
+        },
+      })
       
       return {
         success: true,

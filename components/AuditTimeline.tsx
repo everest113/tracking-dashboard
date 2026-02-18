@@ -131,8 +131,40 @@ export default function AuditTimeline({
     }
   }
 
+  // Human-readable labels for audit actions
+  const actionLabels: Record<string, string> = {
+    // Order actions
+    'order.synced': 'Synced from OMG',
+    'order.created': 'Order Created',
+    'order.refreshed': 'Refreshed from OMG',
+    'order.status_changed': 'Status Changed',
+    // Shipment actions
+    'shipment.created': 'Shipment Created',
+    'shipment.status_changed': 'Tracking Update',
+    'shipment.tracker_registered': 'Tracker Registered',
+    'shipment.tracker_failed': 'Tracker Failed',
+    // Thread actions
+    'thread.searched': 'Thread Search',
+    'thread.auto_matched': 'Auto-Matched Thread',
+    'thread.manually_linked': 'Manually Linked Thread',
+    'thread.rejected': 'Thread Rejected',
+    'thread.no_match': 'No Thread Found',
+    'thread.cleared': 'Thread Unlinked',
+    // Notification actions
+    'notification.sent': 'Notification Sent',
+    'notification.failed': 'Notification Failed',
+    'notification.skipped': 'Notification Skipped',
+    // Sync actions
+    'omg.sync_completed': 'OMG Sync Complete',
+    'omg.sync_failed': 'OMG Sync Failed',
+  }
+
   const formatAction = (action: string) => {
-    // Convert 'notification.sent' to 'Notification Sent'
+    // Check for explicit label first
+    if (actionLabels[action]) {
+      return actionLabels[action]
+    }
+    // Fallback: Convert 'notification.sent' to 'Notification Sent'
     return action
       .split('.')
       .map((part) => part.charAt(0).toUpperCase() + part.slice(1))

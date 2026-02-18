@@ -11,10 +11,23 @@ const ALLOWED_EMAIL_DOMAINS = ['stitchi.co']
  * Public routes that don't require authentication.
  * - /auth/* - Auth0 routes (login, logout, callback)
  * - /api/webhooks/* - Webhook endpoints
+ * - /api/cron/* - Cron job endpoints (protected by CRON_SECRET)
+ * - /api/orpc/* - oRPC endpoints (protected by CRON_SECRET header for automation)
  * - /login - Login page for unauthenticated users
  * - /unauthorized - Shown to users without access
  */
-const PUBLIC_ROUTES = ['/auth', '/api/webhooks', '/login', '/unauthorized']
+const PUBLIC_ROUTES = ['/auth', '/api/webhooks', '/api/cron', '/login', '/unauthorized']
+
+/**
+ * Check if request has valid cron authorization.
+ * Allows cron jobs to bypass auth using CRON_SECRET header.
+ */
+function hasCronAuth(request: NextRequest): boolean {
+  const cronSecret = process.env.CRON_SECRET
+  if (!cronSecret) return false
+  const authHeader = request.headers.get('authorization')
+  return authHeader === `Bearer ${cronSecret}`
+}
 
 /**
  * Check if a path is a public route.
@@ -50,6 +63,11 @@ export async function middleware(request: NextRequest) {
 
   // Public routes don't need auth check
   if (isPublicRoute(request.nextUrl.pathname)) {
+    return authResponse
+  }
+
+  // Allow cron jobs with valid CRON_SECRET to bypass auth
+  if (request.nextUrl.pathname.startsWith('/api/orpc') && hasCronAuth(request)) {
     return authResponse
   }
 

@@ -5,6 +5,7 @@ import type { Ship24Client } from '@/lib/infrastructure/sdks/ship24/client'
 import { Ship24Mapper } from '@/lib/infrastructure/mappers/Ship24Mapper'
 import { TrackingNumber } from '@/lib/domain/value-objects/TrackingNumber'
 import { Result, Ok, Err } from '@/lib/domain/core/Result'
+import { domainEvents } from '@/lib/domain/events'
 
 import { getErrorMessage } from '@/lib/utils/fetch-helpers'
 /**
@@ -116,6 +117,15 @@ export const createRegisterTrackerUseCase = (
     // Persist
     const savedShipment = await repo.save(updatedShipment)
 
+    // Emit tracker registered event
+    if (savedShipment.id) {
+      domainEvents.emit('ShipmentTrackerRegistered', {
+        shipmentId: savedShipment.id,
+        trackingNumber: TrackingNumber.toString(savedShipment.trackingNumber),
+        trackerId,
+      })
+    }
+
     return Ok({
       success: true,
       trackingNumber: TrackingNumber.toString(savedShipment.trackingNumber),
@@ -123,12 +133,22 @@ export const createRegisterTrackerUseCase = (
       shipment: savedShipment,
     })
   } catch (error: unknown) {
-    console.error(`Failed to register tracker for ${TrackingNumber.toString(shipment.trackingNumber)}:`, getErrorMessage(error))
+    const errorMsg = getErrorMessage(error)
+    console.error(`Failed to register tracker for ${TrackingNumber.toString(shipment.trackingNumber)}:`, errorMsg)
+    
+    // Emit tracker failed event
+    if (shipment.id) {
+      domainEvents.emit('ShipmentTrackerFailed', {
+        shipmentId: shipment.id,
+        trackingNumber: TrackingNumber.toString(shipment.trackingNumber),
+        error: errorMsg,
+      })
+    }
     
     return Ok({
         trackingNumber: TrackingNumber.toString(input.shipment.trackingNumber),
         success: false,
-        error: getErrorMessage(error),
+        error: errorMsg,
     })
   }
 }
