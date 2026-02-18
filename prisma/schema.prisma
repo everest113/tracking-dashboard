@@ -39,6 +39,12 @@ model shipments {
   ship24_status         String?               @db.VarChar(100)
   ship24_last_update    DateTime?
   tracking_events       tracking_events[]
+  
+  // Customer notification tracking
+  // Tracks the last status for which a notification was sent to prevent duplicates
+  // and identify missed notifications when a thread is linked after the fact
+  last_notified_status  String?               @db.VarChar(50)
+  
   // Note: OMG data is now joined by po_number, not by relation
   // Note: Customer thread is now stored at the order level, not shipment level
 
