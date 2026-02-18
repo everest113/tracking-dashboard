@@ -152,9 +152,27 @@ export class TrackingNotificationService {
 
     // 7. Create draft in Front (NOT auto-sent)
     try {
+      const authorId = process.env.FRONT_AUTHOR_ID
+      const channelId = process.env.FRONT_CHANNEL_ID
+      
+      if (!authorId) {
+        return {
+          success: false,
+          error: 'FRONT_AUTHOR_ID environment variable not set',
+        }
+      }
+      
+      if (!channelId) {
+        return {
+          success: false,
+          error: 'FRONT_CHANNEL_ID environment variable not set (use cha_xxx format from Front channels)',
+        }
+      }
+
       const draft = await this.frontClient.createDraft(
         order.front_conversation_id,
-        htmlBody
+        htmlBody,
+        { author_id: authorId, channel_id: channelId }
       )
 
       return {

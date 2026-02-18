@@ -143,6 +143,8 @@ export default function OrdersTable() {
   const [threadPopoverOpen, setThreadPopoverOpen] = useState<string | null>(null)
   const [threadLoading, setThreadLoading] = useState<string | null>(null)
   const [manualConversationId, setManualConversationId] = useState('')
+  const [popoverShowEdit, setPopoverShowEdit] = useState<string | null>(null)
+  const [creatingDraftOrderId, setCreatingDraftOrderId] = useState<string | null>(null)
   const [drawerConversationId, setDrawerConversationId] = useState('')
   const [detailOrder, setDetailOrder] = useState<Order | null>(null)
   const [showThreadEdit, setShowThreadEdit] = useState(false)
@@ -337,6 +339,25 @@ export default function OrdersTable() {
       })
     } finally {
       setRefreshingOrder(null)
+    }
+  }
+
+  const handleCreateOrderDraft = async (orderNumber: string, templateType: 'shipped' | 'delivered') => {
+    setCreatingDraftOrderId(orderNumber)
+    try {
+      const result = await api.customerThread.createOrderDraft({ orderNumber, templateType })
+      if (result.success) {
+        toast.success('Draft created in Front', {
+          description: templateType === 'shipped' ? 'Shipped notification draft ready' : 'Delivered notification draft ready',
+        })
+      } else {
+        toast.error('Failed to create draft', { description: result.error || 'Unknown error' })
+      }
+    } catch (error) {
+      console.error('Failed to create order draft:', error)
+      toast.error('Draft creation failed')
+    } finally {
+      setCreatingDraftOrderId(null)
     }
   }
 
@@ -540,6 +561,7 @@ export default function OrdersTable() {
                               open={threadPopoverOpen === order.orderNumber} 
                               onOpenChange={(open) => {
                                 setThreadPopoverOpen(open ? order.orderNumber : null)
+                                if (!open) setPopoverShowEdit(null)
                                 if (!open) setManualConversationId('')
                               }}
                             >
@@ -566,9 +588,21 @@ export default function OrdersTable() {
                                   
                                   {order.frontConversationId ? (
                                     <div className="space-y-2">
-                                      <div className="flex items-center gap-2 text-sm text-green-600">
-                                        <CheckCircle2 className="h-4 w-4" />
-                                        <span>Linked</span>
+                                      <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-2 text-sm text-green-600">
+                                          <CheckCircle2 className="h-4 w-4" />
+                                          <span>Linked</span>
+                                        </div>
+                                        {popoverShowEdit !== order.orderNumber && (
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-6 px-2 text-xs text-muted-foreground"
+                                            onClick={() => setPopoverShowEdit(order.orderNumber)}
+                                          >
+                                            Change
+                                          </Button>
+                                        )}
                                       </div>
                                       <a
                                         href={`https://app.frontapp.com/open/${order.frontConversationId}`}
@@ -579,6 +613,42 @@ export default function OrdersTable() {
                                         <ExternalLink className="h-3 w-3" />
                                         Open in Front
                                       </a>
+                                      <div className="border-t pt-3 space-y-2">
+                                        <div className="text-xs font-medium text-muted-foreground">Create Draft</div>
+                                        <div className="flex gap-2">
+                                          <Button
+                                            variant="outline"
+                                            size="sm"
+                                            className="flex-1"
+                                            onClick={() => handleCreateOrderDraft(order.orderNumber, 'shipped')}
+                                            disabled={creatingDraftOrderId === order.orderNumber || order.stats.total === 0}
+                                          >
+                                            {creatingDraftOrderId === order.orderNumber ? (
+                                              <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                            ) : (
+                                              <Truck className="h-3 w-3 mr-1" />
+                                            )}
+                                            Shipped
+                                          </Button>
+                                          <Button
+                                            variant="outline"
+                                            size="sm"
+                                            className="flex-1"
+                                            onClick={() => handleCreateOrderDraft(order.orderNumber, 'delivered')}
+                                            disabled={creatingDraftOrderId === order.orderNumber || order.stats.total === 0}
+                                          >
+                                            {creatingDraftOrderId === order.orderNumber ? (
+                                              <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                            ) : (
+                                              <PackageCheck className="h-3 w-3 mr-1" />
+                                            )}
+                                            Delivered
+                                          </Button>
+                                        </div>
+                                        {order.stats.total === 0 && (
+                                          <p className="text-xs text-muted-foreground">No tracking numbers yet</p>
+                                        )}
+                                      </div>
                                     </div>
                                   ) : (
                                     <div className="text-sm text-muted-foreground">
@@ -586,6 +656,7 @@ export default function OrdersTable() {
                                     </div>
                                   )}
                                   
+                                  {(!order.frontConversationId || popoverShowEdit === order.orderNumber) && (
                                   <div className="border-t pt-3 space-y-2">
                                     <Button
                                       variant="outline"
@@ -623,7 +694,18 @@ export default function OrdersTable() {
                                         <Link2 className="h-4 w-4" />
                                       </Button>
                                     </div>
+                                    {popoverShowEdit === order.orderNumber && (
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="w-full text-xs text-muted-foreground"
+                                        onClick={() => setPopoverShowEdit(null)}
+                                      >
+                                        Cancel
+                                      </Button>
+                                    )}
                                   </div>
+                                  )}
                                 </div>
                               </PopoverContent>
                             </Popover>
