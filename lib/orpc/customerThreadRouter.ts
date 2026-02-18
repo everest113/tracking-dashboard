@@ -457,6 +457,11 @@ export const customerThreadRouter = {
           return { success: false, draftId: null, error: 'No Front thread linked to this order' }
         }
         
+        // Validate conversation ID format (Front uses cnv_ prefix)
+        if (!order.front_conversation_id.startsWith('cnv_')) {
+          return { success: false, draftId: null, error: `Invalid conversation ID format: ${order.front_conversation_id}` }
+        }
+        
         // 2. Fetch template from Front
         const frontClient = getFrontClient()
         const templateId = TEMPLATE_IDS[input.templateType]
