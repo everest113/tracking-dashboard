@@ -490,6 +490,7 @@ export const customerThreadRouter = {
         }
         
         // 4. Create draft with template body
+        console.log('[createOrderDraft] Creating draft for conversation:', order.front_conversation_id)
         const draft = await frontClient.createDraft(
           order.front_conversation_id,
           template.body,
