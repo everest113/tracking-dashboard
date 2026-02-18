@@ -2,7 +2,9 @@
  * Knock Webhook - Customer Notification
  * 
  * Called by Knock when a customer tracking notification workflow step executes.
- * Sends the notification via Front to the customer's conversation thread.
+ * Creates a DRAFT notification in Front for human review before sending.
+ * 
+ * NOTE: This creates drafts only, never auto-sends to customers.
  */
 
 import { NextResponse } from 'next/server'
@@ -50,15 +52,15 @@ export async function POST(request: Request) {
     const { data, id: workflowRunId, recipient } = parseResult.data
     const { shipmentId, notificationType, exceptionReason } = data
     
-    console.log(`[Knock Webhook] Processing customer notification`, {
+    console.log(`[Knock Webhook] Processing customer notification draft`, {
       workflowRunId,
       shipmentId,
       notificationType,
     })
     
-    // Send notification via Front
+    // Create notification draft in Front (NOT auto-sent)
     const notificationService = getTrackingNotificationService()
-    const result = await notificationService.sendNotification({
+    const result = await notificationService.createNotificationDraft({
       shipmentId,
       notificationType,
       exceptionReason,
@@ -69,24 +71,25 @@ export async function POST(request: Request) {
       await audit.recordSuccess({
         entityType: AuditEntityTypes.Shipment,
         entityId: String(shipmentId),
-        action: AuditActions.NotificationSent,
+        action: AuditActions.NotificationDraftCreated,
         actor: 'system:knock-webhook',
         metadata: {
           notificationType,
           conversationId: result.conversationId,
-          messageId: result.messageId,
+          draftId: result.draftId,
           workflowRunId,
           channel: 'front',
         },
       })
       
-      console.log(`[Knock Webhook] Notification sent`, {
+      console.log(`[Knock Webhook] Notification draft created`, {
         shipmentId,
         notificationType,
         conversationId: result.conversationId,
+        draftId: result.draftId,
       })
       
-      return NextResponse.json({ success: true, messageId: result.messageId })
+      return NextResponse.json({ success: true, draftId: result.draftId })
     } else if (result.skippedReason) {
       await audit.recordSkipped({
         entityType: AuditEntityTypes.Shipment,

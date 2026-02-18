@@ -99,6 +99,42 @@ export const FrontSendReplyRequestSchema = z.object({
 })
 
 /**
+ * Front Create Draft Request schema
+ */
+export const FrontCreateDraftRequestSchema = z.object({
+  body: z.string(), // HTML content of the draft
+  author_id: z.string().optional(), // Teammate ID to create draft as
+  subject: z.string().optional(), // Override subject
+  mode: z.enum(['shared', 'private']).optional(), // Draft visibility (default: shared)
+  signature_id: z.string().optional(), // Custom signature
+  should_add_default_signature: z.boolean().optional(), // Add default signature
+})
+
+/**
+ * Front Create Draft Response schema
+ * The API returns the created draft message
+ */
+export const FrontCreateDraftResponseSchema = z.object({
+  id: z.string(), // Message ID (msg_xxx)
+  type: z.string(),
+  is_draft: z.boolean(),
+  created_at: z.number(),
+  body: z.string(),
+  text: z.string().optional(),
+  author: z.object({
+    id: z.string().optional(),
+    email: z.string().optional(),
+    username: z.string().optional(),
+  }).nullable(),
+  _links: z.object({
+    self: z.string(),
+    related: z.object({
+      conversation: z.string(),
+    }),
+  }),
+})
+
+/**
  * Front Send Reply Response schema
  * The API returns the created message
  */
@@ -135,6 +171,8 @@ export type FrontConversation = z.infer<typeof FrontConversationSchema>
 export type FrontMessage = z.infer<typeof FrontMessageSchema>
 export type FrontSendReplyRequest = z.infer<typeof FrontSendReplyRequestSchema>
 export type FrontSendReplyResponse = z.infer<typeof FrontSendReplyResponseSchema>
+export type FrontCreateDraftRequest = z.infer<typeof FrontCreateDraftRequestSchema>
+export type FrontCreateDraftResponse = z.infer<typeof FrontCreateDraftResponseSchema>
 export type FrontListResponse<T> = {
   _pagination: {
     next?: string | null

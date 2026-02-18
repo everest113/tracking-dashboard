@@ -1,8 +1,11 @@
 /**
  * Tracking Notification Service
  * 
- * Sends tracking update notifications to customers via Front conversation replies.
- * Uses thread discovery to find the customer's conversation, then sends templated messages.
+ * Creates tracking update notification drafts for customers via Front conversation threads.
+ * Uses thread discovery to find the customer's conversation, then creates draft messages
+ * that must be manually reviewed and sent by a teammate.
+ * 
+ * NOTE: This service creates DRAFTS only, never auto-sends to customers.
  */
 
 import { getFrontClient } from '../sdks/front/client'
@@ -25,8 +28,8 @@ export interface ShipmentNotificationContext {
 
 export interface NotificationResult {
   success: boolean
-  /** Front message ID if sent */
-  messageId?: string
+  /** Front draft message ID if created */
+  draftId?: string
   /** Front conversation ID */
   conversationId?: string
   /** Error message if failed */
@@ -38,25 +41,27 @@ export interface NotificationResult {
 /**
  * Tracking Notification Service
  * 
- * Responsible for sending tracking notifications to customers via Front.
- * Handles thread lookup, template rendering, and sending.
+ * Responsible for creating tracking notification drafts in Front.
+ * Handles thread lookup, template rendering, and draft creation.
+ * 
+ * NOTE: All notifications are created as drafts for human review before sending.
  */
 export class TrackingNotificationService {
   private frontClient = getFrontClient()
 
   /**
-   * Send a tracking notification for a shipment.
+   * Create a tracking notification draft for a shipment.
    * 
    * Flow:
    * 1. Look up shipment and order (thread is stored on order)
    * 2. Build notification data from shipment/order info
    * 3. Render appropriate template
-   * 4. Send reply via Front API
+   * 4. Create draft in Front (NOT auto-sent)
    * 
    * @param context - Shipment and notification details
-   * @returns Result with success/failure and message ID
+   * @returns Result with success/failure and draft ID
    */
-  async sendNotification(context: ShipmentNotificationContext): Promise<NotificationResult> {
+  async createNotificationDraft(context: ShipmentNotificationContext): Promise<NotificationResult> {
     const { shipmentId, notificationType, exceptionReason } = context
 
     // 1. Get shipment
@@ -145,16 +150,16 @@ export class TrackingNotificationService {
       exceptionReason
     )
 
-    // 7. Send via Front
+    // 7. Create draft in Front (NOT auto-sent)
     try {
-      const message = await this.frontClient.sendReply(
+      const draft = await this.frontClient.createDraft(
         order.front_conversation_id,
         htmlBody
       )
 
       return {
         success: true,
-        messageId: message.id,
+        draftId: draft.id,
         conversationId: order.front_conversation_id,
       }
     } catch (error) {
@@ -162,53 +167,60 @@ export class TrackingNotificationService {
       return {
         success: false,
         conversationId: order.front_conversation_id,
-        error: `Failed to send Front message: ${errorMessage}`,
+        error: `Failed to create Front draft: ${errorMessage}`,
       }
     }
   }
 
   /**
-   * Send shipped notification
+   * Create shipped notification draft
    */
-  async sendShippedNotification(shipmentId: number): Promise<NotificationResult> {
-    return this.sendNotification({
+  async createShippedDraft(shipmentId: number): Promise<NotificationResult> {
+    return this.createNotificationDraft({
       shipmentId,
       notificationType: 'shipped',
     })
   }
 
   /**
-   * Send delivered notification
+   * Create delivered notification draft
    */
-  async sendDeliveredNotification(shipmentId: number): Promise<NotificationResult> {
-    return this.sendNotification({
+  async createDeliveredDraft(shipmentId: number): Promise<NotificationResult> {
+    return this.createNotificationDraft({
       shipmentId,
       notificationType: 'delivered',
     })
   }
 
   /**
-   * Send out for delivery notification
+   * Create out for delivery notification draft
    */
-  async sendOutForDeliveryNotification(shipmentId: number): Promise<NotificationResult> {
-    return this.sendNotification({
+  async createOutForDeliveryDraft(shipmentId: number): Promise<NotificationResult> {
+    return this.createNotificationDraft({
       shipmentId,
       notificationType: 'out_for_delivery',
     })
   }
 
   /**
-   * Send exception notification
+   * Create exception notification draft
    */
-  async sendExceptionNotification(
+  async createExceptionDraft(
     shipmentId: number, 
     reason?: string
   ): Promise<NotificationResult> {
-    return this.sendNotification({
+    return this.createNotificationDraft({
       shipmentId,
       notificationType: 'exception',
       exceptionReason: reason,
     })
+  }
+
+  /**
+   * @deprecated Use createNotificationDraft instead. Alias for backwards compatibility.
+   */
+  async sendNotification(context: ShipmentNotificationContext): Promise<NotificationResult> {
+    return this.createNotificationDraft(context)
   }
 
   /**

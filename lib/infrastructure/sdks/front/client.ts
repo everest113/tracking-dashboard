@@ -10,11 +10,14 @@ import {
   FrontMessageSchema,
   FrontListResponseSchema,
   FrontSendReplyResponseSchema,
+  FrontCreateDraftResponseSchema,
   type FrontConversation,
   type FrontMessage,
   type FrontListResponse,
   type FrontSendReplyRequest,
   type FrontSendReplyResponse,
+  type FrontCreateDraftRequest,
+  type FrontCreateDraftResponse,
 } from './schemas'
 
 export class FrontClient extends BaseSdkClient {
@@ -221,6 +224,35 @@ export class FrontClient extends BaseSdkClient {
   }
 
   /**
+   * Create a draft reply in a conversation.
+   * This creates an outbound draft message that must be manually sent by a teammate.
+   * 
+   * @param conversationId - The conversation ID (cnv_xxx format)
+   * @param body - HTML content of the draft
+   * @param options - Optional settings (author_id, mode, etc.)
+   * @returns The created draft message
+   */
+  async createDraft(
+    conversationId: string,
+    body: string,
+    options: Omit<FrontCreateDraftRequest, 'body'> = {}
+  ): Promise<FrontCreateDraftResponse> {
+    const payload: FrontCreateDraftRequest = {
+      body,
+      mode: 'shared', // Default to shared so team can see it
+      ...options,
+    }
+
+    const response = await this.post<FrontCreateDraftResponse>(
+      `/conversations/${conversationId}/drafts`,
+      payload,
+      FrontCreateDraftResponseSchema
+    )
+
+    return response
+  }
+
+  /**
    * Get a single conversation by ID.
    */
   async getConversation(conversationId: string): Promise<FrontConversation> {
@@ -282,6 +314,24 @@ export async function sendReply(
 ): Promise<FrontSendReplyResponse> {
   const client = getFrontClient()
   return client.sendReply(conversationId, body, options)
+}
+
+/**
+ * Create a draft reply in a conversation (convenience function).
+ * Creates a shared draft that must be manually sent by a teammate.
+ * 
+ * @param conversationId - The conversation ID (cnv_xxx format)
+ * @param body - HTML content of the draft
+ * @param options - Optional settings (author_id, mode, etc.)
+ * @returns The created draft message
+ */
+export async function createDraft(
+  conversationId: string,
+  body: string,
+  options?: Omit<FrontCreateDraftRequest, 'body'>
+): Promise<FrontCreateDraftResponse> {
+  const client = getFrontClient()
+  return client.createDraft(conversationId, body, options)
 }
 
 /**

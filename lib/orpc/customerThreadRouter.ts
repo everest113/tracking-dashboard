@@ -379,9 +379,10 @@ export const customerThreadRouter = {
     }),
 
   /**
-   * Send a tracking notification to the customer via Front
+   * Create a tracking notification draft for the customer in Front
+   * NOTE: Creates drafts only, never auto-sends
    */
-  sendNotification: publicProcedure
+  createNotificationDraft: publicProcedure
     .input(z.object({
       shipmentId: z.number(),
       notificationType: z.enum(['shipped', 'out_for_delivery', 'delivered', 'exception']),
@@ -389,7 +390,7 @@ export const customerThreadRouter = {
     }))
     .output(z.object({
       success: z.boolean(),
-      messageId: z.string().nullable(),
+      draftId: z.string().nullable(),
       conversationId: z.string().nullable(),
       error: z.string().nullable(),
       skippedReason: z.string().nullable(),
@@ -398,7 +399,7 @@ export const customerThreadRouter = {
       const { getTrackingNotificationService } = await import('@/lib/infrastructure/customer-thread')
       
       const service = getTrackingNotificationService()
-      const result = await service.sendNotification({
+      const result = await service.createNotificationDraft({
         shipmentId: input.shipmentId,
         notificationType: input.notificationType,
         exceptionReason: input.exceptionReason,
@@ -406,7 +407,7 @@ export const customerThreadRouter = {
       
       return {
         success: result.success,
-        messageId: result.messageId ?? null,
+        draftId: result.draftId ?? null,
         conversationId: result.conversationId ?? null,
         error: result.error ?? null,
         skippedReason: result.skippedReason ?? null,

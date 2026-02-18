@@ -1,10 +1,12 @@
 # Customer Tracking Notifications
 
-Send tracking updates to customers via Front conversation replies.
+Create draft tracking updates for customers in Front conversation threads.
 
 ## Overview
 
-When a shipment status changes, customers receive a notification in their existing Front conversation thread. This uses Knock for orchestration (idempotency, retries) and Front for delivery.
+When a shipment status changes, a **draft notification** is created in the customer's Front conversation thread. A teammate must review and send the draft manually.
+
+> ⚠️ **DRAFTS ONLY** — This system creates drafts, never auto-sends to customers.
 
 ```
 Ship24 Webhook
@@ -34,7 +36,10 @@ Email/Slack/Push            Webhook Channel
                             TrackingNotificationService
                                    │
                                    ▼
-                            Front API (reply to thread)
+                            Front API (CREATE DRAFT)
+                                   │
+                                   ▼
+                            Teammate reviews & sends
 ```
 
 ## Notification Types
@@ -121,7 +126,7 @@ All notification attempts are logged to `audit_history`:
 
 | Action | Status | Description |
 |--------|--------|-------------|
-| `notification.sent` | `success` | Notification delivered to Front |
+| `notification.draft_created` | `success` | Draft created in Front thread |
 | `notification.skipped` | `skipped` | Missing thread, wrong status, etc. |
 | `notification.failed` | `failed` | Front API error |
 
@@ -142,6 +147,46 @@ customer:{eventId}:{shipmentId}:{notificationType}
 ```
 
 If the same notification is triggered twice (e.g., cron retry), Knock skips the duplicate.
+
+## Catch-up Notifications
+
+When a thread is linked *after* shipment status changes have occurred, catch-up notifications are sent automatically.
+
+### Flow
+
+```
+Thread manually linked
+        │
+        ▼
+ThreadLinked domain event
+        │
+        ▼
+catchup-notification.handler
+        │
+        ├── Query POs for order
+        ├── Query shipments for POs
+        ├── For each shipment:
+        │     ├── Get current status
+        │     ├── Check audit: was notification sent?
+        │     └── If not → trigger via Knock
+        │
+        ▼
+Catch-up notifications sent
+```
+
+### Example
+
+1. Order 199 has shipment with status `delivered`
+2. No thread linked → notification skipped
+3. User manually links thread to Order 199
+4. `ThreadLinked` event fires
+5. Handler finds shipment, sees no `delivered` notification was sent
+6. Triggers catch-up `delivered` notification via Knock
+7. Customer receives "Your package has been delivered!" in Front thread
+
+### Audit Trail
+
+Catch-up notifications include `isCatchup: true` in metadata for debugging.
 
 ## Testing
 
