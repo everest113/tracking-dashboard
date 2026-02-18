@@ -143,6 +143,7 @@ export default function OrdersTable() {
   const [threadPopoverOpen, setThreadPopoverOpen] = useState<string | null>(null)
   const [threadLoading, setThreadLoading] = useState<string | null>(null)
   const [manualConversationId, setManualConversationId] = useState('')
+  const [popoverShowEdit, setPopoverShowEdit] = useState<string | null>(null)
   const [drawerConversationId, setDrawerConversationId] = useState('')
   const [detailOrder, setDetailOrder] = useState<Order | null>(null)
   const [showThreadEdit, setShowThreadEdit] = useState(false)
@@ -540,6 +541,7 @@ export default function OrdersTable() {
                               open={threadPopoverOpen === order.orderNumber} 
                               onOpenChange={(open) => {
                                 setThreadPopoverOpen(open ? order.orderNumber : null)
+                                if (!open) setPopoverShowEdit(null)
                                 if (!open) setManualConversationId('')
                               }}
                             >
@@ -566,9 +568,21 @@ export default function OrdersTable() {
                                   
                                   {order.frontConversationId ? (
                                     <div className="space-y-2">
-                                      <div className="flex items-center gap-2 text-sm text-green-600">
-                                        <CheckCircle2 className="h-4 w-4" />
-                                        <span>Linked</span>
+                                      <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-2 text-sm text-green-600">
+                                          <CheckCircle2 className="h-4 w-4" />
+                                          <span>Linked</span>
+                                        </div>
+                                        {popoverShowEdit !== order.orderNumber && (
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-6 px-2 text-xs text-muted-foreground"
+                                            onClick={() => setPopoverShowEdit(order.orderNumber)}
+                                          >
+                                            Change
+                                          </Button>
+                                        )}
                                       </div>
                                       <a
                                         href={`https://app.frontapp.com/open/${order.frontConversationId}`}
@@ -586,6 +600,7 @@ export default function OrdersTable() {
                                     </div>
                                   )}
                                   
+                                  {(!order.frontConversationId || popoverShowEdit === order.orderNumber) && (
                                   <div className="border-t pt-3 space-y-2">
                                     <Button
                                       variant="outline"
@@ -623,7 +638,18 @@ export default function OrdersTable() {
                                         <Link2 className="h-4 w-4" />
                                       </Button>
                                     </div>
+                                    {popoverShowEdit === order.orderNumber && (
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="w-full text-xs text-muted-foreground"
+                                        onClick={() => setPopoverShowEdit(null)}
+                                      >
+                                        Cancel
+                                      </Button>
+                                    )}
                                   </div>
+                                  )}
                                 </div>
                               </PopoverContent>
                             </Popover>
